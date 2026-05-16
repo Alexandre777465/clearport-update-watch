@@ -3,7 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { alerts, relevanceClass, savedProducts } from "@/lib/mock";
+import { alerts, relevanceClass, savedProducts, type Alert } from "@/lib/mock";
 import { Download, ExternalLink, ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/alerts/$id")({
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/alerts/$id")({
 });
 
 function AlertDetail() {
-  const { alert } = Route.useLoaderData();
+  const { alert } = Route.useLoaderData() as { alert: Alert };
   const related = savedProducts.filter((p) => alert.htsCodes.includes(p.hts) || alert.categories.includes(p.category));
 
   return (
