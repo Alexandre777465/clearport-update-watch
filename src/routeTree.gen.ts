@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SampleAlertRouteImport } from './routes/sample-alert'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as PricingRouteImport } from './routes/pricing'
+import { Route as PreferencesRouteImport } from './routes/preferences'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AskRouteImport } from './routes/ask'
@@ -30,6 +31,11 @@ const ProductsRoute = ProductsRouteImport.update({
 const PricingRoute = PricingRouteImport.update({
   id: '/pricing',
   path: '/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PreferencesRoute = PreferencesRouteImport.update({
+  id: '/preferences',
+  path: '/preferences',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingRoute = OnboardingRouteImport.update({
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
   '/onboarding': typeof OnboardingRoute
+  '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
   '/onboarding': typeof OnboardingRoute
+  '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
   '/onboarding': typeof OnboardingRoute
+  '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/ask'
     | '/dashboard'
     | '/onboarding'
+    | '/preferences'
     | '/pricing'
     | '/products'
     | '/sample-alert'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/ask'
     | '/dashboard'
     | '/onboarding'
+    | '/preferences'
     | '/pricing'
     | '/products'
     | '/sample-alert'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/ask'
     | '/dashboard'
     | '/onboarding'
+    | '/preferences'
     | '/pricing'
     | '/products'
     | '/sample-alert'
@@ -116,6 +128,7 @@ export interface RootRouteChildren {
   AskRoute: typeof AskRoute
   DashboardRoute: typeof DashboardRoute
   OnboardingRoute: typeof OnboardingRoute
+  PreferencesRoute: typeof PreferencesRoute
   PricingRoute: typeof PricingRoute
   ProductsRoute: typeof ProductsRoute
   SampleAlertRoute: typeof SampleAlertRoute
@@ -142,6 +155,13 @@ declare module '@tanstack/react-router' {
       path: '/pricing'
       fullPath: '/pricing'
       preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/preferences': {
+      id: '/preferences'
+      path: '/preferences'
+      fullPath: '/preferences'
+      preLoaderRoute: typeof PreferencesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding': {
@@ -180,6 +200,7 @@ const rootRouteChildren: RootRouteChildren = {
   AskRoute: AskRoute,
   DashboardRoute: DashboardRoute,
   OnboardingRoute: OnboardingRoute,
+  PreferencesRoute: PreferencesRoute,
   PricingRoute: PricingRoute,
   ProductsRoute: ProductsRoute,
   SampleAlertRoute: SampleAlertRoute,
