@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SampleAlertRouteImport } from './routes/sample-alert'
+import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SampleAlertRoute = SampleAlertRouteImport.update({
   id: '/sample-alert',
   path: '/sample-alert',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -32,30 +38,34 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/pricing': typeof PricingRoute
   '/sample-alert': typeof SampleAlertRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/pricing': typeof PricingRoute
   '/sample-alert': typeof SampleAlertRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/pricing': typeof PricingRoute
   '/sample-alert': typeof SampleAlertRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/sample-alert'
+  fullPaths: '/' | '/dashboard' | '/pricing' | '/sample-alert'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/sample-alert'
-  id: '__root__' | '/' | '/dashboard' | '/sample-alert'
+  to: '/' | '/dashboard' | '/pricing' | '/sample-alert'
+  id: '__root__' | '/' | '/dashboard' | '/pricing' | '/sample-alert'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  PricingRoute: typeof PricingRoute
   SampleAlertRoute: typeof SampleAlertRoute
 }
 
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/sample-alert'
       fullPath: '/sample-alert'
       preLoaderRoute: typeof SampleAlertRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  PricingRoute: PricingRoute,
   SampleAlertRoute: SampleAlertRoute,
 }
 export const routeTree = rootRouteImport
