@@ -1,10 +1,12 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { Ship, LayoutDashboard, Bell, Package, MessageSquare, Settings, CreditCard } from "lucide-react";
+import { Ship, Radar, Bell, Package, MessageSquare, Settings, CreditCard, BookOpen, Rss } from "lucide-react";
 import type { ReactNode } from "react";
 
 const nav = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Monitoring Center", icon: Radar },
   { to: "/products", label: "Monitored products", icon: Package },
+  { to: "/import-basics", label: "Import Basics", icon: BookOpen },
+  { to: "/sources", label: "Sources", icon: Rss },
   { to: "/ask", label: "Ask ClearPort", icon: MessageSquare },
   { to: "/preferences", label: "Alert preferences", icon: Bell },
   { to: "/pricing", label: "Plan & billing", icon: CreditCard },

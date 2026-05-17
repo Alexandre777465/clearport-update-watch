@@ -1,10 +1,16 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { alerts, relevanceClass, savedProducts, type Alert } from "@/lib/mock";
-import { Download, ExternalLink, ArrowLeft } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { alerts, relevanceClass, savedProducts, whyYouSeeThis, buildBrokerSummary, type Alert } from "@/lib/mock";
+import { toggleSaved, dismissAlert, useAlertState } from "@/lib/alert-store";
+import { toast } from "sonner";
+import { Download, ExternalLink, ArrowLeft, Bookmark, BookmarkCheck, X, MessageSquare, Info } from "lucide-react";
 
 export const Route = createFileRoute("/alerts/$id")({
   component: AlertDetail,
@@ -18,11 +24,27 @@ export const Route = createFileRoute("/alerts/$id")({
 function AlertDetail() {
   const { alert } = Route.useLoaderData() as { alert: Alert };
   const related = savedProducts.filter((p) => alert.htsCodes.includes(p.hts) || alert.categories.includes(p.category));
+  const { saved } = useAlertState();
+  const isSaved = saved.includes(alert.id);
+  const [exportOpen, setExportOpen] = useState(false);
+
+  const download = () => {
+    const text = buildBrokerSummary(alert);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `clearport-broker-summary-${alert.id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <AppShell title="Alert detail" subtitle="Source-backed summary — verify with your customs broker">
       <Link to="/dashboard" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> Back to dashboard
+        <ArrowLeft className="h-4 w-4" /> Back to Monitoring Center
       </Link>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -36,6 +58,11 @@ function AlertDetail() {
             </div>
             <h1 className="mt-4 text-2xl font-semibold tracking-tight">{alert.title}</h1>
             <p className="mt-4 text-muted-foreground">{alert.summary}</p>
+
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-blue-100 bg-blue-50/60 p-3 text-sm">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span><span className="font-medium">Why you are seeing this:</span> {whyYouSeeThis(alert)}</span>
+            </div>
 
             <div className="mt-6 rounded-md border border-border bg-slate-50 p-4">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Why this update matters</div>
@@ -94,14 +121,30 @@ function AlertDetail() {
                 </li>
               ))}
             </ol>
-            <div className="mt-5 flex gap-2">
-              <Button><Download className="mr-2 h-4 w-4" /> Export broker summary</Button>
-              <Button variant="outline">Mark as verified</Button>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button onClick={() => setExportOpen(true)}><Download className="mr-2 h-4 w-4" /> Export broker summary</Button>
+              <Link to="/ask" search={{ alertId: alert.id }}>
+                <Button variant="outline"><MessageSquare className="mr-2 h-4 w-4" /> Ask ClearPort</Button>
+              </Link>
+              <Button variant="outline" onClick={() => toast.success("Marked as verified.")}>Mark as verified</Button>
             </div>
           </Card>
         </div>
 
         <div className="space-y-6">
+          <Card className="p-6">
+            <h3 className="text-sm font-semibold">Actions</h3>
+            <div className="mt-3 flex flex-col gap-2">
+              <Button variant={isSaved ? "default" : "outline"} size="sm" onClick={() => toggleSaved(alert.id)}>
+                {isSaved ? <BookmarkCheck className="mr-2 h-4 w-4" /> : <Bookmark className="mr-2 h-4 w-4" />}
+                {isSaved ? "Saved" : "Save alert"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => { dismissAlert(alert.id); toast.success("Dismissed from feed."); }}>
+                <X className="mr-2 h-4 w-4" /> Dismiss
+              </Button>
+            </div>
+          </Card>
+
           <Card className="p-6">
             <h3 className="text-sm font-semibold">Official source</h3>
             <p className="mt-2 text-sm text-muted-foreground">{alert.source}</p>
@@ -121,6 +164,22 @@ function AlertDetail() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Broker-ready summary</DialogTitle>
+            <DialogDescription>Preview the broker summary, then download a plain-text copy for your customs broker.</DialogDescription>
+          </DialogHeader>
+          <pre className="max-h-[50vh] overflow-auto rounded-md border border-border bg-slate-50 p-4 text-xs whitespace-pre-wrap">{buildBrokerSummary(alert)}</pre>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportOpen(false)}>Close</Button>
+            <Button onClick={() => { download(); setExportOpen(false); }}>
+              <Download className="mr-2 h-4 w-4" /> Download .txt
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

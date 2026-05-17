@@ -9,16 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as SampleAlertRouteImport } from './routes/sample-alert'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PreferencesRouteImport } from './routes/preferences'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as ImportBasicsRouteImport } from './routes/import-basics'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AlertsIdRouteImport } from './routes/alerts.$id'
 
+const SourcesRoute = SourcesRouteImport.update({
+  id: '/sources',
+  path: '/sources',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SampleAlertRoute = SampleAlertRouteImport.update({
   id: '/sample-alert',
   path: '/sample-alert',
@@ -42,6 +49,11 @@ const PreferencesRoute = PreferencesRouteImport.update({
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ImportBasicsRoute = ImportBasicsRouteImport.update({
+  id: '/import-basics',
+  path: '/import-basics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -69,22 +81,26 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
+  '/import-basics': typeof ImportBasicsRoute
   '/onboarding': typeof OnboardingRoute
   '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
+  '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
+  '/import-basics': typeof ImportBasicsRoute
   '/onboarding': typeof OnboardingRoute
   '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
+  '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
 }
 export interface FileRoutesById {
@@ -92,11 +108,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
+  '/import-basics': typeof ImportBasicsRoute
   '/onboarding': typeof OnboardingRoute
   '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
+  '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
 }
 export interface FileRouteTypes {
@@ -105,33 +123,39 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/dashboard'
+    | '/import-basics'
     | '/onboarding'
     | '/preferences'
     | '/pricing'
     | '/products'
     | '/sample-alert'
+    | '/sources'
     | '/alerts/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/ask'
     | '/dashboard'
+    | '/import-basics'
     | '/onboarding'
     | '/preferences'
     | '/pricing'
     | '/products'
     | '/sample-alert'
+    | '/sources'
     | '/alerts/$id'
   id:
     | '__root__'
     | '/'
     | '/ask'
     | '/dashboard'
+    | '/import-basics'
     | '/onboarding'
     | '/preferences'
     | '/pricing'
     | '/products'
     | '/sample-alert'
+    | '/sources'
     | '/alerts/$id'
   fileRoutesById: FileRoutesById
 }
@@ -139,16 +163,25 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AskRoute: typeof AskRoute
   DashboardRoute: typeof DashboardRoute
+  ImportBasicsRoute: typeof ImportBasicsRoute
   OnboardingRoute: typeof OnboardingRoute
   PreferencesRoute: typeof PreferencesRoute
   PricingRoute: typeof PricingRoute
   ProductsRoute: typeof ProductsRoute
   SampleAlertRoute: typeof SampleAlertRoute
+  SourcesRoute: typeof SourcesRoute
   AlertsIdRoute: typeof AlertsIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sources': {
+      id: '/sources'
+      path: '/sources'
+      fullPath: '/sources'
+      preLoaderRoute: typeof SourcesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sample-alert': {
       id: '/sample-alert'
       path: '/sample-alert'
@@ -182,6 +215,13 @@ declare module '@tanstack/react-router' {
       path: '/onboarding'
       fullPath: '/onboarding'
       preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/import-basics': {
+      id: '/import-basics'
+      path: '/import-basics'
+      fullPath: '/import-basics'
+      preLoaderRoute: typeof ImportBasicsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -219,13 +259,25 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AskRoute: AskRoute,
   DashboardRoute: DashboardRoute,
+  ImportBasicsRoute: ImportBasicsRoute,
   OnboardingRoute: OnboardingRoute,
   PreferencesRoute: PreferencesRoute,
   PricingRoute: PricingRoute,
   ProductsRoute: ProductsRoute,
   SampleAlertRoute: SampleAlertRoute,
+  SourcesRoute: SourcesRoute,
   AlertsIdRoute: AlertsIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
