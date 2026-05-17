@@ -1,24 +1,69 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { alerts, relevanceClass } from "@/lib/mock";
-import { Bookmark, X, Download, ExternalLink, AlertTriangle } from "lucide-react";
+import { AlertCard } from "@/components/AlertCard";
+import { alerts, savedProducts } from "@/lib/mock";
+import { useAlertState } from "@/lib/alert-store";
+import { Radar, RefreshCw } from "lucide-react";
 
-export const Route = createFileRoute("/dashboard")({ component: Dashboard });
-
-const stats = [
-  { label: "Relevant updates this week", value: 5, hint: "Across your products" },
-  { label: "Affecting China-origin goods", value: 4, hint: "Last 7 days" },
-  { label: "Upcoming effective dates", value: 3, hint: "In next 30 days" },
-  { label: "Saved HTS codes monitored", value: 12, hint: "Across 3 products" },
-  { label: "Alerts needing broker verification", value: 2, hint: "Action recommended" },
-];
+export const Route = createFileRoute("/dashboard")({
+  component: Dashboard,
+  head: () => ({
+    meta: [
+      { title: "Monitoring Center — ClearPort" },
+      { name: "description", content: "Import-rule updates matched to your saved products, categories, route, and HTS codes." },
+    ],
+  }),
+});
 
 function Dashboard() {
+  const { dismissed } = useAlertState();
+  const visible = alerts.filter((a) => !dismissed.includes(a.id));
+
+  const savedHts = savedProducts.map((p) => p.hts);
+  const savedCats = savedProducts.map((p) => p.category);
+  const relevantToProducts = visible.filter(
+    (a) => a.htsCodes.some((h) => savedHts.includes(h)) || a.categories.some((c) => savedCats.includes(c)),
+  );
+  const chinaUpdates = visible.filter((a) => a.originCountries.includes("China"));
+  const today = new Date("2026-05-17");
+  const upcoming = visible
+    .filter((a) => {
+      const d = new Date(a.effectiveDate);
+      const diff = (d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+      return diff >= 0 && diff <= 45;
+    })
+    .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+  const brokerVerificationCount = visible.filter((a) => a.relevance !== "Possible match").length;
+
+  const stats = [
+    { label: "Relevant updates this week", value: relevantToProducts.length, hint: "Matched to your products" },
+    { label: "China → USA updates", value: chinaUpdates.length, hint: "Affecting China-origin goods" },
+    { label: "Upcoming effective dates", value: upcoming.length, hint: "In next 45 days" },
+    { label: "HTS codes monitored", value: new Set(savedHts).size, hint: `Across ${savedProducts.length} products` },
+    { label: "Broker verification needed", value: brokerVerificationCount, hint: "Likely / direct matches" },
+  ];
+
   return (
-    <AppShell title="Dashboard" subtitle="Source-backed import rule alerts for your products">
+    <AppShell
+      title="Import updates that may affect your products"
+      subtitle="ClearPort monitors official U.S. import-rule sources and matches updates to your products, categories, route, and HTS codes."
+    >
+      <Card className="mb-6 flex flex-wrap items-center justify-between gap-3 border-blue-100 bg-blue-50/40 p-4">
+        <div className="flex items-center gap-3 text-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Radar className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="font-medium">ClearPort continuously checks official sources and matches updates to your monitored products.</div>
+            <div className="text-xs text-muted-foreground">Last source check: 2 hours ago · Next scheduled check: in ~1 hour · Source status: <span className="text-green-700">Active</span></div>
+          </div>
+        </div>
+        <Link to="/sources"><Button variant="outline" size="sm"><RefreshCw className="mr-2 h-4 w-4" /> View sources</Button></Link>
+      </Card>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {stats.map((s) => (
           <Card key={s.label} className="p-5">
@@ -29,59 +74,33 @@ function Dashboard() {
         ))}
       </div>
 
-      <div className="mt-8 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Alert feed</h2>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm">All sources</Button>
-          <Button variant="outline" size="sm">China-origin only</Button>
-          <Button variant="outline" size="sm">Direct HTS matches</Button>
-        </div>
-      </div>
+      <Tabs defaultValue="relevant" className="mt-8">
+        <TabsList>
+          <TabsTrigger value="relevant">Relevant to my products ({relevantToProducts.length})</TabsTrigger>
+          <TabsTrigger value="china">All China → USA updates ({chinaUpdates.length})</TabsTrigger>
+          <TabsTrigger value="upcoming">Upcoming effective dates ({upcoming.length})</TabsTrigger>
+        </TabsList>
 
-      <div className="mt-4 space-y-4">
-        {alerts.map((a) => (
-          <Card key={a.id} className="p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className={relevanceClass(a.relevance)}>{a.relevance}</Badge>
-                  <Badge variant="outline">{a.source}</Badge>
-                  <Badge variant="outline">Effective {a.effectiveDate}</Badge>
-                  {a.originCountries.includes("China") && (
-                    <Badge variant="outline" className="border-red-200 bg-red-50 text-red-800">China-origin</Badge>
-                  )}
-                </div>
-                <Link to="/alerts/$id" params={{ id: a.id }} className="mt-3 block">
-                  <h3 className="text-base font-semibold leading-snug hover:underline">{a.title}</h3>
-                </Link>
-                <p className="mt-2 text-sm text-muted-foreground">{a.summary}</p>
+        <TabsContent value="relevant" className="mt-4 space-y-4">
+          {relevantToProducts.length === 0 ? <EmptyState label="No updates currently match your saved products." /> : relevantToProducts.map((a) => <AlertCard key={a.id} alert={a} />)}
+        </TabsContent>
+        <TabsContent value="china" className="mt-4 space-y-4">
+          {chinaUpdates.length === 0 ? <EmptyState label="No China-origin updates right now." /> : chinaUpdates.map((a) => <AlertCard key={a.id} alert={a} />)}
+        </TabsContent>
+        <TabsContent value="upcoming" className="mt-4 space-y-4">
+          {upcoming.length === 0 ? <EmptyState label="No upcoming effective dates in the next 45 days." /> : upcoming.map((a) => <AlertCard key={a.id} alert={a} />)}
+        </TabsContent>
+      </Tabs>
 
-                <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-                  <div><span className="font-medium text-foreground">Categories:</span> {a.categories.join(", ")}</div>
-                  <div><span className="font-medium text-foreground">HTS:</span> {a.htsCodes.length ? a.htsCodes.join(", ") : "—"}</div>
-                  <div><span className="font-medium text-foreground">Published:</span> {a.publicationDate}</div>
-                </div>
-
-                {a.relevance !== "Possible match" && (
-                  <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 p-3 text-xs text-amber-900">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span><span className="font-medium">Verify with broker:</span> {a.brokerQuestions[0]}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex shrink-0 flex-col gap-2">
-                <Button variant="outline" size="sm"><Bookmark className="mr-2 h-4 w-4" /> Save</Button>
-                <Button variant="ghost" size="sm"><X className="mr-2 h-4 w-4" /> Dismiss</Button>
-                <Button variant="ghost" size="sm"><Download className="mr-2 h-4 w-4" /> Export</Button>
-                <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-xs text-primary hover:underline">
-                  Source <ExternalLink className="ml-1 h-3 w-3" />
-                </a>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <p className="mt-8 text-center text-xs text-muted-foreground">
+        ClearPort provides educational, source-backed monitoring. Final interpretation should be confirmed with your customs broker.
+      </p>
     </AppShell>
+  );
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <Card className="p-8 text-center text-sm text-muted-foreground">{label}</Card>
   );
 }
