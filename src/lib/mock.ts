@@ -14,6 +14,7 @@ export type Alert = {
   brokerQuestions: string[];
   sourceUrl: string;
   sourceExcerpt: string;
+  alertType: "Tariff / exclusion" | "Labeling / marking" | "Forced labor" | "HTS update" | "AD/CVD" | "Operational";
 };
 
 export const alerts: Alert[] = [
@@ -28,16 +29,17 @@ export const alerts: Alert[] = [
     categories: ["Electronics", "Home goods", "Fitness accessories"],
     htsCodes: ["8512.20.40", "9506.91.00", "8543.70.99"],
     relevance: "Direct HTS match",
+    alertType: "Tariff / exclusion",
     summary:
       "Certain tariff exclusions for China-origin products have been extended, modified, or allowed to expire. Importers using affected HTS codes should verify whether their products remain eligible for exclusion treatment.",
     whyMatters:
       "If your product uses one of the affected HTS codes, your landed cost or filing process may change.",
     brokerQuestions: [
-      "Does your saved HTS code appear in the notice?",
-      "Is your product description covered by the exclusion?",
-      "What is the effective date for your shipments in transit?",
-      "Does your entry require special filing treatment?",
-      "Does your supplier invoice include the required product description?",
+      "Does our saved HTS code appear in the notice?",
+      "Is our product description covered by the exclusion?",
+      "What is the effective date for shipments in transit?",
+      "Does our entry require special filing treatment?",
+      "Does our supplier invoice include the required product description?",
     ],
     sourceUrl: "https://ustr.gov/",
     sourceExcerpt:
@@ -54,6 +56,7 @@ export const alerts: Alert[] = [
     categories: ["Textiles / apparel"],
     htsCodes: ["6109.10.00", "6204.62.80"],
     relevance: "Likely match",
+    alertType: "Labeling / marking",
     summary:
       "CBP reminds importers of country-of-origin marking and fiber content labeling requirements for textile and apparel imports. Non-compliant shipments may be subject to redelivery or marking notices.",
     whyMatters:
@@ -78,6 +81,7 @@ export const alerts: Alert[] = [
     categories: ["Electronics"],
     htsCodes: ["8517.62.00", "8528.72.64"],
     relevance: "Possible match",
+    alertType: "HTS update",
     summary:
       "Revision 3 of the 2026 HTS introduces new statistical breakouts for selected consumer electronics. Importers should review whether their products fall under a new 10-digit subheading.",
     whyMatters:
@@ -102,6 +106,7 @@ export const alerts: Alert[] = [
     categories: ["Kitchenware", "Food-contact products"],
     htsCodes: ["7323.93.00"],
     relevance: "Likely match",
+    alertType: "HTS update",
     summary:
       "CBP is revoking a prior ruling letter concerning the classification of certain coated stainless steel cookware. Affected importers should re-evaluate classification.",
     whyMatters:
@@ -126,6 +131,7 @@ export const alerts: Alert[] = [
     categories: ["Textiles / apparel", "Electronics", "Other consumer goods"],
     htsCodes: [],
     relevance: "Possible match",
+    alertType: "Forced labor",
     summary:
       "CBP outlines additional documentation expected at entry for shipments containing inputs from specific regions. Importers should prepare supply chain tracing documentation.",
     whyMatters:
@@ -141,78 +147,159 @@ export const alerts: Alert[] = [
   },
 ];
 
-export const sources = [
+export type SourceStatus = {
+  name: string;
+  type: string;
+  lastChecked: string;
+  lastUpdate: string;
+  frequency: string;
+  status: "Active" | "Needs attention";
+  url: string;
+};
+
+export const sources: SourceStatus[] = [
   {
     name: "CBP CSMS messages",
     type: "Customs operational messages",
     lastChecked: "2 hours ago",
+    lastUpdate: "2026-05-12 — Textile labeling reminder",
     frequency: "Hourly",
+    status: "Active",
+    url: "https://www.cbp.gov/trade/automated/cargo-systems-messaging-service",
+  },
+  {
+    name: "CBP RSS trade feeds",
+    type: "Trade news and bulletins",
+    lastChecked: "1 hour ago",
+    lastUpdate: "2026-05-11 — Trade news update",
+    frequency: "Hourly",
+    status: "Active",
+    url: "https://www.cbp.gov/newsroom/rss",
   },
   {
     name: "CBP Federal Register notices",
     type: "Rulemaking and notices",
     lastChecked: "5 hours ago",
+    lastUpdate: "2026-05-10 — Notice of rulemaking",
     frequency: "Daily",
+    status: "Active",
+    url: "https://www.federalregister.gov/agencies/u-s-customs-and-border-protection",
   },
   {
     name: "Customs Bulletin and Decisions",
     type: "Rulings and revocations",
     lastChecked: "Today",
+    lastUpdate: "2026-04-28 — NY ruling N123456 revoked",
     frequency: "Weekly",
+    status: "Active",
+    url: "https://www.cbp.gov/trade/rulings",
   },
   {
     name: "USTR Section 301 actions",
     type: "Tariff actions and exclusions",
     lastChecked: "3 hours ago",
+    lastUpdate: "2026-05-12 — Exclusion list modified",
     frequency: "Daily",
+    status: "Active",
+    url: "https://ustr.gov/",
   },
   {
     name: "USITC HTS updates",
     type: "Tariff schedule revisions",
     lastChecked: "Today",
+    lastUpdate: "2026-05-05 — HTS Revision 3 published",
     frequency: "On publication",
+    status: "Active",
+    url: "https://hts.usitc.gov/",
   },
   {
-    name: "Official tariff change records",
-    type: "Proclamations and modifications",
+    name: "Federal Register trade notices",
+    type: "Proclamations and trade notices",
     lastChecked: "1 day ago",
+    lastUpdate: "2026-05-04 — Presidential proclamation",
     frequency: "On publication",
+    status: "Needs attention",
+    url: "https://www.federalregister.gov/",
   },
 ];
 
-export const savedProducts = [
+export type SavedProduct = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  material: string;
+  intendedUse: string;
+  hts: string;
+  origin: string;
+  destination: string;
+  supplier: string;
+  supplierCountry: string;
+  channel: string;
+  alertFrequency: "Instant" | "Daily" | "Weekly";
+  relatedAlerts: number;
+  lastAlertDate: string;
+  upcomingEffective: string | null;
+  lastMatchedSource: string;
+};
+
+export const savedProducts: SavedProduct[] = [
   {
     id: "p1",
     name: "Bluetooth speaker — Model BX-200",
     category: "Electronics",
+    description: "Portable Bluetooth 5.2 speaker with rechargeable Li-ion battery and USB-C charging.",
+    material: "ABS plastic housing, aluminum grille",
+    intendedUse: "Consumer audio playback",
     hts: "8518.22.00",
     origin: "China",
     destination: "United States",
     supplier: "Shenzhen AudioCo",
+    supplierCountry: "China",
     channel: "Amazon",
+    alertFrequency: "Instant",
     relatedAlerts: 3,
+    lastAlertDate: "2026-05-12",
+    upcomingEffective: "2026-06-01",
+    lastMatchedSource: "USTR / Federal Register",
   },
   {
     id: "p2",
     name: "Organic cotton t-shirt",
     category: "Textiles / apparel",
+    description: "Crew-neck short-sleeve t-shirt, unisex sizing.",
+    material: "100% organic cotton, woven labels",
+    intendedUse: "Apparel",
     hts: "6109.10.00",
     origin: "China",
     destination: "United States",
     supplier: "Guangzhou Textiles Ltd.",
+    supplierCountry: "China",
     channel: "Shopify",
+    alertFrequency: "Daily",
     relatedAlerts: 2,
+    lastAlertDate: "2026-05-09",
+    upcomingEffective: null,
+    lastMatchedSource: "CBP CSMS",
   },
   {
     id: "p3",
     name: "Stainless steel cookware set",
     category: "Kitchenware",
+    description: "5-piece coated stainless steel cookware set for residential use.",
+    material: "Stainless steel with non-stick coating",
+    intendedUse: "Food preparation (food-contact)",
     hts: "7323.93.00",
     origin: "China",
     destination: "United States",
     supplier: "Ningbo Kitchen Co.",
+    supplierCountry: "China",
     channel: "Retail",
+    alertFrequency: "Weekly",
     relatedAlerts: 1,
+    lastAlertDate: "2026-04-28",
+    upcomingEffective: "2026-06-27",
+    lastMatchedSource: "Customs Bulletin and Decisions",
   },
 ];
 
@@ -222,3 +309,61 @@ export const relevanceClass = (r: Alert["relevance"]) =>
     : r === "Likely match"
       ? "bg-amber-100 text-amber-800 border-amber-200"
       : "bg-slate-100 text-slate-700 border-slate-200";
+
+export function whyYouSeeThis(alert: Alert): string {
+  const matchedProduct = savedProducts.find(
+    (p) => alert.htsCodes.includes(p.hts) || alert.categories.includes(p.category),
+  );
+  const chinaMatch = alert.originCountries.includes("China");
+  if (matchedProduct && alert.htsCodes.includes(matchedProduct.hts)) {
+    return `You are seeing this because your saved product "${matchedProduct.name}" uses HTS ${matchedProduct.hts}, which is referenced in this update.`;
+  }
+  if (matchedProduct) {
+    return `You are seeing this because your saved product category "${matchedProduct.category}" matches this update${chinaMatch ? ", and it affects China-origin goods" : ""}.`;
+  }
+  if (chinaMatch) {
+    return `You are seeing this because you monitor China → USA shipments and this update affects China-origin goods.`;
+  }
+  return `You are seeing this because it may apply to one of your monitored categories or routes.`;
+}
+
+export function relevantAlertsForProduct(productId: string): Alert[] {
+  const p = savedProducts.find((x) => x.id === productId);
+  if (!p) return [];
+  return alerts.filter((a) => a.htsCodes.includes(p.hts) || a.categories.includes(p.category));
+}
+
+export function buildBrokerSummary(alert: Alert): string {
+  return [
+    `ClearPort — Broker Summary`,
+    `=========================`,
+    ``,
+    `Alert: ${alert.title}`,
+    `Source: ${alert.source}`,
+    `Published: ${alert.publicationDate}`,
+    `Effective: ${alert.effectiveDate}`,
+    `Affected origin: ${alert.originCountries.join(", ")}`,
+    `Destination: ${alert.destinationCountry}`,
+    `Affected categories: ${alert.categories.join(", ")}`,
+    `Affected HTS codes: ${alert.htsCodes.length ? alert.htsCodes.join(", ") : "Not specified"}`,
+    `Relevance: ${alert.relevance}`,
+    ``,
+    `Plain-English summary`,
+    `---------------------`,
+    alert.summary,
+    ``,
+    `Why this may matter`,
+    `-------------------`,
+    alert.whyMatters,
+    ``,
+    `Questions to ask your broker`,
+    `----------------------------`,
+    ...alert.brokerQuestions.map((q, i) => `${i + 1}. ${q}`),
+    ``,
+    `Official source: ${alert.sourceUrl}`,
+    ``,
+    `Disclaimer`,
+    `----------`,
+    `ClearPort provides educational, source-backed monitoring. It is not legal advice and does not replace a licensed customs broker. Final interpretation and classification should be confirmed with your broker.`,
+  ].join("\n");
+}
