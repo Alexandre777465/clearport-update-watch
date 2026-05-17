@@ -14,6 +14,7 @@ import { Route as ProductsRouteImport } from './routes/products'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PreferencesRouteImport } from './routes/preferences'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as ImportBasicsRouteImport } from './routes/import-basics'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as IndexRouteImport } from './routes/index'
@@ -44,6 +45,11 @@ const OnboardingRoute = OnboardingRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ImportBasicsRoute = ImportBasicsRouteImport.update({
+  id: '/import-basics',
+  path: '/import-basics',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -69,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
+  '/import-basics': typeof ImportBasicsRoute
   '/onboarding': typeof OnboardingRoute
   '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
+  '/import-basics': typeof ImportBasicsRoute
   '/onboarding': typeof OnboardingRoute
   '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/dashboard': typeof DashboardRoute
+  '/import-basics': typeof ImportBasicsRoute
   '/onboarding': typeof OnboardingRoute
   '/preferences': typeof PreferencesRoute
   '/pricing': typeof PricingRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/dashboard'
+    | '/import-basics'
     | '/onboarding'
     | '/preferences'
     | '/pricing'
@@ -116,6 +126,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/dashboard'
+    | '/import-basics'
     | '/onboarding'
     | '/preferences'
     | '/pricing'
@@ -127,6 +138,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/dashboard'
+    | '/import-basics'
     | '/onboarding'
     | '/preferences'
     | '/pricing'
@@ -139,6 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AskRoute: typeof AskRoute
   DashboardRoute: typeof DashboardRoute
+  ImportBasicsRoute: typeof ImportBasicsRoute
   OnboardingRoute: typeof OnboardingRoute
   PreferencesRoute: typeof PreferencesRoute
   PricingRoute: typeof PricingRoute
@@ -184,6 +197,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/import-basics': {
+      id: '/import-basics'
+      path: '/import-basics'
+      fullPath: '/import-basics'
+      preLoaderRoute: typeof ImportBasicsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -219,6 +239,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AskRoute: AskRoute,
   DashboardRoute: DashboardRoute,
+  ImportBasicsRoute: ImportBasicsRoute,
   OnboardingRoute: OnboardingRoute,
   PreferencesRoute: PreferencesRoute,
   PricingRoute: PricingRoute,
@@ -229,3 +250,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
