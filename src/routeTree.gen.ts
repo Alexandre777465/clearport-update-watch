@@ -19,6 +19,7 @@ import { Route as ImportBasicsRouteImport } from './routes/import-basics'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AlertsIndexRouteImport } from './routes/alerts.index'
 import { Route as AlertsIdRouteImport } from './routes/alerts.$id'
 
 const SourcesRoute = SourcesRouteImport.update({
@@ -71,6 +72,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AlertsIndexRoute = AlertsIndexRouteImport.update({
+  id: '/alerts/',
+  path: '/alerts/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AlertsIdRoute = AlertsIdRouteImport.update({
   id: '/alerts/$id',
   path: '/alerts/$id',
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/sample-alert': typeof SampleAlertRoute
   '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
+  '/alerts/': typeof AlertsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByTo {
   '/sample-alert': typeof SampleAlertRoute
   '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
+  '/alerts': typeof AlertsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/sample-alert': typeof SampleAlertRoute
   '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
+  '/alerts/': typeof AlertsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/sample-alert'
     | '/sources'
     | '/alerts/$id'
+    | '/alerts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/sample-alert'
     | '/sources'
     | '/alerts/$id'
+    | '/alerts'
   id:
     | '__root__'
     | '/'
@@ -157,6 +168,7 @@ export interface FileRouteTypes {
     | '/sample-alert'
     | '/sources'
     | '/alerts/$id'
+    | '/alerts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +183,7 @@ export interface RootRouteChildren {
   SampleAlertRoute: typeof SampleAlertRoute
   SourcesRoute: typeof SourcesRoute
   AlertsIdRoute: typeof AlertsIdRoute
+  AlertsIndexRoute: typeof AlertsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -245,6 +258,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/alerts/': {
+      id: '/alerts/'
+      path: '/alerts'
+      fullPath: '/alerts/'
+      preLoaderRoute: typeof AlertsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/alerts/$id': {
       id: '/alerts/$id'
       path: '/alerts/$id'
@@ -267,6 +287,7 @@ const rootRouteChildren: RootRouteChildren = {
   SampleAlertRoute: SampleAlertRoute,
   SourcesRoute: SourcesRoute,
   AlertsIdRoute: AlertsIdRoute,
+  AlertsIndexRoute: AlertsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
