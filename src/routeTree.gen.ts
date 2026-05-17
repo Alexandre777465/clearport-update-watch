@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as SampleAlertRouteImport } from './routes/sample-alert'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as PricingRouteImport } from './routes/pricing'
@@ -20,6 +21,11 @@ import { Route as AskRouteImport } from './routes/ask'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AlertsIdRouteImport } from './routes/alerts.$id'
 
+const SourcesRoute = SourcesRouteImport.update({
+  id: '/sources',
+  path: '/sources',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SampleAlertRoute = SampleAlertRouteImport.update({
   id: '/sample-alert',
   path: '/sample-alert',
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
+  '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
 }
 export interface FileRoutesByTo {
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
+  '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
 }
 export interface FileRoutesById {
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/pricing': typeof PricingRoute
   '/products': typeof ProductsRoute
   '/sample-alert': typeof SampleAlertRoute
+  '/sources': typeof SourcesRoute
   '/alerts/$id': typeof AlertsIdRoute
 }
 export interface FileRouteTypes {
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/products'
     | '/sample-alert'
+    | '/sources'
     | '/alerts/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/products'
     | '/sample-alert'
+    | '/sources'
     | '/alerts/$id'
   id:
     | '__root__'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/products'
     | '/sample-alert'
+    | '/sources'
     | '/alerts/$id'
   fileRoutesById: FileRoutesById
 }
@@ -157,11 +169,19 @@ export interface RootRouteChildren {
   PricingRoute: typeof PricingRoute
   ProductsRoute: typeof ProductsRoute
   SampleAlertRoute: typeof SampleAlertRoute
+  SourcesRoute: typeof SourcesRoute
   AlertsIdRoute: typeof AlertsIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sources': {
+      id: '/sources'
+      path: '/sources'
+      fullPath: '/sources'
+      preLoaderRoute: typeof SourcesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sample-alert': {
       id: '/sample-alert'
       path: '/sample-alert'
@@ -245,6 +265,7 @@ const rootRouteChildren: RootRouteChildren = {
   PricingRoute: PricingRoute,
   ProductsRoute: ProductsRoute,
   SampleAlertRoute: SampleAlertRoute,
+  SourcesRoute: SourcesRoute,
   AlertsIdRoute: AlertsIdRoute,
 }
 export const routeTree = rootRouteImport
