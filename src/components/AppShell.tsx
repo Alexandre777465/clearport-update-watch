@@ -1,16 +1,12 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { Ship, Radar, Bell, Package, MessageSquare, Settings, CreditCard, BookOpen, Rss } from "lucide-react";
+import { Ship, Radar, Bell, Package, MessageSquare } from "lucide-react";
 import type { ReactNode } from "react";
 
 const nav = [
   { to: "/dashboard", label: "Monitoring Center", icon: Radar },
-  { to: "/products", label: "Monitored products", icon: Package },
-  { to: "/import-basics", label: "Import Basics", icon: BookOpen },
-  { to: "/sources", label: "Sources", icon: Rss },
+  { to: "/products", label: "My Products", icon: Package },
+  { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/ask", label: "Ask ClearPort", icon: MessageSquare },
-  { to: "/preferences", label: "Alert preferences", icon: Bell },
-  { to: "/pricing", label: "Plan & billing", icon: CreditCard },
-  { to: "/onboarding", label: "Setup", icon: Settings },
 ] as const;
 
 export function AppShell({ children, title, subtitle }: { children: ReactNode; title?: string; subtitle?: string }) {
