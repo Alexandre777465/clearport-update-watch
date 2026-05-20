@@ -46,7 +46,7 @@ export type AskResult = {
 };
 
 export const askClearportFn = createServerFn({ method: "POST" })
-  .validator((data: unknown) => schema.parse(data))
+  .inputValidator((data: unknown) => schema.parse(data))
   .handler(async ({ data }): Promise<AskResult> => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
