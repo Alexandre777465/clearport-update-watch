@@ -1,13 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, ExternalLink } from "lucide-react";
+import { Sparkles, ExternalLink, Loader2 } from "lucide-react";
 import { alerts, savedProducts, whyYouSeeThis, type Alert } from "@/lib/mock";
+import { askClearportFn } from "@/api/ask";
 
 const searchSchema = z.object({ alertId: z.string().optional() });
 
@@ -17,7 +18,11 @@ export const Route = createFileRoute("/ask")({
   head: () => ({
     meta: [
       { title: "Ask ClearPort — fact-based answers from official sources" },
-      { name: "description", content: "Ask ClearPort questions about import-rule updates, HTS codes, and broker preparation." },
+      {
+        name: "description",
+        content:
+          "Ask ClearPort questions about import-rule updates, HTS codes, and broker preparation.",
+      },
     ],
   }),
 });
@@ -32,85 +37,72 @@ const chips = [
 ];
 
 type Source = { title: string; date: string; url: string };
-type Msg = { role: "user" | "assistant"; text: string; sources?: Source[] };
+type Msg = { role: "user" | "assistant"; text: string; sources?: Source[]; isLegal?: boolean };
 
 function alertSrc(a: Alert): Source {
   return { title: a.title, date: a.publicationDate, url: a.sourceUrl };
 }
 
-function answer(q: string, contextAlert?: Alert): Msg {
+// Local mock answer — used when ANTHROPIC_API_KEY is not configured server-side
+function mockAnswer(q: string, contextAlert?: Alert): Msg {
   const lower = q.toLowerCase();
-  const cautionTail = " Verify the final interpretation with your customs broker — ClearPort does not provide legal advice or guarantees on whether an update applies.";
+  const tail =
+    " Verify the final interpretation with your customs broker — ClearPort does not provide legal advice or guarantees on whether an update applies.";
 
   if (contextAlert && (lower.includes("why") || lower.includes("this alert"))) {
     return {
       role: "assistant",
-      text: `${whyYouSeeThis(contextAlert)} The update is from ${contextAlert.source}, published ${contextAlert.publicationDate}, effective ${contextAlert.effectiveDate}.${cautionTail}`,
+      text: `${whyYouSeeThis(contextAlert)} The update is from ${contextAlert.source}, published ${contextAlert.publicationDate}, effective ${contextAlert.effectiveDate}.${tail}`,
       sources: [alertSrc(contextAlert)],
     };
   }
-
   if (lower.includes("hts")) {
     const userHts = savedProducts.map((p) => p.hts);
     const matches = alerts.filter((a) => a.htsCodes.some((h) => userHts.includes(h)));
-    if (matches.length === 0) {
-      return { role: "assistant", text: `No current updates explicitly reference your saved HTS codes (${userHts.join(", ")}). New official updates are checked continuously.${cautionTail}` };
-    }
+    if (!matches.length)
+      return {
+        role: "assistant",
+        text: `No current updates explicitly reference your saved HTS codes (${userHts.join(", ")}).${tail}`,
+      };
     return {
       role: "assistant",
-      text: `These updates explicitly reference one of your saved HTS codes: ${matches.map((m) => `"${m.title}" (${m.source}, ${m.publicationDate})`).join("; ")}.${cautionTail}`,
+      text: `These updates reference one of your saved HTS codes: ${matches.map((m) => `"${m.title}"`).join("; ")}.${tail}`,
       sources: matches.map(alertSrc),
     };
   }
-
   if (lower.includes("china")) {
     const matches = alerts.filter((a) => a.originCountries.includes("China"));
     return {
       role: "assistant",
-      text: `There are ${matches.length} current updates that may affect China-origin goods. Most recent: "${matches[0].title}" from ${matches[0].source} (published ${matches[0].publicationDate}).${cautionTail}`,
+      text: `${matches.length} updates may affect China-origin goods. Most recent: "${matches[0].title}" (${matches[0].publicationDate}).${tail}`,
       sources: matches.slice(0, 3).map(alertSrc),
     };
   }
-
   if (lower.includes("upcoming") || lower.includes("effective")) {
-    const today = new Date("2026-05-17");
+    const today = new Date();
     const upcoming = alerts
-      .filter((a) => new Date(a.effectiveDate).getTime() >= today.getTime())
+      .filter((a) => new Date(a.effectiveDate) >= today)
       .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
     return {
       role: "assistant",
       text: upcoming.length
-        ? `Upcoming effective dates: ${upcoming.map((u) => `${u.effectiveDate} — ${u.title}`).join("; ")}.${cautionTail}`
-        : `No upcoming effective dates in monitored sources.${cautionTail}`,
+        ? `Upcoming effective dates: ${upcoming.map((u) => `${u.effectiveDate} — ${u.title}`).join("; ")}.${tail}`
+        : `No upcoming effective dates in monitored sources.${tail}`,
       sources: upcoming.slice(0, 3).map(alertSrc),
     };
   }
-
   if (lower.includes("broker")) {
     const a = contextAlert ?? alerts[0];
     return {
       role: "assistant",
-      text: `For "${a.title}", consider asking your broker: ${a.brokerQuestions.slice(0, 3).map((q, i) => `(${i + 1}) ${q}`).join(" ")}${cautionTail}`,
+      text: `For "${a.title}", consider asking your broker: ${a.brokerQuestions.slice(0, 3).map((q, i) => `(${i + 1}) ${q}`).join(" ")}${tail}`,
       sources: [alertSrc(a)],
     };
   }
-
-  if (lower.includes("electronics") || lower.includes("summarize")) {
-    const cat = lower.includes("electronics") ? "Electronics" : savedProducts[0]?.category ?? "Electronics";
-    const matches = alerts.filter((a) => a.categories.includes(cat));
-    return {
-      role: "assistant",
-      text: matches.length
-        ? `${matches.length} updates may affect ${cat.toLowerCase()} imports. Most relevant: "${matches[0].title}" — ${matches[0].summary}${cautionTail}`
-        : `No current updates match ${cat.toLowerCase()}.${cautionTail}`,
-      sources: matches.slice(0, 3).map(alertSrc),
-    };
-  }
-
-  // default: "what changed this week"
+  // default
   return {
     role: "assistant",
-    text: `This week's most relevant updates: ${alerts.slice(0, 3).map((a) => `"${a.title}" (${a.source}, ${a.publicationDate})`).join("; ")}.${cautionTail}`,
+    text: `Recent updates: ${alerts.slice(0, 3).map((a) => `"${a.title}" (${a.source}, ${a.publicationDate})`).join("; ")}.${tail}`,
     sources: alerts.slice(0, 3).map(alertSrc),
   };
 }
@@ -120,6 +112,7 @@ function Ask() {
   const contextAlert = alertId ? alerts.find((a) => a.id === alertId) : undefined;
 
   const [q, setQ] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Msg[]>(() => [
     {
       role: "assistant",
@@ -129,9 +122,13 @@ function Ask() {
     },
   ]);
 
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isLoading]);
+
   useEffect(() => {
     if (contextAlert) {
-      // ensure new context message replaces stale greeting if alertId changes
       setMessages([
         {
           role: "assistant",
@@ -142,15 +139,49 @@ function Ask() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alertId]);
 
-  const ask = (text: string) => {
-    if (!text.trim()) return;
-    const reply = answer(text, contextAlert);
-    setMessages((m) => [...m, { role: "user", text }, reply]);
+  const ask = async (text: string) => {
+    if (!text.trim() || isLoading) return;
+    setMessages((m) => [...m, { role: "user", text }]);
     setQ("");
+    setIsLoading(true);
+
+    try {
+      const result = await askClearportFn({
+        data: {
+          query: text,
+          productHtsCodes: savedProducts.map((p) => p.hts).filter(Boolean),
+          productCategories: [...new Set(savedProducts.map((p) => p.category))].filter(Boolean),
+          contextAlertTitle: contextAlert?.title,
+          contextAlertSource: contextAlert?.source,
+        },
+      });
+
+      if (result.response) {
+        setMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            text: result.response!,
+            isLegal: result.isLegalDeflection,
+            sources: contextAlert && !result.isLegalDeflection ? [alertSrc(contextAlert)] : undefined,
+          },
+        ]);
+      } else {
+        // Server fn returned null — ANTHROPIC_API_KEY not set, use local mock
+        setMessages((m) => [...m, mockAnswer(text, contextAlert)]);
+      }
+    } catch {
+      setMessages((m) => [...m, mockAnswer(text, contextAlert)]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <AppShell title="Ask ClearPort" subtitle="Fact-based answers from official sources and your saved products">
+    <AppShell
+      title="Ask ClearPort"
+      subtitle="Fact-based answers from official sources and your saved products"
+    >
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
         <Card className="flex h-[70vh] flex-col p-0">
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
@@ -158,16 +189,29 @@ function Ask() {
               <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div
                   className={`max-w-[85%] rounded-lg px-4 py-3 text-sm ${
-                    m.role === "user" ? "bg-primary text-primary-foreground" : "bg-slate-100 text-foreground"
+                    m.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : m.isLegal
+                        ? "border border-amber-200 bg-amber-50 text-amber-900"
+                        : "bg-slate-100 text-foreground"
                   }`}
                 >
                   <p className="whitespace-pre-line">{m.text}</p>
                   {m.sources && m.sources.length > 0 && (
                     <div className="mt-3 space-y-1.5 border-t border-border/40 pt-3">
                       {m.sources.map((s) => (
-                        <a key={s.url + s.title} href={s.url} target="_blank" rel="noreferrer" className="flex items-start gap-2 text-xs text-primary hover:underline">
+                        <a
+                          key={s.url + s.title}
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-start gap-2 text-xs text-primary hover:underline"
+                        >
                           <ExternalLink className="mt-0.5 h-3 w-3 shrink-0" />
-                          <span>{s.title} <span className="text-muted-foreground">— {s.date}</span></span>
+                          <span>
+                            {s.title}{" "}
+                            <span className="text-muted-foreground">— {s.date}</span>
+                          </span>
                         </a>
                       ))}
                     </div>
@@ -175,18 +219,50 @@ function Ask() {
                 </div>
               </div>
             ))}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="rounded-lg bg-slate-100 px-4 py-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
           </div>
+
           <div className="border-t border-border p-4">
             <div className="mb-3 flex flex-wrap gap-2">
               {chips.map((c) => (
-                <button key={c} onClick={() => ask(c)} className="rounded-full border border-border bg-white px-3 py-1 text-xs hover:bg-slate-50">
+                <button
+                  key={c}
+                  onClick={() => ask(c)}
+                  disabled={isLoading}
+                  className="rounded-full border border-border bg-white px-3 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
+                >
                   {c}
                 </button>
               ))}
             </div>
-            <form onSubmit={(e) => { e.preventDefault(); ask(q); }} className="flex gap-2">
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about updates, HTS codes, or broker questions…" />
-              <Button type="submit"><Sparkles className="mr-2 h-4 w-4" /> Ask</Button>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                ask(q);
+              }}
+              className="flex gap-2"
+            >
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Ask about updates, HTS codes, or broker questions…"
+                disabled={isLoading}
+              />
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-2 h-4 w-4" />
+                )}
+                Ask
+              </Button>
             </form>
           </div>
         </Card>
@@ -195,14 +271,22 @@ function Ask() {
           {contextAlert && (
             <Card className="border-blue-200 bg-blue-50/50 p-5 text-xs">
               <div className="font-medium text-foreground">Loaded alert context</div>
-              <Link to="/alerts/$id" params={{ id: contextAlert.id }} className="mt-1 block text-primary hover:underline">{contextAlert.title}</Link>
-              <p className="mt-2 text-muted-foreground">{contextAlert.source} · {contextAlert.publicationDate}</p>
+              <Link
+                to="/alerts/$id"
+                params={{ id: contextAlert.id }}
+                className="mt-1 block text-primary hover:underline"
+              >
+                {contextAlert.title}
+              </Link>
+              <p className="mt-2 text-muted-foreground">
+                {contextAlert.source} · {contextAlert.publicationDate}
+              </p>
             </Card>
           )}
           <Card className="p-5">
             <h3 className="text-sm font-semibold">How Ask ClearPort works</h3>
             <ul className="mt-3 space-y-2 text-xs text-muted-foreground">
-              <li>• Answers from official source summaries, your saved products, HTS codes, and import basics</li>
+              <li>• Answers from official source summaries, your saved products, and HTS codes</li>
               <li>• Always shows source and date when possible</li>
               <li>• Says "verify with broker" when interpretation is required</li>
               <li>• Never guarantees whether something applies</li>
@@ -213,7 +297,9 @@ function Ask() {
             <div className="mt-3 space-y-2">
               {alerts.slice(0, 3).map((a) => (
                 <div key={a.id} className="text-xs">
-                  <Badge variant="outline" className="mr-1">{a.source}</Badge>
+                  <Badge variant="outline" className="mr-1">
+                    {a.source}
+                  </Badge>
                   <span className="text-muted-foreground">{a.publicationDate}</span>
                 </div>
               ))}
