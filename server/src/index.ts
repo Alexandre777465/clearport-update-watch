@@ -9,6 +9,7 @@ import { htsCodesRouter } from './routes/htsCodes';
 import { sourcesRouter } from './routes/sources';
 import { askRouter } from './routes/ask';
 import { notificationsRouter } from './routes/notifications';
+import { watchlistRouter } from './routes/watchlist';
 import { requireAuth } from './middleware/auth';
 
 const app = express();
@@ -25,6 +26,7 @@ app.use(express.json({ limit: '1mb' }));
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+app.use('/api/public/watchlist', watchlistRouter);
 
 // ── Protected ───────────────────────────────────────────────────────────────
 app.use('/api', requireAuth as any);

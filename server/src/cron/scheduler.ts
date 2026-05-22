@@ -3,7 +3,7 @@ import { db } from '../db/client';
 import { checkFeed } from '../services/feedFetcher';
 import { processUnprocessedDocuments } from '../services/summarizer';
 import { generateAlertsForDocument } from '../services/alertGenerator';
-import { sendDailyDigest, sendWeeklyDigest, sendInstantAlert } from '../services/emailService';
+import { sendDailyDigest, sendWeeklyDigest, sendInstantAlert, sendWatchlistAlerts } from '../services/emailService';
 import type { SourceFeed, Alert } from '../types';
 
 export function startScheduler(): void {
@@ -31,10 +31,11 @@ export function startScheduler(): void {
     await dispatchAlerts();
   });
 
-  // ── Daily at 08:00 UTC: daily digest emails ───────────────────────────────
+  // ── Daily at 08:00 UTC: daily digest emails + watchlist alerts ───────────
   cron.schedule('0 8 * * *', async () => {
-    console.log('[cron] Daily digest emails');
+    console.log('[cron] Daily digest + watchlist emails');
     await sendAllDigests('daily');
+    await sendWatchlistAlerts();
   });
 
   // ── Monday at 08:00 UTC: weekly digest emails ─────────────────────────────
