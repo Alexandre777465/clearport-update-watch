@@ -1,9 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Link } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MarketingNav, MarketingFooter } from "@/components/MarketingNav";
+import { MonitoringFormBlock } from "@/components/MonitoringForm";
 import { sources, alerts, relevanceClass } from "@/lib/mock";
 import {
   FileText, Search, Clock, Flag, MessageCircle,
@@ -14,8 +15,12 @@ export const Route = createFileRoute("/")({
   component: Index,
   head: () => ({
     meta: [
-      { title: "ClearPort — U.S. import rule updates, simplified for importers" },
-      { name: "description", content: "ClearPort monitors customs, tariff, and import updates and turns them into plain-English alerts for importers buying from China." },
+      { title: "ClearPort — Never miss a customs or tariff update affecting your products" },
+      {
+        name: "description",
+        content:
+          "Enter your product details and HTS/HS code once. ClearPort monitors official U.S. trade sources and emails you when something relevant changes.",
+      },
     ],
   }),
 });
@@ -37,12 +42,19 @@ const solutions = [
 ];
 
 function Index() {
+  const formRef = useRef<HTMLElement>(null);
   const featured = alerts[0];
+
+  const scrollToForm = (e: React.MouseEvent) => {
+    e.preventDefault();
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <MarketingNav />
 
-      {/* HERO */}
+      {/* ── HERO ──────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden border-b border-border bg-gradient-to-b from-blue-50/60 to-background">
         <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:py-28">
           <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
@@ -54,21 +66,31 @@ function Index() {
                 Never miss a customs or tariff update affecting your products.
               </h1>
               <p className="mt-5 max-w-xl text-lg text-muted-foreground">
-                Enter your product details and HTS/HS code once. ClearPort monitors official U.S. trade sources and emails you when something relevant changes.
+                Enter your product details and HTS/HS code once. ClearPort monitors
+                official U.S. trade sources and emails you when something relevant
+                changes.
               </p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <Link to="/onboarding"><Button size="lg">Start monitoring a product</Button></Link>
-                <Link to="/sample-alert"><Button size="lg" variant="outline">See a sample alert</Button></Link>
+                <Button size="lg" onClick={scrollToForm}>
+                  Start monitoring a product
+                </Button>
+                <Link to="/sample-alert">
+                  <Button size="lg" variant="outline">
+                    See a sample alert
+                  </Button>
+                </Link>
               </div>
               <p className="mt-5 text-sm text-muted-foreground">
-                Built for Amazon sellers, e-commerce brands, sourcing agents, and importers buying from China.
+                Built for Amazon sellers, e-commerce brands, sourcing agents, and
+                importers buying from China.
               </p>
               <p className="mt-4 max-w-xl rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                ClearPort provides source-backed summaries for preparation. Final interpretation should be confirmed with your customs broker.
+                ClearPort provides source-backed summaries for preparation. Final
+                interpretation should be confirmed with your customs broker.
               </p>
             </div>
 
-            {/* Hero alert preview */}
+            {/* Hero — latest alert preview */}
             <Card className="overflow-hidden border-border p-0 shadow-xl">
               <div className="flex items-center justify-between border-b border-border bg-slate-50 px-4 py-3 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">Latest alert</span>
@@ -76,21 +98,33 @@ function Index() {
               </div>
               <div className="p-5">
                 <div className="mb-3 flex flex-wrap gap-2">
-                  <Badge variant="outline" className={relevanceClass(featured.relevance)}>{featured.relevance}</Badge>
+                  <Badge variant="outline" className={relevanceClass(featured.relevance)}>
+                    {featured.relevance}
+                  </Badge>
                   <Badge variant="outline">China → USA</Badge>
                   <Badge variant="outline">Effective {featured.effectiveDate}</Badge>
                 </div>
                 <h3 className="text-base font-semibold leading-snug">{featured.title}</h3>
                 <p className="mt-2 text-sm text-muted-foreground">{featured.summary}</p>
                 <div className="mt-4 rounded-md bg-slate-50 p-3 text-xs text-muted-foreground">
-                  <div className="mb-1 font-medium text-foreground">What to verify with broker</div>
+                  <div className="mb-1 font-medium text-foreground">
+                    What to verify with broker
+                  </div>
                   <ul className="list-disc pl-4">
-                    {featured.brokerQuestions.slice(0, 3).map((q) => <li key={q}>{q}</li>)}
+                    {featured.brokerQuestions.slice(0, 3).map((q) => (
+                      <li key={q}>{q}</li>
+                    ))}
                   </ul>
                 </div>
                 <div className="mt-4 flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Source: {featured.source}</span>
-                  <Link to="/alerts/$id" params={{ id: featured.id }} className="inline-flex items-center gap-1 text-primary hover:underline">
+                  <span className="text-muted-foreground">
+                    Source: {featured.source}
+                  </span>
+                  <Link
+                    to="/alerts/$id"
+                    params={{ id: featured.id }}
+                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                  >
                     Open alert <ExternalLink className="h-3 w-3" />
                   </Link>
                 </div>
@@ -100,7 +134,18 @@ function Index() {
         </div>
       </section>
 
-      {/* PROBLEM */}
+      {/* ── MONITORING FORM ───────────────────────────────────────────────── */}
+      <section
+        ref={formRef}
+        id="monitor"
+        className="border-b border-border bg-white py-16"
+      >
+        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+          <MonitoringFormBlock headingAs="h2" />
+        </div>
+      </section>
+
+      {/* ── PROBLEM ───────────────────────────────────────────────────────── */}
       <section className="border-b border-border py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <h2 className="max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -118,7 +163,7 @@ function Index() {
         </div>
       </section>
 
-      {/* SOLUTION */}
+      {/* ── SOLUTION ──────────────────────────────────────────────────────── */}
       <section className="border-b border-border bg-slate-50 py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <h2 className="max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -138,7 +183,7 @@ function Index() {
         </div>
       </section>
 
-      {/* SOURCES */}
+      {/* ── SOURCES ───────────────────────────────────────────────────────── */}
       <section className="border-b border-border py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="flex items-center gap-2">
@@ -149,7 +194,8 @@ function Index() {
             Built around official trade sources.
           </h2>
           <p className="mt-3 max-w-2xl text-muted-foreground">
-            Every alert is matched back to its official publication so you can verify the source yourself.
+            Every alert is matched back to its official publication so you can verify
+            the source yourself.
           </p>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sources.map((s) => (
@@ -159,7 +205,9 @@ function Index() {
                     <h3 className="font-semibold">{s.name}</h3>
                     <p className="mt-1 text-sm text-muted-foreground">{s.type}</p>
                   </div>
-                  <Badge variant="secondary" className="text-xs">{s.frequency}</Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    {s.frequency}
+                  </Badge>
                 </div>
                 <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
@@ -171,35 +219,52 @@ function Index() {
         </div>
       </section>
 
-      {/* TRUST */}
+      {/* ── TRUST ─────────────────────────────────────────────────────────── */}
       <section className="border-b border-border bg-slate-50 py-20">
         <div className="mx-auto max-w-4xl px-4 text-center sm:px-6">
           <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
             Built for preparation, not legal interpretation.
           </h2>
           <p className="mt-4 text-muted-foreground">
-            ClearPort helps importers monitor official import-rule updates and prepare better questions for their customs broker. It does not replace a licensed customs broker, legal advisor, or customs authority.
+            ClearPort helps importers monitor official import-rule updates and prepare
+            better questions for their customs broker. It does not replace a licensed
+            customs broker, legal advisor, or customs authority.
           </p>
           <ul className="mx-auto mt-8 grid max-w-2xl gap-2 text-left text-sm text-muted-foreground sm:grid-cols-2">
-            {["Source-backed summaries", "Last-checked dates", "Official references", "Broker verification prompts", "Cautious relevance matching"].map((b) => (
-              <li key={b} className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" /> {b}</li>
+            {[
+              "Source-backed summaries",
+              "Last-checked dates",
+              "Official references",
+              "Broker verification prompts",
+              "Cautious relevance matching",
+            ].map((b) => (
+              <li key={b} className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-primary" /> {b}
+              </li>
             ))}
           </ul>
         </div>
       </section>
 
-      {/* CTA */}
+      {/* ── BOTTOM CTA ────────────────────────────────────────────────────── */}
       <section className="py-20">
         <div className="mx-auto max-w-4xl px-4 text-center sm:px-6">
           <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
             Don't read 50-page notices manually.
           </h2>
           <p className="mt-3 text-muted-foreground">
-            Enter your product details once. Get emailed when official U.S. trade rules change.
+            Enter your product details once. Get emailed when official U.S. trade
+            rules change.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
-            <Link to="/onboarding"><Button size="lg">Start monitoring a product</Button></Link>
-            <Link to="/pricing"><Button size="lg" variant="outline">See pricing</Button></Link>
+            <Button size="lg" onClick={scrollToForm}>
+              Start monitoring a product
+            </Button>
+            <Link to="/pricing">
+              <Button size="lg" variant="outline">
+                See pricing
+              </Button>
+            </Link>
           </div>
         </div>
       </section>
