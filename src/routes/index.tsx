@@ -51,14 +51,14 @@ function Index() {
                 For importers buying from China
               </Badge>
               <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
-                U.S. import rules change. ClearPort tells you what matters.
+                Never miss a customs or tariff update affecting your products.
               </h1>
               <p className="mt-5 max-w-xl text-lg text-muted-foreground">
-                ClearPort monitors customs, tariff, and import updates, then turns them into simple alerts for importers buying from China — by product category, origin country, destination country, and HTS code.
+                Enter your product details and HTS/HS code once. ClearPort monitors official U.S. trade sources and emails you when something relevant changes.
               </p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <Link to="/onboarding"><Button size="lg">Start Monitoring</Button></Link>
-                <Link to="/sample-alert"><Button size="lg" variant="outline">See Sample Alert</Button></Link>
+                <Link to="/onboarding"><Button size="lg">Start monitoring a product</Button></Link>
+                <Link to="/sample-alert"><Button size="lg" variant="outline">See a sample alert</Button></Link>
               </div>
               <p className="mt-5 text-sm text-muted-foreground">
                 Built for Amazon sellers, e-commerce brands, sourcing agents, and importers buying from China.
@@ -195,10 +195,10 @@ function Index() {
             Don't read 50-page notices manually.
           </h2>
           <p className="mt-3 text-muted-foreground">
-            Start monitoring U.S. import updates for your products in under 2 minutes.
+            Enter your product details once. Get emailed when official U.S. trade rules change.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
-            <Link to="/onboarding"><Button size="lg">Start Monitoring</Button></Link>
+            <Link to="/onboarding"><Button size="lg">Start monitoring a product</Button></Link>
             <Link to="/pricing"><Button size="lg" variant="outline">See pricing</Button></Link>
           </div>
         </div>

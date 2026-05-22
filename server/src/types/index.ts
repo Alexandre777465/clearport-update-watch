@@ -177,3 +177,16 @@ export interface AlertWithDetails extends Alert {
   source_document?: Partial<SourceDocument>;
   alert_matches?: AlertMatch[];
 }
+
+export interface WatchlistEntry {
+  id: string;
+  email: string;
+  product_name: string;
+  product_description?: string;
+  hts_code?: string;
+  origin_country: string;
+  destination_country: string;
+  alert_frequency: AlertFrequency;
+  last_alerted_at?: string;
+  created_at: string;
+}

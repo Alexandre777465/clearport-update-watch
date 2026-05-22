@@ -257,4 +257,46 @@ export async function updateNotificationPreferences(prefs: {
   }).catch(() => {});
 }
 
+// ── Watchlist (public — no auth required) ────────────────────────────────────
+
+export interface WatchlistPreviewDoc {
+  id: string;
+  title: string;
+  source_name: string;
+  source_url: string;
+  published_at: string;
+  plain_english_summary: string;
+  broker_questions: string[];
+  effective_date?: string;
+}
+
+export async function submitWatchlistEntry(data: {
+  email: string;
+  product_name: string;
+  product_description?: string;
+  hts_code?: string;
+  origin_country: string;
+  destination_country: string;
+  alert_frequency?: string;
+}): Promise<{ id: string; preview: WatchlistPreviewDoc[] }> {
+  if (!API_URL) {
+    // No backend configured — return a successful local placeholder so the
+    // confirmation screen still appears (email is obviously not persisted).
+    return { id: `local-${Date.now()}`, preview: [] };
+  }
+
+  const res = await fetch(`${API_URL}/api/public/watchlist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Watchlist ${res.status}: ${body}`);
+  }
+
+  return res.json() as Promise<{ id: string; preview: WatchlistPreviewDoc[] }>;
+}
+
 export { API_URL };
