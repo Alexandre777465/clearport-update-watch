@@ -257,6 +257,52 @@ export async function updateNotificationPreferences(prefs: {
   }).catch(() => {});
 }
 
+// ── Risk scan types (mirrors server/src/types/index.ts) ─────────────────────
+
+export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'N/A';
+
+export interface RiskCategory {
+  category: string;
+  level: RiskLevel;
+  explanation: string;
+  action: string;
+}
+
+export interface DocumentChecklistItem {
+  document: string;
+  required: boolean;
+  reason: string;
+  uploaded?: boolean;  // client-side state only
+}
+
+export interface ProductRiskScan {
+  id: string;
+  watchlist_entry_id: string;
+  overall_risk: 'Low' | 'Medium' | 'High' | 'Critical';
+  overall_summary: string;
+  risk_categories: RiskCategory[];
+  document_checklist: DocumentChecklistItem[];
+  broker_questions: string[];
+  supplier_questions: string[];
+  next_actions: string[];
+  readiness_score: number;
+  confidence_level: 'Low' | 'Medium' | 'High';
+  created_at: string;
+}
+
+export interface ProductAttributes {
+  is_children: boolean;
+  has_battery: boolean;
+  is_electronic: boolean;
+  is_textile: boolean;
+  is_cosmetic: boolean;
+  is_food_contact: boolean;
+  is_supplement: boolean;
+  sold_on_amazon: boolean;
+  sold_on_tiktok: boolean;
+  sold_in_eu: boolean;
+}
+
 // ── Watchlist (public — no auth required) ────────────────────────────────────
 
 export interface WatchlistPreviewDoc {
@@ -278,11 +324,15 @@ export async function submitWatchlistEntry(data: {
   origin_country: string;
   destination_country: string;
   alert_frequency?: string;
-}): Promise<{ id: string; preview: WatchlistPreviewDoc[] }> {
+} & Partial<ProductAttributes>): Promise<{
+  id: string;
+  preview: WatchlistPreviewDoc[];
+  risk_scan: ProductRiskScan | null;
+}> {
   if (!API_URL) {
-    // No backend configured — return a successful local placeholder so the
-    // confirmation screen still appears (email is obviously not persisted).
-    return { id: `local-${Date.now()}`, preview: [] };
+    // No backend configured — return a local placeholder.
+    // The frontend generates a mock risk scan client-side.
+    return { id: `local-${Date.now()}`, preview: [], risk_scan: null };
   }
 
   const res = await fetch(`${API_URL}/api/public/watchlist`, {
@@ -296,7 +346,11 @@ export async function submitWatchlistEntry(data: {
     throw new Error(`Watchlist ${res.status}: ${body}`);
   }
 
-  return res.json() as Promise<{ id: string; preview: WatchlistPreviewDoc[] }>;
+  return res.json() as Promise<{
+    id: string;
+    preview: WatchlistPreviewDoc[];
+    risk_scan: ProductRiskScan | null;
+  }>;
 }
 
 export { API_URL };

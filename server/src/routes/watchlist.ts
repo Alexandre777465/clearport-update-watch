@@ -1,12 +1,12 @@
 /**
  * Public watchlist endpoint — no authentication required.
- * Accepts an email + product details and creates a watchlist_entries row.
- * Returns a preview of recent matching source documents as an instant scan.
+ * Saves an email + product entry, generates an AI risk scan, and returns both.
  */
 
 import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/client';
+import { generateRiskScan } from '../services/riskScanner';
 
 const router = Router();
 
@@ -18,6 +18,17 @@ const watchlistSchema = z.object({
   origin_country: z.string().max(100).default('China'),
   destination_country: z.string().max(100).default('United States'),
   alert_frequency: z.enum(['instant', 'daily', 'weekly']).default('weekly'),
+  // Product attribute flags (used for risk scan generation)
+  is_children: z.boolean().default(false),
+  has_battery: z.boolean().default(false),
+  is_electronic: z.boolean().default(false),
+  is_textile: z.boolean().default(false),
+  is_cosmetic: z.boolean().default(false),
+  is_food_contact: z.boolean().default(false),
+  is_supplement: z.boolean().default(false),
+  sold_on_amazon: z.boolean().default(false),
+  sold_on_tiktok: z.boolean().default(false),
+  sold_in_eu: z.boolean().default(false),
 });
 
 // POST /api/public/watchlist
@@ -39,8 +50,18 @@ router.post('/', async (req, res) => {
       origin_country: data.origin_country.trim(),
       destination_country: data.destination_country.trim(),
       alert_frequency: data.alert_frequency,
+      is_children: data.is_children,
+      has_battery: data.has_battery,
+      is_electronic: data.is_electronic,
+      is_textile: data.is_textile,
+      is_cosmetic: data.is_cosmetic,
+      is_food_contact: data.is_food_contact,
+      is_supplement: data.is_supplement,
+      sold_on_amazon: data.sold_on_amazon,
+      sold_on_tiktok: data.sold_on_tiktok,
+      sold_in_eu: data.sold_in_eu,
     })
-    .select('id')
+    .select('*')
     .single();
 
   if (error || !entry) {
@@ -48,11 +69,36 @@ router.post('/', async (req, res) => {
     return res.status(500).json({ error: 'Failed to save your monitoring entry. Please try again.' });
   }
 
-  // Best-effort: return matching recent source documents as an instant scan preview.
-  // Errors here are swallowed — the entry is already saved.
-  const preview = await getMatchingDocuments(data.hts_code, data.origin_country);
+  // Run risk scan and source document preview in parallel
+  const [riskScanResult, previewDocs] = await Promise.all([
+    generateRiskScan(entry as any),
+    getMatchingDocuments(data.hts_code, data.origin_country),
+  ]);
 
-  return res.status(201).json({ id: entry.id, preview });
+  // Persist the risk scan if generated
+  let riskScan = null;
+  if (riskScanResult) {
+    const { data: savedScan } = await db
+      .from('product_risk_scans')
+      .insert({
+        watchlist_entry_id: entry.id,
+        overall_risk: riskScanResult.overall_risk,
+        overall_summary: riskScanResult.overall_summary,
+        risk_categories: riskScanResult.risk_categories,
+        document_checklist: riskScanResult.document_checklist,
+        broker_questions: riskScanResult.broker_questions,
+        supplier_questions: riskScanResult.supplier_questions,
+        next_actions: riskScanResult.next_actions,
+        readiness_score: riskScanResult.readiness_score,
+        confidence_level: riskScanResult.confidence_level,
+      })
+      .select('*')
+      .single();
+
+    riskScan = savedScan ?? { ...riskScanResult, id: 'unsaved', watchlist_entry_id: entry.id, created_at: new Date().toISOString() };
+  }
+
+  return res.status(201).json({ id: entry.id, preview: previewDocs, risk_scan: riskScan });
 });
 
 async function getMatchingDocuments(
@@ -61,8 +107,6 @@ async function getMatchingDocuments(
 ): Promise<unknown[]> {
   try {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
-    // Build OR filter: match on HTS code first, then origin country as fallback
     const conditions: string[] = [];
     if (htsCode) conditions.push(`affected_hts_codes.cs.{"${htsCode}"}`);
     conditions.push(`affected_origin_countries.cs.{"${originCountry}"}`);
