@@ -189,4 +189,45 @@ export interface WatchlistEntry {
   alert_frequency: AlertFrequency;
   last_alerted_at?: string;
   created_at: string;
+  // Product attribute flags (added in migration 003)
+  is_children: boolean;
+  has_battery: boolean;
+  is_electronic: boolean;
+  is_textile: boolean;
+  is_cosmetic: boolean;
+  is_food_contact: boolean;
+  is_supplement: boolean;
+  sold_on_amazon: boolean;
+  sold_on_tiktok: boolean;
+  sold_in_eu: boolean;
+}
+
+export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'N/A';
+
+export interface RiskCategory {
+  category: string;
+  level: RiskLevel;
+  explanation: string;
+  action: string;
+}
+
+export interface DocumentChecklistItem {
+  document: string;
+  required: boolean;
+  reason: string;
+}
+
+export interface ProductRiskScan {
+  id: string;
+  watchlist_entry_id: string;
+  overall_risk: 'Low' | 'Medium' | 'High' | 'Critical';
+  overall_summary: string;
+  risk_categories: RiskCategory[];
+  document_checklist: DocumentChecklistItem[];
+  broker_questions: string[];
+  supplier_questions: string[];
+  next_actions: string[];
+  readiness_score: number;
+  confidence_level: 'Low' | 'Medium' | 'High';
+  created_at: string;
 }
