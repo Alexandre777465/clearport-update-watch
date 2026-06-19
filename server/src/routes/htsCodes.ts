@@ -14,7 +14,7 @@ const HtsCodeSchema = z.object({
 
 // ── List monitored HTS codes ──────────────────────────────────────────────────
 htsCodesRouter.get('/', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
   const { data, error } = await db
     .from('monitored_hts_codes')
     .select('*')
@@ -26,7 +26,7 @@ htsCodesRouter.get('/', async (req, res) => {
 
 // ── Add HTS code ──────────────────────────────────────────────────────────────
 htsCodesRouter.post('/', async (req, res) => {
-  const { orgId, userId } = req as AuthedRequest;
+  const { orgId, userId } = req as unknown as AuthedRequest;
 
   const parsed = HtsCodeSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten() });
@@ -46,7 +46,7 @@ htsCodesRouter.post('/', async (req, res) => {
 
 // ── Delete HTS code ───────────────────────────────────────────────────────────
 htsCodesRouter.delete('/:id', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
   const { error } = await db
     .from('monitored_hts_codes')
     .delete()
@@ -58,7 +58,7 @@ htsCodesRouter.delete('/:id', async (req, res) => {
 
 // ── Recent alerts for a monitored HTS code ────────────────────────────────────
 htsCodesRouter.get('/:id/alerts', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
 
   const { data: hts } = await db
     .from('monitored_hts_codes')

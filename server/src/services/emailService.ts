@@ -2,7 +2,14 @@ import { Resend } from 'resend';
 import { db } from '../db/client';
 import type { Alert, EmailType, WatchlistEntry } from '../types';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy init — the server must start even when RESEND_API_KEY is not set
+// (emails are simply skipped until the key is configured).
+let resendClient: Resend | null = null;
+function getResend(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!resendClient) resendClient = new Resend(process.env.RESEND_API_KEY);
+  return resendClient;
+}
 const FROM = `${process.env.RESEND_FROM_NAME ?? 'ClearPort Alerts'} <${process.env.RESEND_FROM_EMAIL ?? 'alerts@clearport.io'}>`;
 const APP_URL = process.env.APP_URL ?? 'https://app.clearport.io';
 
@@ -108,6 +115,12 @@ async function sendEmail(opts: {
     return;
   }
 
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] RESEND_API_KEY not set — skipped "${opts.subject}" to ${opts.to}`);
+    return;
+  }
+
   try {
     await resend.emails.send({ from: FROM, to: opts.to, subject: opts.subject, html: opts.html });
 
@@ -186,6 +199,12 @@ async function sendWatchlistEntryAlert(entry: WatchlistEntry, since: string): Pr
       .from('watchlist_entries')
       .update({ last_alerted_at: new Date().toISOString() })
       .eq('id', entry.id);
+    return;
+  }
+
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[watchlist] RESEND_API_KEY not set — skipped alert to ${entry.email}`);
     return;
   }
 

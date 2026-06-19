@@ -7,7 +7,7 @@ export const alertsRouter = Router();
 // ── List alerts for the org ──────────────────────────────────────────────────
 // GET /api/alerts?page=1&limit=20&severity=high&match_type=direct_hts&is_read=false&search=
 alertsRouter.get('/', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
   const page    = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
   const limit   = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10)));
   const from    = (page - 1) * limit;
@@ -40,7 +40,7 @@ alertsRouter.get('/', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
 
   // Attach user-specific saved/dismissed flags
-  const { userId } = req as AuthedRequest;
+  const { userId } = req as unknown as AuthedRequest;
   const alertIds = (data ?? []).map((a: any) => a.id);
 
   const [{ data: saved }, { data: dismissed }] = await Promise.all([
@@ -65,7 +65,7 @@ alertsRouter.get('/', async (req, res) => {
 
 // ── Single alert ─────────────────────────────────────────────────────────────
 alertsRouter.get('/:id', async (req, res) => {
-  const { orgId, userId } = req as AuthedRequest;
+  const { orgId, userId } = req as unknown as AuthedRequest;
 
   const { data: alert, error } = await db
     .from('alerts')
@@ -90,7 +90,7 @@ alertsRouter.get('/:id', async (req, res) => {
 
 // ── Mark read ────────────────────────────────────────────────────────────────
 alertsRouter.patch('/:id/read', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
   const { error } = await db
     .from('alerts')
     .update({ is_read: true })
@@ -102,7 +102,7 @@ alertsRouter.patch('/:id/read', async (req, res) => {
 
 // ── Save alert ───────────────────────────────────────────────────────────────
 alertsRouter.post('/:id/save', async (req, res) => {
-  const { orgId, userId } = req as AuthedRequest;
+  const { orgId, userId } = req as unknown as AuthedRequest;
 
   // Verify alert belongs to org
   const { data: alert } = await db.from('alerts').select('id').eq('id', req.params.id).eq('organization_id', orgId).single();
@@ -118,7 +118,7 @@ alertsRouter.post('/:id/save', async (req, res) => {
 
 // ── Unsave alert ─────────────────────────────────────────────────────────────
 alertsRouter.delete('/:id/save', async (req, res) => {
-  const { userId } = req as AuthedRequest;
+  const { userId } = req as unknown as AuthedRequest;
   const { error } = await db.from('saved_alerts').delete().eq('alert_id', req.params.id).eq('user_id', userId);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
@@ -126,7 +126,7 @@ alertsRouter.delete('/:id/save', async (req, res) => {
 
 // ── Dismiss alert ────────────────────────────────────────────────────────────
 alertsRouter.post('/:id/dismiss', async (req, res) => {
-  const { orgId, userId } = req as AuthedRequest;
+  const { orgId, userId } = req as unknown as AuthedRequest;
 
   const { data: alert } = await db.from('alerts').select('id').eq('id', req.params.id).eq('organization_id', orgId).single();
   if (!alert) return res.status(404).json({ error: 'Alert not found' });
@@ -141,7 +141,7 @@ alertsRouter.post('/:id/dismiss', async (req, res) => {
 
 // ── Undismiss alert ──────────────────────────────────────────────────────────
 alertsRouter.delete('/:id/dismiss', async (req, res) => {
-  const { userId } = req as AuthedRequest;
+  const { userId } = req as unknown as AuthedRequest;
   const { error } = await db.from('dismissed_alerts').delete().eq('alert_id', req.params.id).eq('user_id', userId);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
@@ -149,7 +149,7 @@ alertsRouter.delete('/:id/dismiss', async (req, res) => {
 
 // ── Saved alerts list ────────────────────────────────────────────────────────
 alertsRouter.get('/saved/list', async (req, res) => {
-  const { userId } = req as AuthedRequest;
+  const { userId } = req as unknown as AuthedRequest;
   const { data, error } = await db
     .from('saved_alerts')
     .select('*, alert:alerts(*, source_document:source_documents(id, title, source_name, published_at))')

@@ -18,7 +18,7 @@ const ProductSchema = z.object({
 
 // ── List products ─────────────────────────────────────────────────────────────
 productsRouter.get('/', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
   const { data, error } = await db
     .from('monitored_products')
     .select('*')
@@ -30,7 +30,7 @@ productsRouter.get('/', async (req, res) => {
 
 // ── Get product ───────────────────────────────────────────────────────────────
 productsRouter.get('/:id', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
   const { data, error } = await db
     .from('monitored_products')
     .select('*')
@@ -43,7 +43,7 @@ productsRouter.get('/:id', async (req, res) => {
 
 // ── Create product ────────────────────────────────────────────────────────────
 productsRouter.post('/', async (req, res) => {
-  const { orgId, userId } = req as AuthedRequest;
+  const { orgId, userId } = req as unknown as AuthedRequest;
 
   const parsed = ProductSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten() });
@@ -59,7 +59,7 @@ productsRouter.post('/', async (req, res) => {
 
 // ── Update product ────────────────────────────────────────────────────────────
 productsRouter.put('/:id', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
 
   const parsed = ProductSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten() });
@@ -77,7 +77,7 @@ productsRouter.put('/:id', async (req, res) => {
 
 // ── Delete product ────────────────────────────────────────────────────────────
 productsRouter.delete('/:id', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
   const { error } = await db
     .from('monitored_products')
     .delete()
@@ -89,7 +89,7 @@ productsRouter.delete('/:id', async (req, res) => {
 
 // ── Recent alerts for a product ───────────────────────────────────────────────
 productsRouter.get('/:id/alerts', async (req, res) => {
-  const { orgId } = req as AuthedRequest;
+  const { orgId } = req as unknown as AuthedRequest;
 
   // Verify ownership
   const { data: product } = await db
