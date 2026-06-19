@@ -106,7 +106,7 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
   try {
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2500,
+      max_tokens: 4096,
       system: [
         { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
       ],
