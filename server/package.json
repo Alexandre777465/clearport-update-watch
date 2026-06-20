@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "ClearPort — U.S. import-rule monitoring backend",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
