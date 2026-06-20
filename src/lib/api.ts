@@ -19,7 +19,15 @@ import {
   type SourceStatus,
 } from "./mock";
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
+// Production backend (public URL — NOT a secret). Used as the default when a
+// production build does not provide VITE_API_URL. An explicit VITE_API_URL
+// always wins, so local dev can point elsewhere or stay on mock data (empty).
+const PROD_API_URL = "https://clearport-update-watch-production.up.railway.app";
+
+const API_URL = (
+  (import.meta.env.VITE_API_URL as string | undefined)?.trim() ||
+  (import.meta.env.PROD ? PROD_API_URL : "")
+).replace(/\/+$/, "");
 
 // ── Low-level fetch wrapper ──────────────────────────────────────────────────
 
