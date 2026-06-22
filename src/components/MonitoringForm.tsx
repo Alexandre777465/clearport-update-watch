@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   submitWatchlistEntry,
+  pollScanResult,
   type WatchlistPreviewDoc,
   type ProductRiskScan,
   type ProductAttributes,
@@ -399,6 +400,9 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     Array<{ key: keyof ProductAttributes; label: string }> | null
   >(null);
   const [inferredAccept, setInferredAccept] = useState<Record<string, boolean>>({});
+  // Async-scan failure state + the attributes to retry with.
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [retryAttrs, setRetryAttrs] = useState<ProductAttributes | null>(null);
 
   const set =
     (field: keyof FormState) =>
@@ -420,15 +424,13 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     return Object.keys(errs).length === 0;
   };
 
-  // Runs the actual save + scan with a final, confirmed set of attributes.
+  // Runs the save (fast) then polls for the async scan result.
   const runScan = async (finalAttrs: ProductAttributes) => {
     setAttrs(finalAttrs);
+    setRetryAttrs(finalAttrs);
     setPendingInferred(null);
+    setScanError(null);
     setLoadingStage("saving");
-
-    // Small delay so "saving" stage is visible before the longer scan step
-    await new Promise((r) => setTimeout(r, 600));
-    setLoadingStage("scanning");
 
     try {
       const result = await submitWatchlistEntry({
@@ -443,8 +445,27 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         ...finalAttrs,
       });
 
-      // Use API scan if returned, otherwise generate client-side mock
-      const riskScan = result.risk_scan ?? generateMockRiskScan(form, finalAttrs);
+      let riskScan: ProductRiskScan;
+
+      if (result.scan_status === "local") {
+        // No backend — generate the mock scan client-side.
+        riskScan = generateMockRiskScan(form, finalAttrs);
+      } else {
+        // Scan runs asynchronously on the backend; poll until ready.
+        setLoadingStage("scanning");
+        const polled = await pollScanResult(result.id);
+        if (polled.status === "ready" && polled.scan) {
+          riskScan = polled.scan;
+        } else {
+          setScanError(
+            polled.status === "failed"
+              ? "We couldn't complete the risk scan. Your product was saved — please try again."
+              : "The scan is taking longer than usual. Your product was saved — please try again.",
+          );
+          setLoadingStage(null);
+          return;
+        }
+      }
 
       setConfirmed({
         email: form.email.trim(),
@@ -455,11 +476,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         destination: form.destination.trim() || "United States",
         preview: result.preview ?? [],
         riskScan,
-        isLocal: result.id.startsWith("local-"),
+        isLocal: result.scan_status === "local",
         emailEnabled: result.email_enabled,
       });
     } catch {
-      setErrors({ email: "Something went wrong. Please try again." });
+      setScanError("Something went wrong saving your product. Please try again.");
     } finally {
       setLoadingStage(null);
     }
@@ -489,6 +510,28 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
 
   if (confirmed) {
     return <ConfirmationView confirmed={confirmed} />;
+  }
+
+  if (scanError) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <Card className="p-6 text-center sm:p-8">
+          <p className="font-semibold text-foreground">Scan not completed</p>
+          <p className="mt-2 text-sm text-muted-foreground">{scanError}</p>
+          <div className="mt-5 flex justify-center gap-2">
+            <Button
+              onClick={() => retryAttrs && void runScan(retryAttrs)}
+              disabled={!retryAttrs}
+            >
+              Try again
+            </Button>
+            <Button variant="outline" onClick={() => setScanError(null)}>
+              Back to edit
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   if (pendingInferred) {
@@ -576,8 +619,9 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           Start monitoring a product
         </Heading>
         <p className="mt-2 text-sm text-muted-foreground">
-          We'll monitor official U.S. trade sources and alert you by email when a
-          relevant customs, tariff, or regulatory update may affect your product.
+          We'll scan your product against official U.S. trade sources and check
+          for relevant customs, tariff, and regulatory risks. We'll save it to
+          your monitoring list so you can track it over time.
         </p>
       </div>
 

@@ -1,6 +1,10 @@
 /**
  * Public watchlist endpoint — no authentication required.
- * Saves an email + product entry, generates an AI risk scan, and returns both.
+ *
+ * Saves the entry and returns IMMEDIATELY with a scan_status of "pending", then
+ * runs the Anthropic risk scan in the background. The frontend polls
+ * GET /api/public/scan/:id until status is "ready" or "failed". This avoids
+ * holding a 30–45s HTTP request open (which proxies aborted with HTTP 499).
  */
 
 import { Router } from 'express';
@@ -49,17 +53,51 @@ router.post('/', async (req, res) => {
   }
 
   const data = parsed.data;
+  const email = data.email.toLowerCase().trim();
+  const productName = data.product_name.trim();
+  const htsCode = data.hts_code?.trim() || null;
+  const origin = data.origin_country.trim();
+
+  // ── Dedupe retries ──────────────────────────────────────────────────────────
+  // If the same email submitted the same product+origin+HTS in the last 10
+  // minutes, reuse that entry instead of creating a duplicate row. This makes
+  // a client retry (e.g. after an aborted request) idempotent.
+  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: existing } = await db
+    .from('watchlist_entries')
+    .select('id')
+    .eq('email', email)
+    .eq('product_name', productName)
+    .eq('origin_country', origin)
+    .eq('hts_code', htsCode as any)
+    .gte('created_at', tenMinAgo)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const previewDocs = await getMatchingDocuments(data.hts_code);
+
+  if (existing) {
+    return res.status(200).json({
+      id: existing.id,
+      preview: previewDocs,
+      scan_status: 'pending',
+      email_enabled: emailAlertsEnabled(),
+      deduped: true,
+    });
+  }
 
   const { data: entry, error } = await db
     .from('watchlist_entries')
     .insert({
-      email: data.email.toLowerCase().trim(),
-      product_name: data.product_name.trim(),
+      email,
+      product_name: productName,
       product_description: data.product_description?.trim() ?? null,
-      hts_code: data.hts_code?.trim() ?? null,
-      origin_country: data.origin_country.trim(),
+      hts_code: htsCode,
+      origin_country: origin,
       destination_country: data.destination_country.trim(),
       alert_frequency: data.alert_frequency,
+      scan_status: 'pending',
       is_children: data.is_children,
       has_battery: data.has_battery,
       is_electronic: data.is_electronic,
@@ -79,43 +117,61 @@ router.post('/', async (req, res) => {
     return res.status(500).json({ error: 'Failed to save your monitoring entry. Please try again.' });
   }
 
-  // Fetch the relevant official documents FIRST, then ground the scan in them.
-  const previewDocs = await getMatchingDocuments(data.hts_code);
-  const riskScanResult = await generateRiskScan(entry as any, {
-    documents: previewDocs as any,
-    estimatedValueUsd: data.estimated_value_usd,
-  });
-
-  // Persist the risk scan if generated
-  let riskScan = null;
-  if (riskScanResult) {
-    const { data: savedScan } = await db
-      .from('product_risk_scans')
-      .insert({
-        watchlist_entry_id: entry.id,
-        overall_risk: riskScanResult.overall_risk,
-        overall_summary: riskScanResult.overall_summary,
-        risk_categories: riskScanResult.risk_categories,
-        document_checklist: riskScanResult.document_checklist,
-        broker_questions: riskScanResult.broker_questions,
-        supplier_questions: riskScanResult.supplier_questions,
-        next_actions: riskScanResult.next_actions,
-        readiness_score: riskScanResult.readiness_score,
-        confidence_level: riskScanResult.confidence_level,
-      })
-      .select('*')
-      .single();
-
-    riskScan = savedScan ?? { ...riskScanResult, id: 'unsaved', watchlist_entry_id: entry.id, created_at: new Date().toISOString() };
-  }
+  // Kick off the scan in the background — do NOT await. Respond immediately.
+  void runScanInBackground(entry, previewDocs, data.estimated_value_usd);
 
   return res.status(201).json({
     id: entry.id,
     preview: previewDocs,
-    risk_scan: riskScan,
+    scan_status: 'pending',
     email_enabled: emailAlertsEnabled(),
   });
 });
+
+// Runs the Anthropic scan after the response has been sent, then persists the
+// result and updates scan_status. Errors are recorded, never thrown.
+async function runScanInBackground(
+  entry: any,
+  previewDocs: unknown[],
+  estimatedValueUsd?: number,
+): Promise<void> {
+  try {
+    const result = await generateRiskScan(entry, {
+      documents: previewDocs as any,
+      estimatedValueUsd,
+    });
+
+    if (!result) {
+      // No API key (or transient null) — mark failed so the client stops polling.
+      await db
+        .from('watchlist_entries')
+        .update({ scan_status: 'failed', scan_error: 'Scan unavailable' })
+        .eq('id', entry.id);
+      return;
+    }
+
+    await db.from('product_risk_scans').insert({
+      watchlist_entry_id: entry.id,
+      overall_risk: result.overall_risk,
+      overall_summary: result.overall_summary,
+      risk_categories: result.risk_categories,
+      document_checklist: result.document_checklist,
+      broker_questions: result.broker_questions,
+      supplier_questions: result.supplier_questions,
+      next_actions: result.next_actions,
+      readiness_score: result.readiness_score,
+      confidence_level: result.confidence_level,
+    });
+
+    await db.from('watchlist_entries').update({ scan_status: 'ready' }).eq('id', entry.id);
+  } catch (err: any) {
+    console.error(`[watchlist] Background scan failed for ${entry.id}:`, err?.message);
+    await db
+      .from('watchlist_entries')
+      .update({ scan_status: 'failed', scan_error: err?.message ?? 'Unknown error' })
+      .eq('id', entry.id);
+  }
+}
 
 // Returns recent official documents that are genuinely relevant to THIS
 // product, judged by HTS code only. A document is never included merely

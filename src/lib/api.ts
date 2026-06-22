@@ -339,6 +339,21 @@ export interface WatchlistPreviewDoc {
   effective_date?: string;
 }
 
+export type ScanStatus = "pending" | "ready" | "failed" | "local";
+
+// fetch with an abort timeout so a single request can't hang forever.
+async function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Creates the watchlist entry and returns immediately. The scan runs
+// asynchronously on the backend; poll fetchScanResult() for the result.
 export async function submitWatchlistEntry(data: {
   email: string;
   product_name: string;
@@ -351,20 +366,23 @@ export async function submitWatchlistEntry(data: {
 } & Partial<ProductAttributes>): Promise<{
   id: string;
   preview: WatchlistPreviewDoc[];
-  risk_scan: ProductRiskScan | null;
   email_enabled: boolean;
+  scan_status: ScanStatus;
 }> {
   if (!API_URL) {
-    // No backend configured — return a local placeholder.
-    // The frontend generates a mock risk scan client-side.
-    return { id: `local-${Date.now()}`, preview: [], risk_scan: null, email_enabled: false };
+    // No backend configured — the frontend generates a mock risk scan.
+    return { id: `local-${Date.now()}`, preview: [], email_enabled: false, scan_status: "local" };
   }
 
-  const res = await fetch(`${API_URL}/api/public/watchlist`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
+  const res = await fetchWithTimeout(
+    `${API_URL}/api/public/watchlist`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    },
+    30_000, // the POST now returns quickly (no scan inline)
+  );
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -374,10 +392,56 @@ export async function submitWatchlistEntry(data: {
   const json = (await res.json()) as {
     id: string;
     preview: WatchlistPreviewDoc[];
-    risk_scan: ProductRiskScan | null;
     email_enabled?: boolean;
+    scan_status?: ScanStatus;
   };
-  return { ...json, email_enabled: json.email_enabled ?? false };
+  return {
+    id: json.id,
+    preview: json.preview ?? [],
+    email_enabled: json.email_enabled ?? false,
+    scan_status: json.scan_status ?? "pending",
+  };
+}
+
+// Polls a single scan-status read.
+export async function fetchScanResult(entryId: string): Promise<{
+  status: ScanStatus;
+  scan: ProductRiskScan | null;
+  error?: string;
+}> {
+  const res = await fetchWithTimeout(`${API_URL}/api/public/scan/${entryId}`, {}, 20_000);
+  if (!res.ok) {
+    return { status: "pending", scan: null };
+  }
+  const json = (await res.json()) as {
+    status: ScanStatus;
+    scan?: ProductRiskScan;
+    error?: string;
+  };
+  return { status: json.status, scan: json.scan ?? null, error: json.error };
+}
+
+// Polls until the scan is ready/failed or the budget is exhausted.
+export async function pollScanResult(
+  entryId: string,
+  opts: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<{ status: ScanStatus; scan: ProductRiskScan | null; error?: string }> {
+  const intervalMs = opts.intervalMs ?? 3_000;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const deadline = Date.now() + timeoutMs;
+
+  // initial small delay — the scan takes a few seconds minimum
+  await new Promise((r) => setTimeout(r, 1_500));
+
+  while (Date.now() < deadline) {
+    const r = await fetchScanResult(entryId).catch(() => ({
+      status: "pending" as ScanStatus,
+      scan: null,
+    }));
+    if (r.status === "ready" || r.status === "failed") return r;
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  return { status: "pending", scan: null, error: "timeout" };
 }
 
 export { API_URL };

@@ -9,8 +9,22 @@ import { db } from '../db/client';
 const router = Router();
 
 // GET /api/public/scan/:entryId
+// Status-aware so the frontend can poll an async scan:
+//   { status: 'ready',   scan }   — scan completed and saved
+//   { status: 'pending' }         — still running
+//   { status: 'failed',  error }  — scan errored
 router.get('/:entryId', async (req, res) => {
   const { entryId } = req.params;
+
+  const { data: entry } = await db
+    .from('watchlist_entries')
+    .select('id, scan_status, scan_error')
+    .eq('id', entryId)
+    .maybeSingle();
+
+  if (!entry) {
+    return res.status(404).json({ error: 'No entry found' });
+  }
 
   const { data: scan, error } = await db
     .from('product_risk_scans')
@@ -24,11 +38,12 @@ router.get('/:entryId', async (req, res) => {
     return res.status(500).json({ error: 'Failed to retrieve scan' });
   }
 
-  if (!scan) {
-    return res.status(404).json({ error: 'No scan found for this entry' });
+  if (scan) {
+    return res.json({ status: 'ready', scan });
   }
 
-  return res.json(scan);
+  const status = entry.scan_status === 'failed' ? 'failed' : 'pending';
+  return res.json({ status, error: entry.scan_error ?? undefined });
 });
 
 // GET /api/public/scan/:entryId/documents
