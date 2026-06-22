@@ -17,7 +17,6 @@ import {
   type DocumentChecklistItem,
   API_URL,
 } from "@/lib/api";
-import { alerts as mockAlerts } from "@/lib/mock";
 import { RiskScanCard, riskColor } from "@/components/RiskScanCard";
 import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
@@ -63,6 +62,7 @@ interface ConfirmedState {
   preview: WatchlistPreviewDoc[];
   riskScan: ProductRiskScan;
   isLocal: boolean;
+  emailEnabled: boolean;
 }
 
 // ── Mock risk scan (client-side fallback when API not connected) ───────────────
@@ -328,6 +328,49 @@ const ATTR_QUESTIONS: Array<{ key: keyof ProductAttributes; label: string }> = [
   { key: "sold_in_eu",     label: "Also selling in the EU" },
 ];
 
+// ── Attribute inference ───────────────────────────────────────────────────────
+// Conservative keyword map: infers obvious product attributes from the name and
+// description so we can flag likely-missed ones (e.g. a "water bottle" is almost
+// certainly food-contact). Inference NEVER silently overrides the user — it only
+// surfaces a confirmation step. Keep keywords tight to avoid false positives.
+
+const INFERENCE_RULES: Array<{
+  key: keyof ProductAttributes;
+  label: string;
+  keywords: string[];
+}> = [
+  { key: "is_food_contact", label: "Touches food or drink",
+    keywords: ["water bottle", "bottle", "tumbler", "flask", "thermos", "mug", "cup",
+      "drinkware", "drinking", "food", "plate", "bowl", "cutlery", "utensil",
+      "straw", "lunchbox", "lunch box", "kettle", "sippy"] },
+  { key: "is_children", label: "For children under 12",
+    keywords: ["kids", "kid", "child", "children", "toddler", "baby", "infant",
+      "nursery", "toy"] },
+  { key: "has_battery", label: "Contains a battery",
+    keywords: ["battery", "rechargeable", "li-ion", "lithium", "power bank", "cordless"] },
+  { key: "is_electronic", label: "Electronic product",
+    keywords: ["bluetooth", "wifi", "wi-fi", "usb", "charger", "speaker", "earbud",
+      "headphone", "camera", "sensor", "electronic"] },
+  { key: "is_textile", label: "Textile / apparel",
+    keywords: ["shirt", "apparel", "clothing", "fabric", "textile", "cotton",
+      "polyester", "garment", "sock", "hoodie", "jacket", "dress", "towel"] },
+  { key: "is_cosmetic", label: "Cosmetic / beauty / personal care",
+    keywords: ["cosmetic", "cream", "lotion", "serum", "makeup", "lipstick",
+      "shampoo", "skincare", "beauty", "fragrance", "perfume"] },
+  { key: "is_supplement", label: "Supplement / food / medical-adjacent",
+    keywords: ["supplement", "vitamin", "protein", "probiotic", "capsule", "gummies"] },
+];
+
+function inferAttributes(
+  name: string,
+  description: string,
+): Array<{ key: keyof ProductAttributes; label: string }> {
+  const text = `${name} ${description}`.toLowerCase();
+  return INFERENCE_RULES
+    .filter((rule) => rule.keywords.some((kw) => text.includes(kw)))
+    .map(({ key, label }) => ({ key, label }));
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "h2" }) {
@@ -343,6 +386,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   const [errors, setErrors] = useState<Partial<FormState>>({});
   const [loadingStage, setLoadingStage] = useState<null | "saving" | "scanning">(null);
   const [confirmed, setConfirmed] = useState<ConfirmedState | null>(null);
+  // Inferred attributes awaiting user confirmation before the scan runs.
+  const [pendingInferred, setPendingInferred] = useState<
+    Array<{ key: keyof ProductAttributes; label: string }> | null
+  >(null);
+  const [inferredAccept, setInferredAccept] = useState<Record<string, boolean>>({});
 
   const set =
     (field: keyof FormState) =>
@@ -364,10 +412,10 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-
+  // Runs the actual save + scan with a final, confirmed set of attributes.
+  const runScan = async (finalAttrs: ProductAttributes) => {
+    setAttrs(finalAttrs);
+    setPendingInferred(null);
     setLoadingStage("saving");
 
     // Small delay so "saving" stage is visible before the longer scan step
@@ -383,11 +431,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         origin_country: form.originCountry.trim() || "China",
         destination_country: form.destination.trim() || "United States",
         alert_frequency: "weekly",
-        ...attrs,
+        ...finalAttrs,
       });
 
       // Use API scan if returned, otherwise generate client-side mock
-      const riskScan = result.risk_scan ?? generateMockRiskScan(form, attrs);
+      const riskScan = result.risk_scan ?? generateMockRiskScan(form, finalAttrs);
 
       setConfirmed({
         email: form.email.trim(),
@@ -399,6 +447,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         preview: result.preview ?? [],
         riskScan,
         isLocal: result.id.startsWith("local-"),
+        emailEnabled: result.email_enabled,
       });
     } catch {
       setErrors({ email: "Something went wrong. Please try again." });
@@ -407,12 +456,105 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    // Infer obvious attributes the user did not select. If any conflict with an
+    // unchecked box, pause and ask the user to confirm before scanning.
+    const missed = inferAttributes(form.productName, form.description).filter(
+      (r) => !attrs[r.key],
+    );
+    if (missed.length > 0) {
+      setPendingInferred(missed);
+      setInferredAccept(Object.fromEntries(missed.map((m) => [m.key, true])));
+      return;
+    }
+
+    await runScan(attrs);
+  };
+
   if (loadingStage) {
     return <ScanningState stage={loadingStage} productName={form.productName} />;
   }
 
   if (confirmed) {
     return <ConfirmationView confirmed={confirmed} />;
+  }
+
+  if (pendingInferred) {
+    const proceed = () => {
+      const merged = { ...attrs };
+      for (const item of pendingInferred) {
+        if (inferredAccept[item.key]) merged[item.key] = true;
+      }
+      void runScan(merged);
+    };
+    return (
+      <div className="mx-auto max-w-xl">
+        <Card className="p-6 sm:p-8">
+          <div className="mb-4 flex items-start gap-3">
+            <ScanSearch className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <div>
+              <h3 className="font-semibold">Quick check before we scan</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Based on your product name and description, these characteristics
+                look likely but weren't selected. Confirm the ones that apply —
+                they change which compliance requirements we check.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {pendingInferred.map((item) => {
+              const checked = inferredAccept[item.key];
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() =>
+                    setInferredAccept((s) => ({ ...s, [item.key]: !s[item.key] }))
+                  }
+                  className={`flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-left text-sm transition-colors ${
+                    checked
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border bg-background text-muted-foreground hover:border-primary/40"
+                  }`}
+                >
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      checked ? "border-primary bg-primary text-white" : "border-slate-300"
+                    }`}
+                  >
+                    {checked ? "✓" : ""}
+                  </span>
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+            <Button onClick={proceed} size="lg" className="flex-1">
+              <ScanSearch className="mr-2 h-4 w-4" />
+              Run analysis
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              onClick={() => setPendingInferred(null)}
+            >
+              Back to edit
+            </Button>
+          </div>
+          <p className="mt-3 text-center text-xs text-muted-foreground">
+            We never change your answers without asking. Uncheck anything that
+            doesn't apply.
+          </p>
+        </Card>
+      </div>
+    );
   }
 
   const Heading = headingAs;
@@ -611,15 +753,6 @@ function ScanningState({
 function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
   const { riskScan } = confirmed;
   const hasLivePreview = confirmed.preview.length > 0;
-  const mockFallback = mockAlerts
-    .filter(
-      (a) =>
-        (confirmed.htsCode && a.htsCodes.includes(confirmed.htsCode)) ||
-        a.originCountries.some(
-          (c) => c.toLowerCase() === confirmed.originCountry.toLowerCase(),
-        ),
-    )
-    .slice(0, 3);
 
   return (
     <div className="space-y-8">
@@ -628,16 +761,28 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         <div className="flex gap-3">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
           <div>
-            <p className="font-semibold text-green-900">Monitoring started.</p>
+            <p className="font-semibold text-green-900">
+              {confirmed.isLocal ? "Risk scan generated." : "Product saved for monitoring."}
+            </p>
             <p className="mt-1 text-sm text-green-800">
-              We'll monitor official U.S. trade sources and email{" "}
-              <strong>{confirmed.email}</strong> when a relevant update may affect{" "}
-              <strong>{confirmed.productName}</strong>.
+              {confirmed.emailEnabled ? (
+                <>
+                  We'll monitor official U.S. trade sources and email{" "}
+                  <strong>{confirmed.email}</strong> when a relevant update may affect{" "}
+                  <strong>{confirmed.productName}</strong>.
+                </>
+              ) : (
+                <>
+                  <strong>{confirmed.productName}</strong> has been saved for
+                  monitoring. Email alerts are not yet active — your risk scan is
+                  ready below.
+                </>
+              )}
             </p>
             {confirmed.isLocal && !API_URL && (
               <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
                 ⚠️ Backend not connected — entry not persisted. Set{" "}
-                <code>VITE_API_URL</code> to enable real email alerts.
+                <code>VITE_API_URL</code> to connect the live backend.
               </p>
             )}
           </div>
@@ -706,26 +851,28 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         />
       </section>
 
-      {/* Recent alerts */}
-      {(hasLivePreview || mockFallback.length > 0) && (
-        <section>
-          <h3 className="mb-2 font-semibold">
-            {hasLivePreview
-              ? "Recent updates that may affect your product"
-              : "Example updates from monitored sources"}
-          </h3>
-          <p className="mb-4 text-sm text-muted-foreground">
-            {hasLivePreview
-              ? "Found in the last 30 days."
-              : "These show the kind of updates ClearPort monitors."}
-          </p>
-          <div className="space-y-4">
-            {hasLivePreview
-              ? confirmed.preview.map((doc) => <LivePreviewCard key={doc.id} doc={doc} />)
-              : mockFallback.map((a) => <MockAlertCard key={a.id} alert={a} />)}
-          </div>
-        </section>
-      )}
+      {/* Recent official updates — only real, HTS-relevant documents are shown.
+          No example/mock government updates in production. */}
+      <section>
+        <h3 className="mb-2 font-semibold">Recent official updates</h3>
+        {hasLivePreview ? (
+          <>
+            <p className="mb-4 text-sm text-muted-foreground">
+              Official publications from the last 30 days relevant to your HTS code.
+            </p>
+            <div className="space-y-4">
+              {confirmed.preview.map((doc) => (
+                <LivePreviewCard key={doc.id} doc={doc} />
+              ))}
+            </div>
+          </>
+        ) : (
+          <Card className="p-5 text-sm text-muted-foreground">
+            No relevant official updates found for this product in the last 30 days.
+            ClearPort will alert you here when a relevant update is published.
+          </Card>
+        )}
+      </section>
 
       {/* Human review upsell */}
       <section>
@@ -777,23 +924,3 @@ function LivePreviewCard({ doc }: { doc: WatchlistPreviewDoc }) {
   );
 }
 
-function MockAlertCard({ alert }: { alert: (typeof mockAlerts)[0] }) {
-  return (
-    <Card className="p-5">
-      <p className="font-semibold leading-snug">{alert.title}</p>
-      <p className="mt-0.5 text-xs text-muted-foreground">
-        {alert.source} · {alert.publicationDate}
-        {alert.effectiveDate !== "TBD" ? ` · Effective ${alert.effectiveDate}` : ""}
-      </p>
-      {alert.summary && <p className="mt-3 text-sm text-muted-foreground">{alert.summary}</p>}
-      {alert.brokerQuestions?.length > 0 && (
-        <div className="mt-4 rounded-md bg-slate-50 p-3 text-xs">
-          <p className="mb-1 font-medium text-foreground">What to ask your customs broker</p>
-          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
-            {alert.brokerQuestions.slice(0, 3).map((q) => <li key={q}>{q}</li>)}
-          </ul>
-        </div>
-      )}
-    </Card>
-  );
-}

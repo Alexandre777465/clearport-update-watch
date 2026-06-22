@@ -336,11 +336,12 @@ export async function submitWatchlistEntry(data: {
   id: string;
   preview: WatchlistPreviewDoc[];
   risk_scan: ProductRiskScan | null;
+  email_enabled: boolean;
 }> {
   if (!API_URL) {
     // No backend configured — return a local placeholder.
     // The frontend generates a mock risk scan client-side.
-    return { id: `local-${Date.now()}`, preview: [], risk_scan: null };
+    return { id: `local-${Date.now()}`, preview: [], risk_scan: null, email_enabled: false };
   }
 
   const res = await fetch(`${API_URL}/api/public/watchlist`, {
@@ -354,11 +355,13 @@ export async function submitWatchlistEntry(data: {
     throw new Error(`Watchlist ${res.status}: ${body}`);
   }
 
-  return res.json() as Promise<{
+  const json = (await res.json()) as {
     id: string;
     preview: WatchlistPreviewDoc[];
     risk_scan: ProductRiskScan | null;
-  }>;
+    email_enabled?: boolean;
+  };
+  return { ...json, email_enabled: json.email_enabled ?? false };
 }
 
 export { API_URL };

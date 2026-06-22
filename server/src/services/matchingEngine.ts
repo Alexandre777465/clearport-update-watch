@@ -77,6 +77,18 @@ function htsMatch(a: string, b: string): boolean {
   return longer.startsWith(shorter);
 }
 
+// Public, defensible HTS relevance check used by the watchlist preview.
+// Reuses the same digit-prefix logic as htsMatch, but requires the shared
+// prefix to be at least heading-level (4 digits) so that a broad code like
+// "96" or a chapter cannot match an unrelated product. Returns false unless
+// both codes carry at least 4 significant digits.
+export function htsCodesRelated(a: string, b: string): boolean {
+  const na = (a ?? '').replace(/[^0-9]/g, '');
+  const nb = (b ?? '').replace(/[^0-9]/g, '');
+  if (na.length < 4 || nb.length < 4) return false;
+  return htsMatch(na, nb);
+}
+
 function categoriesOverlap(docCats: string[], productCats: string[]): boolean {
   if (docCats.length === 0 || productCats.length === 0) return false;
   const docLower = docCats.map((c) => c.toLowerCase());

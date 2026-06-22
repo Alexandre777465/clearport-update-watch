@@ -74,7 +74,9 @@ export function ReadinessScore({
 }) {
   const items = getReadinessItems(scan, htsCode);
   const done = items.filter((i) => i.done).length;
-  const score = scan.readiness_score;
+  // Derive the percentage from the same checklist that drives "X of Y complete"
+  // so the headline number and the count can never contradict each other.
+  const score = items.length ? Math.round((done / items.length) * 100) : 0;
   const highPriorityMissing = items.filter((i) => i.priority && !i.done);
 
   return (

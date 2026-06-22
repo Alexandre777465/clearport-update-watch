@@ -7,6 +7,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/client';
 import { generateRiskScan } from '../services/riskScanner';
+import { htsCodesRelated } from '../services/matchingEngine';
+
+// Email is only truthfully "active" when a Resend key is present AND alerts
+// are enabled. The frontend uses this to avoid promising emails it can't send.
+function emailAlertsEnabled(): boolean {
+  return Boolean(process.env.RESEND_API_KEY) && process.env.ENABLE_EMAIL_ALERTS === 'true';
+}
 
 const router = Router();
 
@@ -72,7 +79,7 @@ router.post('/', async (req, res) => {
   // Run risk scan and source document preview in parallel
   const [riskScanResult, previewDocs] = await Promise.all([
     generateRiskScan(entry as any),
-    getMatchingDocuments(data.hts_code, data.origin_country),
+    getMatchingDocuments(data.hts_code),
   ]);
 
   // Persist the risk scan if generated
@@ -98,31 +105,46 @@ router.post('/', async (req, res) => {
     riskScan = savedScan ?? { ...riskScanResult, id: 'unsaved', watchlist_entry_id: entry.id, created_at: new Date().toISOString() };
   }
 
-  return res.status(201).json({ id: entry.id, preview: previewDocs, risk_scan: riskScan });
+  return res.status(201).json({
+    id: entry.id,
+    preview: previewDocs,
+    risk_scan: riskScan,
+    email_enabled: emailAlertsEnabled(),
+  });
 });
 
-async function getMatchingDocuments(
-  htsCode: string | undefined,
-  originCountry: string,
-): Promise<unknown[]> {
+// Returns recent official documents that are genuinely relevant to THIS
+// product, judged by HTS code only. A document is never included merely
+// because it shares an origin country (that produced unrelated AD/CVD
+// notices in earlier tests). If no HTS code is provided, or no document's
+// affected HTS codes are related to it, an empty list is returned and the
+// frontend shows a "no relevant updates" message.
+async function getMatchingDocuments(htsCode: string | undefined): Promise<unknown[]> {
+  const normalized = (htsCode ?? '').replace(/[^0-9]/g, '');
+  if (normalized.length < 4) return []; // need at least heading-level to match defensibly
+
   try {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const conditions: string[] = [];
-    if (htsCode) conditions.push(`affected_hts_codes.cs.{"${htsCode}"}`);
-    conditions.push(`affected_origin_countries.cs.{"${originCountry}"}`);
 
+    // Pull recent processed documents that carry at least one HTS code, then
+    // confirm relevance in JS using the shared, guarded prefix matcher.
     const { data } = await db
       .from('source_documents')
       .select(
-        'id, title, source_name, source_url, published_at, plain_english_summary, broker_questions, effective_date',
+        'id, title, source_name, source_url, published_at, plain_english_summary, broker_questions, effective_date, affected_hts_codes',
       )
       .eq('is_processed', true)
       .gte('published_at', since)
-      .or(conditions.join(','))
       .order('published_at', { ascending: false })
-      .limit(5);
+      .limit(100);
 
-    return data ?? [];
+    const relevant = (data ?? []).filter((doc: any) =>
+      Array.isArray(doc.affected_hts_codes) &&
+      doc.affected_hts_codes.some((code: string) => htsCodesRelated(code, htsCode!)),
+    );
+
+    // Strip the helper field before returning to the client.
+    return relevant.slice(0, 5).map(({ affected_hts_codes, ...rest }: any) => rest);
   } catch {
     return [];
   }

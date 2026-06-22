@@ -39,34 +39,23 @@ const REVIEWS = [
   },
 ];
 
-export function HumanReviewCta({ productName }: { productName: string }) {
-  const handleRequest = (reviewType: string, price: string) => {
-    // TODO: wire to payment flow (Stripe or similar) and create
-    // a human_review_requests row in Supabase
-    alert(
-      `Human review request for "${productName}" (${reviewType} · ${price})\n\n` +
-        "This feature is coming soon. The database table is ready — " +
-        "connect a payment provider to activate."
-    );
-  };
-
+export function HumanReviewCta(_props: { productName: string }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Want a human expert to verify this assessment?
+        Want a human expert to verify this assessment? Paid expert reviews are
+        launching soon.
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
-        {REVIEWS.map(({ icon: Icon, title, price, description, badge, reviewType }) => (
-          <Card key={reviewType} className="p-4">
+        {REVIEWS.map(({ icon: Icon, title, price, description, reviewType }) => (
+          <Card key={reviewType} className="p-4 opacity-75">
             <div className="flex items-start justify-between gap-2">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                 <Icon className="h-4 w-4" />
               </div>
-              {badge && (
-                <Badge variant="outline" className="text-xs border-blue-200 bg-blue-50 text-blue-700">
-                  {badge}
-                </Badge>
-              )}
+              <Badge variant="outline" className="text-xs">
+                Coming soon
+              </Badge>
             </div>
             <p className="mt-3 font-semibold text-sm">{title}</p>
             <p className="mt-1 text-xs text-muted-foreground">{description}</p>
@@ -74,9 +63,9 @@ export function HumanReviewCta({ productName }: { productName: string }) {
               variant="outline"
               size="sm"
               className="mt-4 w-full"
-              onClick={() => handleRequest(reviewType, price)}
+              disabled
             >
-              Request — {price}
+              {price} — Coming soon
             </Button>
           </Card>
         ))}
