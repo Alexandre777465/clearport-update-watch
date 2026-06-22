@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { db } from '../db/client';
 import { generateRiskScan } from '../services/riskScanner';
 import { htsCodesRelated } from '../services/matchingEngine';
+import { evaluateBaselines } from '../services/baselines';
 
 // Email is only truthfully "active" when a Resend key is present AND alerts
 // are enabled. The frontend uses this to avoid promising emails it can't send.
@@ -136,9 +137,13 @@ async function runScanInBackground(
   estimatedValueUsd?: number,
 ): Promise<void> {
   try {
+    // Deterministic, source-backed baselines first (USITC HTS + curated registry).
+    const baselineCategories = await evaluateBaselines(entry, estimatedValueUsd).catch(() => []);
+
     const result = await generateRiskScan(entry, {
       documents: previewDocs as any,
       estimatedValueUsd,
+      baselineCategories,
     });
 
     if (!result) {

@@ -61,6 +61,10 @@ export interface ScanDocument {
 export interface ScanOptions {
   documents?: ScanDocument[];
   estimatedValueUsd?: number;
+  // Deterministic, source-backed categories computed in code (Stage 3). These
+  // are authoritative: they are merged in and take precedence over any model
+  // category with the same name, and only THEY may be "verified_applicable".
+  baselineCategories?: RiskCategory[];
 }
 
 export async function generateRiskScan(
@@ -188,7 +192,8 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
     const json = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
     const parsed = JSON.parse(json) as ScanResult;
 
-    return sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
+    const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
+    return mergeBaselines(sanitized, opts.baselineCategories ?? []);
   } catch (err: any) {
     console.error('[riskScanner] Failed to generate scan:', err.message);
     return null;
@@ -243,4 +248,21 @@ function sanitizeAndPrice(
   });
 
   return { ...scan, risk_categories: categories };
+}
+
+// Merge deterministic baseline categories with the model's. Baselines are
+// authoritative: a model category with the same name is dropped in favor of the
+// baseline one. Baselines (the only source of "verified_applicable") are listed
+// first, ordered by risk.
+function mergeBaselines(scan: ScanResult, baselines: RiskCategory[]): ScanResult {
+  if (!baselines.length) return scan;
+  const baseNames = new Set(baselines.map((b) => b.category.toLowerCase()));
+  const modelExtras = (scan.risk_categories ?? []).filter(
+    (c) => !baseNames.has(c.category.toLowerCase()),
+  );
+  const order: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3, 'N/A': 4 };
+  const merged = [...baselines, ...modelExtras].sort(
+    (a, b) => (order[a.level] ?? 5) - (order[b.level] ?? 5),
+  );
+  return { ...scan, risk_categories: merged };
 }
