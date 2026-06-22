@@ -287,21 +287,29 @@ export async function updateNotificationPreferences(prefs: {
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'N/A';
 
 export interface SourceCitation {
+  agency: string;
   name: string;
   title: string;
-  published_at: string;
+  cfr_citation?: string;
+  published_at?: string;
   effective_date?: string;
+  last_verified_at?: string;
   url: string;
   why_relevant: string;
 }
+
+export type VerificationStatus =
+  | "verified_applicable"
+  | "official_unconfirmed"
+  | "no_verified_source";
 
 export interface RiskCategory {
   category: string;
   level: RiskLevel;
   explanation: string;
   action: string;
-  // Phase 2 source-grounding (optional; present only when grounded)
-  verified?: boolean;
+  verification_status?: VerificationStatus;
+  applicability_conditions?: string;
   what_changed?: string;
   verified_rate_pct?: number | null;
   financial_impact?: string;

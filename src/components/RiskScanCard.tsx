@@ -1,7 +1,28 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { ProductRiskScan, RiskLevel } from "@/lib/api";
+import type { ProductRiskScan, RiskLevel, VerificationStatus } from "@/lib/api";
 import { AlertTriangle, CheckCircle2, ExternalLink, Info, ShieldAlert, ShieldCheck } from "lucide-react";
+
+// Three honest verification statuses (Stage 2).
+function statusBadge(status?: VerificationStatus): { label: string; className: string } {
+  switch (status) {
+    case "verified_applicable":
+      return {
+        label: "Verified applicable",
+        className: "border-green-200 bg-green-50 text-green-700",
+      };
+    case "official_unconfirmed":
+      return {
+        label: "Official requirement — applicability needs confirmation",
+        className: "border-amber-200 bg-amber-50 text-amber-800",
+      };
+    default:
+      return {
+        label: "No verified source found",
+        className: "border-slate-200 bg-slate-50 text-slate-500",
+      };
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,19 +114,18 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                     <Badge variant="outline" className={`text-xs ${riskColor(cat.level as RiskLevel)}`}>
                       {cat.level}
                     </Badge>
-                    {cat.verified && cat.source ? (
-                      <Badge variant="outline" className="text-xs border-green-200 bg-green-50 text-green-700">
-                        ✓ Verified against official source
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-xs border-slate-200 bg-slate-50 text-slate-500">
-                        General guidance — not verified against a current source
-                      </Badge>
-                    )}
+                    {(() => {
+                      const sb = statusBadge(cat.verification_status);
+                      return (
+                        <Badge variant="outline" className={`text-xs ${sb.className}`}>
+                          {sb.label}
+                        </Badge>
+                      );
+                    })()}
                   </div>
 
-                  {/* 1. What changed (verified only) */}
-                  {cat.verified && cat.what_changed && (
+                  {/* 1. What changed (sourced items only) */}
+                  {cat.what_changed && (
                     <p className="mt-2 text-xs">
                       <span className="font-semibold text-foreground">What changed: </span>
                       <span className="text-muted-foreground">{cat.what_changed}</span>
@@ -117,6 +137,14 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                     <span className="font-semibold text-foreground">How it affects this product: </span>
                     <span className="text-muted-foreground">{cat.explanation}</span>
                   </p>
+
+                  {/* Applicability conditions (when the rule is sourced but unconfirmed) */}
+                  {cat.applicability_conditions && cat.verification_status !== "no_verified_source" && (
+                    <p className="mt-1.5 text-xs">
+                      <span className="font-semibold text-foreground">Applies when: </span>
+                      <span className="text-muted-foreground">{cat.applicability_conditions}</span>
+                    </p>
+                  )}
 
                   {/* 3. Estimated financial impact (only when computed from a verified rate) */}
                   {cat.financial_impact && (
@@ -132,17 +160,24 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                     <span className="text-muted-foreground">{cat.action}</span>
                   </p>
 
-                  {/* 5. Official source (verified only) */}
-                  {cat.verified && cat.source && (
-                    <div className="mt-2.5 rounded-md border border-green-100 bg-green-50/50 p-2.5 text-xs">
+                  {/* 5. Official source (when present) */}
+                  {cat.source && (
+                    <div className="mt-2.5 rounded-md border border-slate-200 bg-slate-50/60 p-2.5 text-xs">
                       <p className="font-medium text-foreground">Official source</p>
                       <p className="mt-0.5 text-muted-foreground">
+                        {cat.source.agency ? `${cat.source.agency} · ` : ""}
                         {cat.source.name} — {cat.source.title}
                       </p>
+                      {cat.source.cfr_citation && (
+                        <p className="mt-0.5 text-muted-foreground">Citation: {cat.source.cfr_citation}</p>
+                      )}
                       <p className="mt-0.5 text-muted-foreground">
-                        Published {cat.source.published_at?.slice(0, 10)}
+                        {cat.source.published_at ? `Published ${cat.source.published_at.slice(0, 10)}` : ""}
                         {cat.source.effective_date
-                          ? ` · Effective ${cat.source.effective_date.slice(0, 10)}`
+                          ? ` · Effective/rev ${cat.source.effective_date.slice(0, 10)}`
+                          : ""}
+                        {cat.source.last_verified_at
+                          ? ` · Last verified ${cat.source.last_verified_at.slice(0, 10)}`
                           : ""}
                       </p>
                       {cat.source.why_relevant && (

@@ -28,16 +28,21 @@ Never guarantee clearance or compliance.
 SOURCE-GROUNDING RULES (critical):
 - You are given a list of RELEVANT OFFICIAL DOCUMENTS. They are the ONLY acceptable basis for any \
 statement about a CURRENT tariff rate, a rule change, a publication date, or an effective date.
-- If a current rate / rule / date is supported by one of those documents, mark that risk category \
-"verified": true, fill in "source" with that document's details, and set "what_changed". You may set \
-"verified_rate_pct" to the numeric percentage ONLY if the document explicitly states it.
-- If you do NOT have a supplying document for a current rate/rule/date, you MUST NOT state one. Mark the \
-category "verified": false and leave "source" null and "verified_rate_pct" null. Standing requirements \
-(e.g. "lithium batteries require UN 38.3 testing") are allowed as general guidance with "verified": false.
-- NEVER invent a rate, a citation, a date, a document title, or applicability. When unsure, say so and \
-mark it unverified.
-- Do not compute dollar amounts. Provide only "verified_rate_pct" when supported; dollar impact is \
-calculated separately.
+- Each risk category MUST carry a "verification_status" of exactly one of:
+    "official_unconfirmed" — a real official document (from the supplied list) backs this requirement, \
+but you cannot confirm from the given product facts that it definitely applies. Fill "source" and \
+"applicability_conditions" (the exact product facts that WOULD make it apply).
+    "no_verified_source" — no supplied document backs this. Do NOT state a current rate/rule/date. \
+Leave "source" null. Use this for standing requirements you cannot cite from the supplied documents.
+- Do NOT output "verified_applicable" yourself — that status is assigned only by ClearPort's verified \
+baseline system, never by you.
+- "verified_rate_pct" may be set ONLY if a supplied document explicitly states the numeric rate.
+- NEVER invent a rate, citation, date, document title, agency, or applicability condition. When unsure, \
+use "no_verified_source".
+- Always name the correct responsible authority in source.agency (e.g. lithium battery TRANSPORT rules \
+are DOT/PHMSA + UN, not CPSC; children's product safety is CPSC; food contact is FDA; RF devices FCC; \
+fuel/emissions EPA). Do not force a requirement under the wrong agency.
+- Do not compute dollar amounts. Provide only "verified_rate_pct" when supported.
 
 Respond ONLY with valid JSON — no markdown, no code fences, no explanation outside the JSON object.`;
 
@@ -114,8 +119,9 @@ Return this exact JSON (no markdown, no code fences):
       "level": "Low|Medium|High|Critical|N/A",
       "explanation": "2-3 sentences in plain English: how this affects THIS product",
       "action": "Specific action this importer should take now",
-      "verified": false,
-      "what_changed": "Only when verified: what the official document changed",
+      "verification_status": "official_unconfirmed | no_verified_source",
+      "applicability_conditions": "Exact product facts that make this rule apply (e.g. 'contains a lithium-ion cell shipped by air')",
+      "what_changed": "Only when a document backs it: what that document changed",
       "verified_rate_pct": null,
       "source": null
     }
@@ -130,12 +136,12 @@ Return this exact JSON (no markdown, no code fences):
   "confidence_level": "Low|Medium|High"
 }
 
-For any risk_category that IS supported by a document above, set:
-  "verified": true,
+For any risk_category that IS supported by a supplied document, set:
+  "verification_status": "official_unconfirmed",
   "what_changed": "<what that document changed>",
   "verified_rate_pct": <number or null — only if the doc states a rate>,
-  "source": { "name": "<source_name>", "title": "<title>", "published_at": "<published_at>", "effective_date": "<effective_date or omit>", "url": "<url>", "why_relevant": "<one sentence>" }
-For every other category set "verified": false, "source": null, "verified_rate_pct": null.
+  "source": { "agency": "<responsible authority, e.g. USTR/CBP/USITC>", "name": "<source_name>", "title": "<title>", "cfr_citation": "<CFR/statute if present, else omit>", "published_at": "<published_at>", "effective_date": "<effective_date or omit>", "url": "<url>", "why_relevant": "<one sentence>" }
+For every other category set "verification_status": "no_verified_source", "source": null, "verified_rate_pct": null.
 
 RISK CATEGORIES to include (only include what is relevant — skip truly inapplicable ones):
 1. Tariff Risk — always include
@@ -203,30 +209,36 @@ function sanitizeAndPrice(
   const categories: RiskCategory[] = (scan.risk_categories ?? []).map((cat) => {
     const c: RiskCategory = { ...cat };
 
-    // A category can only stay "verified" if it cites a document we actually
-    // supplied. Otherwise downgrade to general guidance and drop the source.
-    const hasValidSource = !!c.source && typeof c.source.url === 'string' && allowedUrls.has(c.source.url);
-    if (!c.verified || !hasValidSource) {
-      c.verified = false;
-      c.source = undefined;
-      c.what_changed = undefined;
-      c.verified_rate_pct = null;
-      c.financial_impact = undefined;
+    // Enforce the three-status contract in code. The model may only propose
+    // "official_unconfirmed" (and must cite a supplied document) or
+    // "no_verified_source". "verified_applicable" is reserved for the baseline
+    // system (Stage 3) and is never accepted from the model here.
+    const hasValidSource =
+      !!c.source && typeof c.source.url === 'string' && allowedUrls.has(c.source.url);
+
+    if (c.verification_status === 'official_unconfirmed' && hasValidSource) {
+      // Keep as official-but-unconfirmed; compute $ only from a verified rate.
+      const pct = typeof c.verified_rate_pct === 'number' ? c.verified_rate_pct : null;
+      if (pct != null && value != null) {
+        const amount = Math.round((value * pct) / 100);
+        c.financial_impact = `~$${amount.toLocaleString('en-US')} on a $${value.toLocaleString(
+          'en-US',
+        )} shipment (${pct}% per ${c.source!.name})`;
+      } else if (pct != null) {
+        c.financial_impact = `~${pct}% of customs value (per ${c.source!.name}) — add an estimated shipment value to see the dollar impact`;
+      } else {
+        c.financial_impact = undefined;
+      }
       return c;
     }
 
-    // Verified: compute a dollar figure only from the verified rate.
-    const pct = typeof c.verified_rate_pct === 'number' ? c.verified_rate_pct : null;
-    if (pct != null && value != null) {
-      const amount = Math.round((value * pct) / 100);
-      c.financial_impact = `~$${amount.toLocaleString('en-US')} on a $${value.toLocaleString(
-        'en-US',
-      )} shipment (${pct}% per ${c.source!.name})`;
-    } else if (pct != null) {
-      c.financial_impact = `~${pct}% of customs value (per ${c.source!.name}) — add an estimated shipment value to see the dollar impact`;
-    } else {
-      c.financial_impact = undefined;
-    }
+    // Everything else collapses to "no verified source" — no citation, no rate,
+    // no dollar figure, no unsupported "what changed".
+    c.verification_status = 'no_verified_source';
+    c.source = undefined;
+    c.what_changed = undefined;
+    c.verified_rate_pct = null;
+    c.financial_impact = undefined;
     return c;
   });
 

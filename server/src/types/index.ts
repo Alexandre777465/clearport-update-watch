@@ -205,26 +205,40 @@ export interface WatchlistEntry {
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'N/A';
 
 export interface SourceCitation {
-  name: string;          // e.g. "Federal Register – USTR Notices"
-  title: string;         // document title
-  published_at: string;  // ISO date
-  effective_date?: string;
+  agency: string;        // responsible authority, e.g. "CPSC", "FDA", "DOT/PHMSA", "USTR", "USITC"
+  name: string;          // publication/source name
+  title: string;         // document or regulation title
+  cfr_citation?: string; // e.g. "16 CFR 1303" or statute, when available
+  published_at?: string; // ISO date
+  effective_date?: string; // effective date or current revision date
+  last_verified_at?: string; // when ClearPort last verified this citation
   url: string;
-  why_relevant: string;  // one sentence: why this doc affects THIS product
+  why_relevant: string;  // one sentence: why this source affects THIS product
 }
+
+// Three honest statuses (replaces the old binary verified flag):
+//  verified_applicable  — official source is current AND the submitted product
+//                         facts clearly satisfy its applicability conditions.
+//  official_unconfirmed — the rule is real & sourced, but product facts /
+//                         classification are insufficient to confirm it applies.
+//  no_verified_source   — no official source backs this; do not guess.
+export type VerificationStatus =
+  | 'verified_applicable'
+  | 'official_unconfirmed'
+  | 'no_verified_source';
 
 export interface RiskCategory {
   category: string;
   level: RiskLevel;
   explanation: string;   // "how it affects this product"
   action: string;        // "required action"
-  // ── Phase 2 source-grounding (all optional; stored inside the existing
-  // risk_categories JSONB — no schema migration). A category is "verified"
-  // only when grounded in a supplied official document.
-  verified?: boolean;
-  what_changed?: string;            // 5-part: what changed (verified only)
+  // ── Source-grounding (stored inside the existing risk_categories JSONB —
+  // no schema migration).
+  verification_status?: VerificationStatus;
+  applicability_conditions?: string; // exact product conditions that make it apply
+  what_changed?: string;             // what changed (sourced items)
   verified_rate_pct?: number | null; // numeric rate taken from a source, if any
-  financial_impact?: string;        // computed in code from a verified rate
+  financial_impact?: string;         // computed in code from a verified rate
   source?: SourceCitation;
 }
 
