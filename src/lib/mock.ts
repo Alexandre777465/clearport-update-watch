@@ -147,81 +147,63 @@ export const alerts: Alert[] = [
   },
 ];
 
-export type SourceStatus = {
-  name: string;
-  type: string;
-  lastChecked: string;
-  lastUpdate: string;
-  frequency: string;
-  status: "Active" | "Needs attention";
-  url: string;
-};
+// Live source health (from GET /api/public/sources). No mock data — the
+// sources page shows only real backend health, or "Status unavailable".
+export type SourceHealth =
+  | "Active"
+  | "Degraded"
+  | "Error"
+  | "Never checked"
+  | "Unavailable";
 
-export const sources: SourceStatus[] = [
+// Static, factual list of the official sources ClearPort monitors. Used by the
+// marketing homepage. Contains NO timestamps or live status (that lives on the
+// authenticated /sources page, read from the backend) — only what each source
+// is and where to verify it. This is descriptive, not a health claim.
+export const officialSources: { name: string; type: string; url: string }[] = [
   {
-    name: "CBP CSMS messages",
-    type: "Customs operational messages",
-    lastChecked: "2 hours ago",
-    lastUpdate: "2026-05-12 — Textile labeling reminder",
-    frequency: "Hourly",
-    status: "Active",
-    url: "https://www.cbp.gov/trade/automated/cargo-systems-messaging-service",
-  },
-  {
-    name: "CBP RSS trade feeds",
-    type: "Trade news and bulletins",
-    lastChecked: "1 hour ago",
-    lastUpdate: "2026-05-11 — Trade news update",
-    frequency: "Hourly",
-    status: "Active",
-    url: "https://www.cbp.gov/newsroom/rss",
-  },
-  {
-    name: "CBP Federal Register notices",
-    type: "Rulemaking and notices",
-    lastChecked: "5 hours ago",
-    lastUpdate: "2026-05-10 — Notice of rulemaking",
-    frequency: "Daily",
-    status: "Active",
+    name: "Federal Register — CBP",
+    type: "Customs rules & notices (official API)",
     url: "https://www.federalregister.gov/agencies/u-s-customs-and-border-protection",
   },
   {
-    name: "Customs Bulletin and Decisions",
-    type: "Rulings and revocations",
-    lastChecked: "Today",
-    lastUpdate: "2026-04-28 — NY ruling N123456 revoked",
-    frequency: "Weekly",
-    status: "Active",
-    url: "https://www.cbp.gov/trade/rulings",
+    name: "Federal Register — USTR",
+    type: "Section 301 & trade actions (official API)",
+    url: "https://www.federalregister.gov/agencies/trade-representative-office-of-united-states",
   },
   {
-    name: "USTR Section 301 actions",
-    type: "Tariff actions and exclusions",
-    lastChecked: "3 hours ago",
-    lastUpdate: "2026-05-12 — Exclusion list modified",
-    frequency: "Daily",
-    status: "Active",
-    url: "https://ustr.gov/",
+    name: "Federal Register — USITC",
+    type: "Trade Commission notices (official API)",
+    url: "https://www.federalregister.gov/agencies/international-trade-commission",
   },
   {
-    name: "USITC HTS updates",
-    type: "Tariff schedule revisions",
-    lastChecked: "Today",
-    lastUpdate: "2026-05-05 — HTS Revision 3 published",
-    frequency: "On publication",
-    status: "Active",
+    name: "U.S. Customs and Border Protection",
+    type: "CBP newsroom RSS",
+    url: "https://www.cbp.gov/newsroom",
+  },
+  {
+    name: "USITC Harmonized Tariff Schedule",
+    type: "HTS classifications & duty rates",
     url: "https://hts.usitc.gov/",
   },
   {
-    name: "Federal Register trade notices",
-    type: "Proclamations and trade notices",
-    lastChecked: "1 day ago",
-    lastUpdate: "2026-05-04 — Presidential proclamation",
-    frequency: "On publication",
-    status: "Needs attention",
-    url: "https://www.federalregister.gov/",
+    name: "USTR Section 301",
+    type: "Tariff actions & exclusions",
+    url: "https://ustr.gov/issue-areas/enforcement/section-301-investigations",
   },
 ];
+
+export type SourceStatus = {
+  name: string;
+  type: string;
+  lastChecked: string;        // real relative time, or "Never"
+  lastSuccessfulSync: string; // real relative time, or "Never"
+  frequency: string;          // real interval derived from check_interval_minutes
+  status: SourceHealth;
+  error?: string | null;
+  url: string;
+};
+
 
 export type SavedProduct = {
   id: string;

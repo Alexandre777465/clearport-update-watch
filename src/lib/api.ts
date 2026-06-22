@@ -13,7 +13,6 @@ import { getAccessToken } from "./supabase";
 import {
   alerts as mockAlerts,
   savedProducts as mockProducts,
-  sources as mockSources,
   type Alert,
   type SavedProduct,
   type SourceStatus,
@@ -123,34 +122,52 @@ function mapProduct(raw: Record<string, unknown>): SavedProduct {
 }
 
 function mapSource(raw: Record<string, unknown>): SourceStatus {
-  const healthy =
-    raw.status === "healthy" || raw.status === "never_checked";
   const feedType = raw.feed_type as string;
   const typeLabel =
     feedType === "rss"
-      ? "Trade news RSS"
+      ? "Official RSS feed"
       : feedType === "api"
-        ? "Federal Register API"
-        : "Official page";
+        ? "Official API (Federal Register)"
+        : "Official web page";
+
+  // Map backend health to a truthful display status — no invented "Active".
+  const backend = raw.status as string;
+  const statusMap: Record<string, SourceStatus["status"]> = {
+    healthy: "Active",
+    degraded: "Degraded",
+    error: "Error",
+    never_checked: "Never checked",
+    unavailable: "Unavailable",
+  };
+  const status = statusMap[backend] ?? "Never checked";
 
   const lastChecked = raw.last_checked_at
     ? formatRelative(raw.last_checked_at as string)
     : "Never";
+  const lastSuccessfulSync = raw.last_successful_sync_at
+    ? formatRelative(raw.last_successful_sync_at as string)
+    : "Never";
 
-  const latestTitle = raw.latest_alert_title as string | null;
-  const latestAt = raw.latest_alert_at as string | null;
-  const lastUpdate =
-    latestTitle && latestAt
-      ? `${latestAt.slice(0, 10)} — ${latestTitle}`
-      : latestTitle ?? "No updates yet";
+  const mins = (raw.check_interval_minutes as number) ?? 0;
+  const frequency =
+    status === "Unavailable"
+      ? "Not scheduled"
+      : mins >= 1440
+        ? `Every ${Math.round(mins / 1440)} day(s)`
+        : mins >= 60
+          ? `Every ${Math.round(mins / 60)} hour(s)`
+          : mins > 0
+            ? `Every ${mins} min`
+            : "Ongoing";
 
   return {
     name: raw.name as string,
     type: typeLabel,
     lastChecked,
-    lastUpdate,
-    frequency: "Ongoing",
-    status: healthy ? "Active" : "Needs attention",
+    lastSuccessfulSync,
+    frequency,
+    status,
+    error: (raw.recent_error as string) ?? null,
     url: raw.url as string,
   };
 }
@@ -237,14 +254,14 @@ export async function deleteProductRemote(id: string): Promise<void> {
   await apiFetch(`/api/products/${id}`, { method: "DELETE" });
 }
 
+// Live source health only. No mock fallback — if the backend is unreachable
+// this throws and the UI shows "Status unavailable" rather than fake data.
 export async function fetchSources(): Promise<SourceStatus[]> {
-  if (!API_URL) return mockSources;
-  try {
-    const { data } = await apiFetch<{ data: unknown[] }>("/api/sources/status");
-    return data.map((r) => mapSource(r as Record<string, unknown>));
-  } catch {
-    return mockSources;
-  }
+  if (!API_URL) throw new Error("source-status-unavailable");
+  const res = await fetch(`${API_URL}/api/public/sources`);
+  if (!res.ok) throw new Error(`Sources ${res.status}`);
+  const { data } = (await res.json()) as { data: unknown[] };
+  return data.map((r) => mapSource(r as Record<string, unknown>));
 }
 
 export async function fetchNotificationPreferences() {

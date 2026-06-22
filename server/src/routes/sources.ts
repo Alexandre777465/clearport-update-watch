@@ -4,6 +4,19 @@ import { getSourceStatuses } from '../services/sourceStatus';
 
 export const sourcesRouter = Router();
 
+// Public, read-only source health. No auth — the marketing/status page reads
+// this so it can show live, truthful status (including deactivated feeds as
+// 'unavailable') instead of falling back to mock data.
+export const publicSourcesRouter = Router();
+publicSourcesRouter.get('/', async (_req, res) => {
+  try {
+    const statuses = await getSourceStatuses(true); // include inactive (e.g. CSMS)
+    res.json({ data: statuses, checked_at: new Date().toISOString() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Source status overview ────────────────────────────────────────────────────
 // GET /api/sources/status
 sourcesRouter.get('/status', async (_req, res) => {

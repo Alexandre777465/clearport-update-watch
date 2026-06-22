@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MarketingNav, MarketingFooter } from "@/components/MarketingNav";
 import { MonitoringFormBlock } from "@/components/MonitoringForm";
-import { sources, alerts, relevanceClass } from "@/lib/mock";
+import { officialSources, alerts, relevanceClass } from "@/lib/mock";
 import {
   FileText, Search, Clock, Flag, MessageCircle,
   Languages, Target, BookCheck, ListChecks, Mail, ShieldCheck, ExternalLink,
@@ -198,21 +198,20 @@ function Index() {
             the source yourself.
           </p>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {sources.map((s) => (
+            {officialSources.map((s) => (
               <Card key={s.name} className="p-5">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-semibold">{s.name}</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{s.type}</p>
-                  </div>
-                  <Badge variant="secondary" className="text-xs">
-                    {s.frequency}
-                  </Badge>
+                <div>
+                  <h3 className="font-semibold">{s.name}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{s.type}</p>
                 </div>
-                <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
-                  Last checked: {s.lastChecked}
-                </div>
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  Visit official source <ExternalLink className="h-3 w-3" />
+                </a>
               </Card>
             ))}
           </div>
@@ -233,7 +232,7 @@ function Index() {
           <ul className="mx-auto mt-8 grid max-w-2xl gap-2 text-left text-sm text-muted-foreground sm:grid-cols-2">
             {[
               "Source-backed summaries",
-              "Last-checked dates",
+              "Live source-health status",
               "Official references",
               "Broker verification prompts",
               "Cautious relevance matching",

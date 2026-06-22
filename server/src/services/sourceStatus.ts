@@ -7,26 +7,45 @@ export interface FeedStatus {
   url: string;
   feed_type: string;
   is_active: boolean;
+  check_interval_minutes: number;
   last_checked_at: string | null;
   last_successful_sync_at: string | null;
   latest_alert_title: string | null;
   latest_alert_at: string | null;
   recent_error: string | null;
-  status: 'healthy' | 'degraded' | 'error' | 'never_checked';
+  status: 'healthy' | 'degraded' | 'error' | 'never_checked' | 'unavailable';
 }
 
-export async function getSourceStatuses(): Promise<FeedStatus[]> {
-  const { data: feeds } = await db
-    .from('source_feeds')
-    .select('*')
-    .eq('is_active', true)
-    .order('name');
+// includeInactive: when true, deactivated feeds are returned with status
+// 'unavailable' (used by the public status page so it can honestly show, e.g.,
+// CSMS as deactivated rather than hiding it or faking health).
+export async function getSourceStatuses(includeInactive = false): Promise<FeedStatus[]> {
+  const base = db.from('source_feeds').select('*').order('name');
+  const { data: feeds } = includeInactive ? await base : await base.eq('is_active', true);
 
   if (!feeds?.length) return [];
 
   const statuses: FeedStatus[] = [];
 
   for (const feed of feeds as SourceFeed[]) {
+    if (!feed.is_active) {
+      statuses.push({
+        id: feed.id,
+        name: feed.name,
+        url: feed.url,
+        feed_type: feed.feed_type,
+        is_active: false,
+        check_interval_minutes: feed.check_interval_minutes,
+        last_checked_at: feed.last_checked_at ?? null,
+        last_successful_sync_at: feed.last_successful_sync_at ?? null,
+        latest_alert_title: null,
+        latest_alert_at: null,
+        recent_error: null,
+        status: 'unavailable',
+      });
+      continue;
+    }
+
     const { data: latestLog } = await db
       .from('source_check_logs')
       .select('status, error_message, checked_at')
@@ -51,6 +70,7 @@ export async function getSourceStatuses(): Promise<FeedStatus[]> {
       url: feed.url,
       feed_type: feed.feed_type,
       is_active: feed.is_active,
+      check_interval_minutes: feed.check_interval_minutes,
       last_checked_at: feed.last_checked_at ?? null,
       last_successful_sync_at: feed.last_successful_sync_at ?? null,
       latest_alert_title: (latestDoc as any)?.title ?? null,

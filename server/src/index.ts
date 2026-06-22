@@ -6,7 +6,7 @@ import { startScheduler } from './cron/scheduler';
 import { alertsRouter } from './routes/alerts';
 import { productsRouter } from './routes/products';
 import { htsCodesRouter } from './routes/htsCodes';
-import { sourcesRouter } from './routes/sources';
+import { sourcesRouter, publicSourcesRouter } from './routes/sources';
 import { askRouter } from './routes/ask';
 import { notificationsRouter } from './routes/notifications';
 import { watchlistRouter } from './routes/watchlist';
@@ -30,6 +30,8 @@ app.get('/api/health', (_req, res) => {
 });
 app.use('/api/public/watchlist', watchlistRouter);
 app.use('/api/public/scan', scanRouter);
+
+app.use('/api/public/sources', publicSourcesRouter);
 
 // ── Admin (token-guarded inside the router) ───────────────────────────────────
 app.use('/api/admin', adminRouter);
