@@ -317,7 +317,7 @@ INSERT INTO source_feeds (name, source_name, url, feed_type, check_interval_minu
   (
     'CBP Trade RSS Feed',
     'U.S. Customs and Border Protection',
-    'https://www.cbp.gov/trade/rss',
+    'https://www.cbp.gov/rss.xml',
     'rss', 30
   ),
   (
@@ -329,19 +329,19 @@ INSERT INTO source_feeds (name, source_name, url, feed_type, check_interval_minu
   (
     'Federal Register – CBP Notices',
     'Federal Register / U.S. Customs and Border Protection',
-    'https://www.federalregister.gov/api/v1/documents.json?conditions%5Bagencies%5D%5B%5D=customs-border-protection&conditions%5Btype%5D%5B%5D=RULE&conditions%5Btype%5D%5B%5D=NOTICE&per_page=20&order=newest',
+    'https://www.federalregister.gov/api/v1/documents.json?conditions%5Bagencies%5D%5B%5D=u-s-customs-and-border-protection&conditions%5Btype%5D%5B%5D=RULE&conditions%5Btype%5D%5B%5D=NOTICE&per_page=20&order=newest&fields%5B%5D=title&fields%5B%5D=publication_date&fields%5B%5D=html_url&fields%5B%5D=abstract&fields%5B%5D=document_number&fields%5B%5D=effective_on',
     'api', 360
   ),
   (
     'Federal Register – USTR Notices',
     'Federal Register / Office of the U.S. Trade Representative',
-    'https://www.federalregister.gov/api/v1/documents.json?conditions%5Bagencies%5D%5B%5D=office-of-the-united-states-trade-representative&conditions%5Btype%5D%5B%5D=RULE&conditions%5Btype%5D%5B%5D=NOTICE&per_page=20&order=newest',
+    'https://www.federalregister.gov/api/v1/documents.json?conditions%5Bagencies%5D%5B%5D=trade-representative-office-of-united-states&conditions%5Btype%5D%5B%5D=RULE&conditions%5Btype%5D%5B%5D=NOTICE&per_page=20&order=newest&fields%5B%5D=title&fields%5B%5D=publication_date&fields%5B%5D=html_url&fields%5B%5D=abstract&fields%5B%5D=document_number&fields%5B%5D=effective_on',
     'api', 360
   ),
   (
     'Federal Register – ITC Notices',
     'Federal Register / U.S. International Trade Commission',
-    'https://www.federalregister.gov/api/v1/documents.json?conditions%5Bagencies%5D%5B%5D=international-trade-commission&conditions%5Btype%5D%5B%5D=RULE&conditions%5Btype%5D%5B%5D=NOTICE&per_page=20&order=newest',
+    'https://www.federalregister.gov/api/v1/documents.json?conditions%5Bagencies%5D%5B%5D=international-trade-commission&conditions%5Btype%5D%5B%5D=RULE&conditions%5Btype%5D%5B%5D=NOTICE&per_page=20&order=newest&fields%5B%5D=title&fields%5B%5D=publication_date&fields%5B%5D=html_url&fields%5B%5D=abstract&fields%5B%5D=document_number&fields%5B%5D=effective_on',
     'api', 360
   ),
   (

@@ -43,28 +43,36 @@ router.post('/refresh', requireAdmin, async (_req, res) => {
 
   const sources: Array<{
     name: string;
-    status: string;
-    documents_found: number;
-    documents_new: number;
+    status: string;          // 'success' | 'error'
+    documents_fetched: number;
+    documents_stored: number;
+    duplicates_skipped: number;
+    last_refresh: string | null;
     error: string | null;
   }> = [];
 
   for (const feed of feeds as SourceFeed[]) {
+    const now = new Date().toISOString();
     try {
       const r = await checkFeed(feed);
+      const ok = r.status !== 'error';
       sources.push({
         name: feed.name,
-        status: r.status,
-        documents_found: r.documentsFound,
-        documents_new: r.documentsNew,
+        status: ok ? 'success' : 'error',
+        documents_fetched: r.documentsFound,
+        documents_stored: r.documentsNew,
+        duplicates_skipped: Math.max(0, r.documentsFound - r.documentsNew),
+        last_refresh: ok ? now : null,
         error: r.error ?? null,
       });
     } catch (err: any) {
       sources.push({
         name: feed.name,
         status: 'error',
-        documents_found: 0,
-        documents_new: 0,
+        documents_fetched: 0,
+        documents_stored: 0,
+        duplicates_skipped: 0,
+        last_refresh: null,
         error: err?.message ?? 'unknown error',
       });
     }
