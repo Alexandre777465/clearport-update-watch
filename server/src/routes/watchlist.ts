@@ -25,6 +25,9 @@ const watchlistSchema = z.object({
   origin_country: z.string().max(100).default('China'),
   destination_country: z.string().max(100).default('United States'),
   alert_frequency: z.enum(['instant', 'daily', 'weekly']).default('weekly'),
+  // Optional estimated customs value of the shipment (USD). Used only to
+  // compute a dollar impact from a verified rate — never persisted.
+  estimated_value_usd: z.number().positive().max(1_000_000_000).optional(),
   // Product attribute flags (used for risk scan generation)
   is_children: z.boolean().default(false),
   has_battery: z.boolean().default(false),
@@ -76,11 +79,12 @@ router.post('/', async (req, res) => {
     return res.status(500).json({ error: 'Failed to save your monitoring entry. Please try again.' });
   }
 
-  // Run risk scan and source document preview in parallel
-  const [riskScanResult, previewDocs] = await Promise.all([
-    generateRiskScan(entry as any),
-    getMatchingDocuments(data.hts_code),
-  ]);
+  // Fetch the relevant official documents FIRST, then ground the scan in them.
+  const previewDocs = await getMatchingDocuments(data.hts_code);
+  const riskScanResult = await generateRiskScan(entry as any, {
+    documents: previewDocs as any,
+    estimatedValueUsd: data.estimated_value_usd,
+  });
 
   // Persist the risk scan if generated
   let riskScan = null;

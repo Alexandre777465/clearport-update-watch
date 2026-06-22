@@ -269,11 +269,26 @@ export async function updateNotificationPreferences(prefs: {
 
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'N/A';
 
+export interface SourceCitation {
+  name: string;
+  title: string;
+  published_at: string;
+  effective_date?: string;
+  url: string;
+  why_relevant: string;
+}
+
 export interface RiskCategory {
   category: string;
   level: RiskLevel;
   explanation: string;
   action: string;
+  // Phase 2 source-grounding (optional; present only when grounded)
+  verified?: boolean;
+  what_changed?: string;
+  verified_rate_pct?: number | null;
+  financial_impact?: string;
+  source?: SourceCitation;
 }
 
 export interface DocumentChecklistItem {
@@ -332,6 +347,7 @@ export async function submitWatchlistEntry(data: {
   origin_country: string;
   destination_country: string;
   alert_frequency?: string;
+  estimated_value_usd?: number;
 } & Partial<ProductAttributes>): Promise<{
   id: string;
   preview: WatchlistPreviewDoc[];

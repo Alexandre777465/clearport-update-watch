@@ -1,11 +1,20 @@
 /**
  * Generates a structured import risk scan for a watchlist entry using Claude.
+ *
+ * Phase 2: the scan is grounded in official documents. Relevant source
+ * documents (matched by HTS) are passed in and Claude may only assert a
+ * CURRENT tariff rate, rule change, publication date or effective date if it
+ * is supported by one of those documents — in which case it must cite it.
+ * Standing requirements that are not tied to a supplied document are returned
+ * as unverified "general guidance". Dollar impacts are computed in code from a
+ * verified rate, never invented by the model.
+ *
  * Returns null if ANTHROPIC_API_KEY is not set — the frontend falls back to
  * a client-side mock scan in that case.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { WatchlistEntry, ProductRiskScan } from '../types';
+import type { WatchlistEntry, ProductRiskScan, RiskCategory } from '../types';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -14,17 +23,62 @@ for their specific product before they import.
 
 Write everything in plain English for a small business owner or e-commerce seller — not a trade lawyer. \
 Be specific about what THEY need to do, not general statements about "consulting professionals." \
-Be honest about uncertainty: if something depends on exact HTS classification, say "verify with broker." \
 Never guarantee clearance or compliance.
+
+SOURCE-GROUNDING RULES (critical):
+- You are given a list of RELEVANT OFFICIAL DOCUMENTS. They are the ONLY acceptable basis for any \
+statement about a CURRENT tariff rate, a rule change, a publication date, or an effective date.
+- If a current rate / rule / date is supported by one of those documents, mark that risk category \
+"verified": true, fill in "source" with that document's details, and set "what_changed". You may set \
+"verified_rate_pct" to the numeric percentage ONLY if the document explicitly states it.
+- If you do NOT have a supplying document for a current rate/rule/date, you MUST NOT state one. Mark the \
+category "verified": false and leave "source" null and "verified_rate_pct" null. Standing requirements \
+(e.g. "lithium batteries require UN 38.3 testing") are allowed as general guidance with "verified": false.
+- NEVER invent a rate, a citation, a date, a document title, or applicability. When unsure, say so and \
+mark it unverified.
+- Do not compute dollar amounts. Provide only "verified_rate_pct" when supported; dollar impact is \
+calculated separately.
 
 Respond ONLY with valid JSON — no markdown, no code fences, no explanation outside the JSON object.`;
 
 type ScanResult = Omit<ProductRiskScan, 'id' | 'watchlist_entry_id' | 'created_at'>;
 
-export async function generateRiskScan(entry: WatchlistEntry): Promise<ScanResult | null> {
+export interface ScanDocument {
+  id: string;
+  title: string;
+  source_name: string;
+  source_url: string;
+  published_at: string | null;
+  plain_english_summary: string | null;
+  effective_date?: string | null;
+}
+
+export interface ScanOptions {
+  documents?: ScanDocument[];
+  estimatedValueUsd?: number;
+}
+
+export async function generateRiskScan(
+  entry: WatchlistEntry,
+  opts: ScanOptions = {},
+): Promise<ScanResult | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null;
 
   const isChina = entry.origin_country.toLowerCase().includes('china');
+  const documents = opts.documents ?? [];
+
+  const documentBlock = documents.length
+    ? documents
+        .map(
+          (d, i) =>
+            `[DOC ${i + 1}]\n  source_name: ${d.source_name}\n  title: ${d.title}\n  published_at: ${
+              d.published_at ?? 'unknown'
+            }\n  effective_date: ${d.effective_date ?? 'not stated'}\n  url: ${
+              d.source_url
+            }\n  summary: ${(d.plain_english_summary ?? '').slice(0, 600)}`,
+        )
+        .join('\n\n')
+    : '(none — no official documents currently match this product by HTS code)';
 
   const userPrompt = `Generate an import risk assessment for this product and return ONLY valid JSON.
 
@@ -47,6 +101,9 @@ PRODUCT CHARACTERISTICS:
 - Sold on TikTok Shop: ${entry.sold_on_tiktok ? 'YES' : 'No'}
 - Also sold in EU: ${entry.sold_in_eu ? 'YES' : 'No'}
 
+RELEVANT OFFICIAL DOCUMENTS (the ONLY basis for current rate/rule/date claims):
+${documentBlock}
+
 Return this exact JSON (no markdown, no code fences):
 {
   "overall_risk": "Low|Medium|High|Critical",
@@ -55,16 +112,16 @@ Return this exact JSON (no markdown, no code fences):
     {
       "category": "Category name",
       "level": "Low|Medium|High|Critical|N/A",
-      "explanation": "2-3 sentences in plain English explaining the risk",
-      "action": "Specific action this importer should take now"
+      "explanation": "2-3 sentences in plain English: how this affects THIS product",
+      "action": "Specific action this importer should take now",
+      "verified": false,
+      "what_changed": "Only when verified: what the official document changed",
+      "verified_rate_pct": null,
+      "source": null
     }
   ],
   "document_checklist": [
-    {
-      "document": "Document name",
-      "required": true,
-      "reason": "One sentence on why it is needed"
-    }
+    { "document": "Document name", "required": true, "reason": "One sentence on why it is needed" }
   ],
   "broker_questions": ["question 1", "question 2", "question 3", "question 4", "question 5"],
   "supplier_questions": ["question 1", "question 2", "question 3", "question 4"],
@@ -72,6 +129,13 @@ Return this exact JSON (no markdown, no code fences):
   "readiness_score": 0,
   "confidence_level": "Low|Medium|High"
 }
+
+For any risk_category that IS supported by a document above, set:
+  "verified": true,
+  "what_changed": "<what that document changed>",
+  "verified_rate_pct": <number or null — only if the doc states a rate>,
+  "source": { "name": "<source_name>", "title": "<title>", "published_at": "<published_at>", "effective_date": "<effective_date or omit>", "url": "<url>", "why_relevant": "<one sentence>" }
+For every other category set "verified": false, "source": null, "verified_rate_pct": null.
 
 RISK CATEGORIES to include (only include what is relevant — skip truly inapplicable ones):
 1. Tariff Risk — always include
@@ -94,11 +158,11 @@ READINESS SCORE calculation:
 - Start at 40
 - +15 if HTS code was provided
 - +10 if product description was provided
-- +5 if more than 3 product attributes answered YES (user is being thorough)
-- -20 if children's product (needs CPSIA cert urgently)
-- -15 if battery product (needs UN 38.3)
-- -15 if food/supplement (needs FDA work)
-- -10 if cosmetic (needs safety data)
+- +5 if more than 3 product attributes answered YES
+- -20 if children's product
+- -15 if battery product
+- -15 if food/supplement
+- -10 if cosmetic
 - Never go below 10, never above 90 for a new product
 
 CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "Medium" if HTS missing or product has complex characteristics, "Low" if very limited information.`;
@@ -116,9 +180,55 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
     const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
     // Strip any accidental markdown code fences
     const json = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
-    return JSON.parse(json) as ScanResult;
+    const parsed = JSON.parse(json) as ScanResult;
+
+    return sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
   } catch (err: any) {
     console.error('[riskScanner] Failed to generate scan:', err.message);
     return null;
   }
+}
+
+// Defensive pass: enforce the grounding contract in code so a model slip can't
+// produce an uncited "verified" claim, and compute dollar impact ONLY from a
+// verified rate. Never fabricates a figure.
+function sanitizeAndPrice(
+  scan: ScanResult,
+  documents: ScanDocument[],
+  estimatedValueUsd?: number,
+): ScanResult {
+  const allowedUrls = new Set(documents.map((d) => d.source_url));
+  const value = typeof estimatedValueUsd === 'number' && estimatedValueUsd > 0 ? estimatedValueUsd : null;
+
+  const categories: RiskCategory[] = (scan.risk_categories ?? []).map((cat) => {
+    const c: RiskCategory = { ...cat };
+
+    // A category can only stay "verified" if it cites a document we actually
+    // supplied. Otherwise downgrade to general guidance and drop the source.
+    const hasValidSource = !!c.source && typeof c.source.url === 'string' && allowedUrls.has(c.source.url);
+    if (!c.verified || !hasValidSource) {
+      c.verified = false;
+      c.source = undefined;
+      c.what_changed = undefined;
+      c.verified_rate_pct = null;
+      c.financial_impact = undefined;
+      return c;
+    }
+
+    // Verified: compute a dollar figure only from the verified rate.
+    const pct = typeof c.verified_rate_pct === 'number' ? c.verified_rate_pct : null;
+    if (pct != null && value != null) {
+      const amount = Math.round((value * pct) / 100);
+      c.financial_impact = `~$${amount.toLocaleString('en-US')} on a $${value.toLocaleString(
+        'en-US',
+      )} shipment (${pct}% per ${c.source!.name})`;
+    } else if (pct != null) {
+      c.financial_impact = `~${pct}% of customs value (per ${c.source!.name}) — add an estimated shipment value to see the dollar impact`;
+    } else {
+      c.financial_impact = undefined;
+    }
+    return c;
+  });
+
+  return { ...scan, risk_categories: categories };
 }

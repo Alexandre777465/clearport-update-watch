@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { ProductRiskScan, RiskLevel } from "@/lib/api";
-import { AlertTriangle, CheckCircle2, Info, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Info, ShieldAlert, ShieldCheck } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -88,16 +88,78 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 shrink-0">{riskIcon(cat.level as RiskLevel)}</div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium">{cat.category}</span>
                     <Badge variant="outline" className={`text-xs ${riskColor(cat.level as RiskLevel)}`}>
                       {cat.level}
                     </Badge>
+                    {cat.verified && cat.source ? (
+                      <Badge variant="outline" className="text-xs border-green-200 bg-green-50 text-green-700">
+                        ✓ Verified against official source
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs border-slate-200 bg-slate-50 text-slate-500">
+                        General guidance — not verified against a current source
+                      </Badge>
+                    )}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{cat.explanation}</p>
-                  <p className="mt-2 text-xs font-medium text-foreground">
-                    → {cat.action}
+
+                  {/* 1. What changed (verified only) */}
+                  {cat.verified && cat.what_changed && (
+                    <p className="mt-2 text-xs">
+                      <span className="font-semibold text-foreground">What changed: </span>
+                      <span className="text-muted-foreground">{cat.what_changed}</span>
+                    </p>
+                  )}
+
+                  {/* 2. How it affects this product */}
+                  <p className="mt-1.5 text-xs">
+                    <span className="font-semibold text-foreground">How it affects this product: </span>
+                    <span className="text-muted-foreground">{cat.explanation}</span>
                   </p>
+
+                  {/* 3. Estimated financial impact (only when computed from a verified rate) */}
+                  {cat.financial_impact && (
+                    <p className="mt-1.5 text-xs">
+                      <span className="font-semibold text-foreground">Estimated financial impact: </span>
+                      <span className="text-muted-foreground">{cat.financial_impact}</span>
+                    </p>
+                  )}
+
+                  {/* 4. Required action */}
+                  <p className="mt-1.5 text-xs">
+                    <span className="font-semibold text-foreground">Required action: </span>
+                    <span className="text-muted-foreground">{cat.action}</span>
+                  </p>
+
+                  {/* 5. Official source (verified only) */}
+                  {cat.verified && cat.source && (
+                    <div className="mt-2.5 rounded-md border border-green-100 bg-green-50/50 p-2.5 text-xs">
+                      <p className="font-medium text-foreground">Official source</p>
+                      <p className="mt-0.5 text-muted-foreground">
+                        {cat.source.name} — {cat.source.title}
+                      </p>
+                      <p className="mt-0.5 text-muted-foreground">
+                        Published {cat.source.published_at?.slice(0, 10)}
+                        {cat.source.effective_date
+                          ? ` · Effective ${cat.source.effective_date.slice(0, 10)}`
+                          : ""}
+                      </p>
+                      {cat.source.why_relevant && (
+                        <p className="mt-0.5 text-muted-foreground">{cat.source.why_relevant}</p>
+                      )}
+                      {cat.source.url && (
+                        <a
+                          href={cat.source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 text-primary hover:underline"
+                        >
+                          View official document <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>

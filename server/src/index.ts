@@ -11,6 +11,7 @@ import { askRouter } from './routes/ask';
 import { notificationsRouter } from './routes/notifications';
 import { watchlistRouter } from './routes/watchlist';
 import { scanRouter } from './routes/scan';
+import { adminRouter } from './routes/admin';
 import { requireAuth } from './middleware/auth';
 
 const app = express();
@@ -29,6 +30,9 @@ app.get('/api/health', (_req, res) => {
 });
 app.use('/api/public/watchlist', watchlistRouter);
 app.use('/api/public/scan', scanRouter);
+
+// ── Admin (token-guarded inside the router) ───────────────────────────────────
+app.use('/api/admin', adminRouter);
 
 // ── Protected ───────────────────────────────────────────────────────────────
 app.use('/api', requireAuth as any);

@@ -204,11 +204,28 @@ export interface WatchlistEntry {
 
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'N/A';
 
+export interface SourceCitation {
+  name: string;          // e.g. "Federal Register – USTR Notices"
+  title: string;         // document title
+  published_at: string;  // ISO date
+  effective_date?: string;
+  url: string;
+  why_relevant: string;  // one sentence: why this doc affects THIS product
+}
+
 export interface RiskCategory {
   category: string;
   level: RiskLevel;
-  explanation: string;
-  action: string;
+  explanation: string;   // "how it affects this product"
+  action: string;        // "required action"
+  // ── Phase 2 source-grounding (all optional; stored inside the existing
+  // risk_categories JSONB — no schema migration). A category is "verified"
+  // only when grounded in a supplied official document.
+  verified?: boolean;
+  what_changed?: string;            // 5-part: what changed (verified only)
+  verified_rate_pct?: number | null; // numeric rate taken from a source, if any
+  financial_impact?: string;        // computed in code from a verified rate
+  source?: SourceCitation;
 }
 
 export interface DocumentChecklistItem {

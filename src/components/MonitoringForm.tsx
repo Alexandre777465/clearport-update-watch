@@ -37,6 +37,7 @@ interface FormState {
   htsCode: string;
   originCountry: string;
   destination: string;
+  estimatedValue: string;
 }
 
 const DEFAULT_ATTRS: ProductAttributes = {
@@ -371,6 +372,12 @@ function inferAttributes(
     .map(({ key, label }) => ({ key, label }));
 }
 
+// Parse the optional shipment value into a positive number, or undefined.
+function parseEstimatedValue(raw: string): number | undefined {
+  const n = Number(raw.replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "h2" }) {
@@ -381,6 +388,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     htsCode: "",
     originCountry: "China",
     destination: "United States",
+    estimatedValue: "",
   });
   const [attrs, setAttrs] = useState<ProductAttributes>({ ...DEFAULT_ATTRS });
   const [errors, setErrors] = useState<Partial<FormState>>({});
@@ -431,6 +439,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         origin_country: form.originCountry.trim() || "China",
         destination_country: form.destination.trim() || "United States",
         alert_frequency: "weekly",
+        estimated_value_usd: parseEstimatedValue(form.estimatedValue),
         ...finalAttrs,
       });
 
@@ -641,6 +650,25 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
             />
             <p className="mt-1 text-xs text-muted-foreground">
               Find on past customs entries or ask your factory for their export HS code.
+            </p>
+          </div>
+
+          {/* Estimated shipment value */}
+          <div>
+            <Label htmlFor="cp-value">
+              Estimated customs value of shipment (USD){" "}
+              <span className="text-xs text-muted-foreground">(optional — enables dollar impact)</span>
+            </Label>
+            <Input
+              id="cp-value"
+              inputMode="decimal"
+              value={form.estimatedValue}
+              onChange={set("estimatedValue")}
+              placeholder="e.g. 25000"
+              className="mt-1.5"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Used only to estimate dollar impact from verified official rates. Leave blank to see rates only.
             </p>
           </div>
 
