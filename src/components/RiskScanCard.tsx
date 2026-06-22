@@ -124,41 +124,61 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                     })()}
                   </div>
 
-                  {/* 1. What changed (sourced items only) */}
-                  {cat.what_changed && (
-                    <p className="mt-2 text-xs">
-                      <span className="font-semibold text-foreground">What changed: </span>
-                      <span className="text-muted-foreground">{cat.what_changed}</span>
-                    </p>
+                  {cat.verification_status === "no_verified_source" ? (
+                    /* Unsourced: make NO claim and NO mandatory action. State only
+                       what could not be verified and what is missing. */
+                    <>
+                      <p className="mt-2 text-xs text-muted-foreground">{cat.explanation}</p>
+                      {cat.missing_info && (
+                        <p className="mt-1.5 text-xs">
+                          <span className="font-semibold text-foreground">
+                            What ClearPort needs to verify this:{" "}
+                          </span>
+                          <span className="text-muted-foreground">{cat.missing_info}</span>
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {/* 1. What changed (sourced items only) */}
+                      {cat.what_changed && (
+                        <p className="mt-2 text-xs">
+                          <span className="font-semibold text-foreground">What changed: </span>
+                          <span className="text-muted-foreground">{cat.what_changed}</span>
+                        </p>
+                      )}
+
+                      {/* 2. How it affects this product */}
+                      <p className="mt-1.5 text-xs">
+                        <span className="font-semibold text-foreground">How it affects this product: </span>
+                        <span className="text-muted-foreground">{cat.explanation}</span>
+                      </p>
+
+                      {/* Applicability conditions */}
+                      {cat.applicability_conditions && (
+                        <p className="mt-1.5 text-xs">
+                          <span className="font-semibold text-foreground">Applies when: </span>
+                          <span className="text-muted-foreground">{cat.applicability_conditions}</span>
+                        </p>
+                      )}
+
+                      {/* 3. Estimated financial impact (only from a verified rate) */}
+                      {cat.financial_impact && (
+                        <p className="mt-1.5 text-xs">
+                          <span className="font-semibold text-foreground">Estimated financial impact: </span>
+                          <span className="text-muted-foreground">{cat.financial_impact}</span>
+                        </p>
+                      )}
+
+                      {/* 4. Required action */}
+                      {cat.action && (
+                        <p className="mt-1.5 text-xs">
+                          <span className="font-semibold text-foreground">Required action: </span>
+                          <span className="text-muted-foreground">{cat.action}</span>
+                        </p>
+                      )}
+                    </>
                   )}
-
-                  {/* 2. How it affects this product */}
-                  <p className="mt-1.5 text-xs">
-                    <span className="font-semibold text-foreground">How it affects this product: </span>
-                    <span className="text-muted-foreground">{cat.explanation}</span>
-                  </p>
-
-                  {/* Applicability conditions (when the rule is sourced but unconfirmed) */}
-                  {cat.applicability_conditions && cat.verification_status !== "no_verified_source" && (
-                    <p className="mt-1.5 text-xs">
-                      <span className="font-semibold text-foreground">Applies when: </span>
-                      <span className="text-muted-foreground">{cat.applicability_conditions}</span>
-                    </p>
-                  )}
-
-                  {/* 3. Estimated financial impact (only when computed from a verified rate) */}
-                  {cat.financial_impact && (
-                    <p className="mt-1.5 text-xs">
-                      <span className="font-semibold text-foreground">Estimated financial impact: </span>
-                      <span className="text-muted-foreground">{cat.financial_impact}</span>
-                    </p>
-                  )}
-
-                  {/* 4. Required action */}
-                  <p className="mt-1.5 text-xs">
-                    <span className="font-semibold text-foreground">Required action: </span>
-                    <span className="text-muted-foreground">{cat.action}</span>
-                  </p>
 
                   {/* 5. Official source (when present) */}
                   {cat.source && (

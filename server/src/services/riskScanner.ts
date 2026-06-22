@@ -14,7 +14,10 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { WatchlistEntry, ProductRiskScan, RiskCategory } from '../types';
+import type {
+  WatchlistEntry, ProductRiskScan, RiskCategory, RiskLevel,
+  VerificationStatus, DocumentChecklistItem,
+} from '../types';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -193,7 +196,7 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
     const parsed = JSON.parse(json) as ScanResult;
 
     const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
-    return mergeBaselines(sanitized, opts.baselineCategories ?? []);
+    return finalizeScan(sanitized, opts.baselineCategories ?? []);
   } catch (err: any) {
     console.error('[riskScanner] Failed to generate scan:', err.message);
     return null;
@@ -250,19 +253,102 @@ function sanitizeAndPrice(
   return { ...scan, risk_categories: categories };
 }
 
-// Merge deterministic baseline categories with the model's. Baselines are
-// authoritative: a model category with the same name is dropped in favor of the
-// baseline one. Baselines (the only source of "verified_applicable") are listed
-// first, ordered by risk.
-function mergeBaselines(scan: ScanResult, baselines: RiskCategory[]): ScanResult {
-  if (!baselines.length) return scan;
-  const baseNames = new Set(baselines.map((b) => b.category.toLowerCase()));
-  const modelExtras = (scan.risk_categories ?? []).filter(
-    (c) => !baseNames.has(c.category.toLowerCase()),
-  );
+// ── Topic mapping for semantic de-duplication ─────────────────────────────────
+// Maps a category name to the set of compliance topics it covers, so a verified
+// deterministic baseline can replace any overlapping model category.
+function topicsOf(name: string): Set<string> {
+  const n = name.toLowerCase();
+  const t = new Set<string>();
+  if (/mfn|general rate|customs duty|tariff/.test(n)) t.add('tariff');
+  if (/hts classification|classification risk/.test(n)) t.add('hts_class');
+  if (/section 301|\b301\b/.test(n)) t.add('s301');
+  if (/ad\/?cvd|antidumping|countervailing/.test(n)) t.add('adcvd');
+  if (/section 232|steel|aluminum/.test(n)) t.add('s232');
+  if (/cpsia|children|cpsc/.test(n)) t.add('children');
+  if (/food.?contact/.test(n)) t.add('fda_food');
+  if (/cosmetic/.test(n)) t.add('fda_cosmetic');
+  if (/supplement|dietary/.test(n)) t.add('fda_supplement');
+  if (/\bfda\b/.test(n) && t.size === 0) { t.add('fda_food'); t.add('fda_cosmetic'); t.add('fda_supplement'); }
+  if (/fcc|radio|part 15|emission/.test(n)) t.add('fcc');
+  if (/battery|un ?38\.3|lithium|phmsa/.test(n)) t.add('battery');
+  if (/epa|tsca|fifra/.test(n)) t.add('epa');
+  if (/textile|apparel|fiber|ftc label/.test(n)) t.add('textile');
+  if (/customs documentation|^documentation/.test(n)) t.add('docs');
+  if (/marketplace|amazon|tiktok/.test(n)) t.add('marketplace');
+  return t;
+}
+
+// Universally-required CBP entry documents (required for ALL imports).
+const ALWAYS_REQUIRED_DOCS = /commercial invoice|packing list|country of origin|bill of lading|entry summary/i;
+
+// Final report integrity pass (Stage 1):
+//  - baselines are authoritative and replace overlapping model categories;
+//  - model categories left unsourced are neutralized to make NO claim and have
+//    NO mandatory action — they only state what could not be verified;
+//  - marketplace cards with no official source are hidden entirely;
+//  - overall risk is recomputed from verified + official-unconfirmed only;
+//  - the document checklist is gated so "required" needs a verified rule.
+function finalizeScan(scan: ScanResult, baselines: RiskCategory[]): ScanResult {
+  const baselineTopics = new Set<string>();
+  baselines.forEach((b) => topicsOf(b.category).forEach((t) => baselineTopics.add(t)));
+
+  // Drop model categories whose topic a baseline already covers.
+  const modelExtras = (scan.risk_categories ?? []).filter((c) => {
+    const ts = [...topicsOf(c.category)];
+    if (ts.some((t) => baselineTopics.has(t))) return false;
+    // Hide marketplace cards entirely — no official policy source is stored.
+    if (ts.includes('marketplace')) return false;
+    return true;
+  });
+
+  // Neutralize any remaining unsourced model category: no claim, no action.
+  const neutralized = modelExtras.map((c) => {
+    if (c.verification_status === 'official_unconfirmed' && c.source) return c; // sourced, keep
+    return {
+      category: c.category,
+      level: 'N/A' as RiskLevel,
+      explanation: `ClearPort has no official source on file to confirm whether ${c.category.toLowerCase()} applies to this product. It is listed only so you know it was considered — no requirement, tariff, test, or obligation is being asserted.`,
+      action: '',
+      verification_status: 'no_verified_source' as VerificationStatus,
+      missing_info:
+        c.applicability_conditions ||
+        'a matching official source plus your product’s exact HTS classification and attributes.',
+    } satisfies RiskCategory;
+  });
+
   const order: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3, 'N/A': 4 };
-  const merged = [...baselines, ...modelExtras].sort(
+  const merged = [...baselines, ...neutralized].sort(
     (a, b) => (order[a.level] ?? 5) - (order[b.level] ?? 5),
   );
-  return { ...scan, risk_categories: merged };
+
+  // Overall risk from supported findings ONLY (verified + official-unconfirmed).
+  const supported = merged.filter(
+    (c) => c.verification_status === 'verified_applicable' || c.verification_status === 'official_unconfirmed',
+  );
+  const rank = (lvl: string) => order[lvl] ?? 5;
+  const worst = supported.reduce<string>((acc, c) => (rank(c.level) < rank(acc) ? c.level : acc), 'Low');
+  const overall_risk = (['Critical', 'High', 'Medium', 'Low'].includes(worst) ? worst : 'Low') as ScanResult['overall_risk'];
+  const overall_summary = supported.length
+    ? scan.overall_summary
+    : 'ClearPort could not verify any applicable requirements from official sources for the details provided. Add an HTS code and product attributes for a fuller, source-backed assessment.';
+
+  // Gate the document checklist: "required" only when a verified rule backs it.
+  const verifiedTopics = new Set<string>();
+  baselines
+    .filter((b) => b.verification_status === 'verified_applicable')
+    .forEach((b) => topicsOf(b.category).forEach((t) => verifiedTopics.add(t)));
+  const checklist = (scan.document_checklist ?? []).map((d) => {
+    const backed =
+      ALWAYS_REQUIRED_DOCS.test(d.document) ||
+      [...topicsOf(`${d.document} ${d.reason}`)].some((t) => verifiedTopics.has(t));
+    return { ...d, required: backed, status: backed ? 'required' : 'needs_confirmation' } as DocumentChecklistItem;
+  });
+
+  return {
+    ...scan,
+    overall_risk,
+    overall_summary,
+    risk_categories: merged,
+    document_checklist: checklist,
+  };
 }

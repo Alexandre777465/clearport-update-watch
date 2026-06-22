@@ -10,6 +10,8 @@ export function DocumentChecklist({
   items: DocumentChecklistItem[];
   uploadedDocTypes?: string[];
 }) {
+  // "Required" only when backed by a verified rule; everything else is shown
+  // as "Applicability needs confirmation" — never asserted as mandatory.
   const required = items.filter((d) => d.required);
   const optional = items.filter((d) => !d.required);
 
@@ -67,7 +69,12 @@ export function DocumentChecklist({
       {optional.length > 0 && (
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Recommended
+            Applicability needs confirmation
+          </p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            These may apply depending on your product's exact classification and
+            attributes — confirm with your supplier or broker before treating them
+            as mandatory.
           </p>
           <div className="space-y-2">
             {optional.map((doc) => (
@@ -75,7 +82,12 @@ export function DocumentChecklist({
                 <div className="flex items-start gap-2">
                   <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
-                    <span className="text-sm font-medium">{doc.document}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{doc.document}</span>
+                      <Badge variant="outline" className="text-xs border-amber-200 bg-amber-50 text-amber-800">
+                        Needs confirmation
+                      </Badge>
+                    </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">{doc.reason}</p>
                   </div>
                 </div>

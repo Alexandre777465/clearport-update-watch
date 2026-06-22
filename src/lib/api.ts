@@ -313,12 +313,14 @@ export interface RiskCategory {
   what_changed?: string;
   verified_rate_pct?: number | null;
   financial_impact?: string;
+  missing_info?: string;
   source?: SourceCitation;
 }
 
 export interface DocumentChecklistItem {
   document: string;
   required: boolean;
+  status?: "required" | "needs_confirmation";
   reason: string;
   uploaded?: boolean;  // client-side state only
 }

@@ -239,12 +239,14 @@ export interface RiskCategory {
   what_changed?: string;             // what changed (sourced items)
   verified_rate_pct?: number | null; // numeric rate taken from a source, if any
   financial_impact?: string;         // computed in code from a verified rate
+  missing_info?: string;             // for no_verified_source: what's missing to verify
   source?: SourceCitation;
 }
 
 export interface DocumentChecklistItem {
   document: string;
-  required: boolean;
+  required: boolean;                 // true only when backed by a verified rule
+  status?: 'required' | 'needs_confirmation';
   reason: string;
 }
 
