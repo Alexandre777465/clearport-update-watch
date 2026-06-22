@@ -861,15 +861,20 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         </div>
       </Card>
 
-      {/* Risk scan */}
+      {/* Current verified baseline (standing requirements) */}
       <section>
-        <div className="mb-4 flex items-center gap-2">
+        <div className="mb-1 flex items-center gap-2">
           <ScanSearch className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold">Import risk scan</h3>
+          <h3 className="font-semibold">Current verified baseline</h3>
           <Badge variant="outline" className={`text-xs ${riskColor(riskScan.overall_risk)}`}>
             {riskScan.overall_risk} risk
           </Badge>
         </div>
+        <p className="mb-4 text-xs text-muted-foreground">
+          What is true for this product right now, from official sources — duty
+          rates and standing compliance requirements. Recent changes are shown
+          separately below.
+        </p>
         <RiskScanCard scan={riskScan} />
       </section>
 
@@ -926,11 +931,12 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       {/* Recent official updates — only real, HTS-relevant documents are shown.
           No example/mock government updates in production. */}
       <section>
-        <h3 className="mb-2 font-semibold">Recent official updates</h3>
+        <h3 className="mb-2 font-semibold">Recent verified changes</h3>
         {hasLivePreview ? (
           <>
             <p className="mb-4 text-sm text-muted-foreground">
-              Official publications from the last 30 days relevant to your HTS code.
+              Official publications from the last 30 days relevant to your HTS code —
+              newly published rules, tariff actions, or notices, each linked to its source.
             </p>
             <div className="space-y-4">
               {confirmed.preview.map((doc) => (
@@ -940,8 +946,8 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
           </>
         ) : (
           <Card className="p-5 text-sm text-muted-foreground">
-            No relevant official updates found for this product in the last 30 days.
-            ClearPort will alert you here when a relevant update is published.
+            No relevant change found in the last 30 days for this product.
+            ClearPort will alert you here when a relevant official update is published.
           </Card>
         )}
       </section>
