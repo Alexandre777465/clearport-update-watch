@@ -178,7 +178,11 @@ READINESS SCORE calculation:
 - -10 if cosmetic
 - Never go below 10, never above 90 for a new product
 
-CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "Medium" if HTS missing or product has complex characteristics, "Low" if very limited information.`;
+CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "Medium" if HTS missing or product has complex characteristics, "Low" if very limited information.${
+    entry.language === 'zh'
+      ? '\n\nLANGUAGE: Write every "explanation", "action", "what_changed", "overall_summary", broker_questions, supplier_questions and next_actions value in Simplified Chinese (简体中文) using professional import/compliance terminology. Keep agency names, document titles, CFR citations, HTS codes and URLs in their original English/numeric form — never translate or alter those.'
+      : ''
+  }`;
 
   try {
     const message = await anthropic.messages.create({
@@ -196,7 +200,7 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
     const parsed = JSON.parse(json) as ScanResult;
 
     const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
-    return finalizeScan(sanitized, opts.baselineCategories ?? []);
+    return finalizeScan(sanitized, opts.baselineCategories ?? [], entry.language === 'zh' ? 'zh' : 'en');
   } catch (err: any) {
     console.error('[riskScanner] Failed to generate scan:', err.message);
     return null;
@@ -288,7 +292,7 @@ const ALWAYS_REQUIRED_DOCS = /commercial invoice|packing list|country of origin|
 //  - marketplace cards with no official source are hidden entirely;
 //  - overall risk is recomputed from verified + official-unconfirmed only;
 //  - the document checklist is gated so "required" needs a verified rule.
-function finalizeScan(scan: ScanResult, baselines: RiskCategory[]): ScanResult {
+function finalizeScan(scan: ScanResult, baselines: RiskCategory[], lang: 'en' | 'zh' = 'en'): ScanResult {
   const baselineTopics = new Set<string>();
   baselines.forEach((b) => topicsOf(b.category).forEach((t) => baselineTopics.add(t)));
 
@@ -331,14 +335,20 @@ function finalizeScan(scan: ScanResult, baselines: RiskCategory[]): ScanResult {
   const worst = supported.reduce<string>((acc, c) => (rank(c.level) < rank(acc) ? c.level : acc), 'Low');
   const overall_risk = (['Critical', 'High', 'Medium', 'Low'].includes(worst) ? worst : 'Low') as ScanResult['overall_risk'];
 
-  // Deterministic summary built ONLY from supported findings.
+  // Deterministic summary built ONLY from supported findings (localized).
   const overall_summary = supported.length
-    ? `Based on official sources, ClearPort verified ${verified.length} applicable requirement${verified.length === 1 ? '' : 's'}` +
-      (unconfirmed.length
-        ? ` and found ${unconfirmed.length} official requirement${unconfirmed.length === 1 ? '' : 's'} whose applicability needs confirmation`
-        : '') +
-      `. Highest verified/applicable risk: ${overall_risk}.`
-    : 'ClearPort could not verify any applicable requirements from official sources for the details provided. Add an HTS code and product attributes for a fuller, source-backed assessment.';
+    ? lang === 'zh'
+      ? `依据官方来源，ClearPort 已核实 ${verified.length} 项适用要求` +
+        (unconfirmed.length ? `，并发现 ${unconfirmed.length} 项官方要求其适用性需进一步确认` : '') +
+        `。已核实/适用的最高风险等级：${overall_risk}。`
+      : `Based on official sources, ClearPort verified ${verified.length} applicable requirement${verified.length === 1 ? '' : 's'}` +
+        (unconfirmed.length
+          ? ` and found ${unconfirmed.length} official requirement${unconfirmed.length === 1 ? '' : 's'} whose applicability needs confirmation`
+          : '') +
+        `. Highest verified/applicable risk: ${overall_risk}.`
+    : lang === 'zh'
+      ? 'ClearPort 未能依据官方来源核实所提供信息的任何适用要求。请补充 HTS 编码和产品属性以获得更完整的、有官方来源支持的评估。'
+      : 'ClearPort could not verify any applicable requirements from official sources for the details provided. Add an HTS code and product attributes for a fuller, source-backed assessment.';
 
   // Next actions / broker / supplier questions — derived ONLY from supported findings.
   const next_actions = dedupeStrings(

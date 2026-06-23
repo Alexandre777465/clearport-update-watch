@@ -75,11 +75,15 @@ export async function askAboutProduct(entryId: string, question: string): Promis
   }
 
   const evidence = buildEvidence(e, supported, matchedDocs);
+  const zh = e.language === 'zh';
+  const langDirective = zh
+    ? `\n\nRespond in Simplified Chinese (简体中文) using professional import/compliance terminology. Keep all agency names, document titles, CFR citations, HTS codes and URLs in their original English/numeric form — do not translate or alter them. If you cannot answer from the EVIDENCE, reply exactly: "ClearPort 无法依据现有官方来源核实这一点。" and state which product detail or official source is missing.`
+    : '';
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 1100,
-    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    system: [{ type: 'text', text: SYSTEM + langDirective, cache_control: { type: 'ephemeral' } }],
     messages: [
       {
         role: 'user',
@@ -89,7 +93,7 @@ export async function askAboutProduct(entryId: string, question: string): Promis
   });
 
   const answer = message.content[0].type === 'text' ? message.content[0].text.trim() : INSUFFICIENT;
-  const grounded = !answer.startsWith(INSUFFICIENT);
+  const grounded = !answer.startsWith(INSUFFICIENT) && !answer.startsWith('ClearPort 无法依据');
   // De-dup sources by url.
   const seen = new Set<string>();
   const uniqueSources = sources.filter((s) => (seen.has(s.url) ? false : (seen.add(s.url), true)));

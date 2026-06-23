@@ -1,8 +1,30 @@
 import { Link } from "@tanstack/react-router";
 import { Ship } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useLang, setLang, t } from "@/lib/i18n";
+
+function LanguageToggle() {
+  const lang = useLang();
+  return (
+    <div className="flex items-center rounded-md border border-border text-xs">
+      <button
+        onClick={() => setLang("en")}
+        className={`px-2 py-1 ${lang === "en" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+      >
+        EN
+      </button>
+      <button
+        onClick={() => setLang("zh")}
+        className={`px-2 py-1 ${lang === "zh" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+      >
+        中文
+      </button>
+    </div>
+  );
+}
 
 export function MarketingNav() {
+  const lang = useLang();
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
@@ -13,12 +35,13 @@ export function MarketingNav() {
           <span className="text-lg font-semibold tracking-tight">ClearPort</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm text-muted-foreground md:flex">
-          <Link to="/ask" className="hover:text-foreground">ClearPort Assistant</Link>
-          <Link to="/sources" className="hover:text-foreground">Official sources</Link>
+          <Link to="/ask" className="hover:text-foreground">{t(lang, "nav_assistant")}</Link>
+          <Link to="/sources" className="hover:text-foreground">{t(lang, "nav_sources")}</Link>
         </nav>
         <div className="flex items-center gap-2">
+          <LanguageToggle />
           <Link to="/onboarding">
-            <Button size="sm">Check a product</Button>
+            <Button size="sm">{t(lang, "nav_check")}</Button>
           </Link>
         </div>
       </div>

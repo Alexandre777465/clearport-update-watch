@@ -390,6 +390,7 @@ export async function submitWatchlistEntry(data: {
   destination_country: string;
   alert_frequency?: string;
   estimated_value_usd?: number;
+  language?: "en" | "zh";
 } & Partial<ProductAttributes>): Promise<{
   id: string;
   preview: WatchlistPreviewDoc[];

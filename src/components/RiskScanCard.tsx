@@ -2,25 +2,17 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { ProductRiskScan, RiskLevel, VerificationStatus } from "@/lib/api";
 import { AlertTriangle, CheckCircle2, ExternalLink, Info, ShieldAlert, ShieldCheck } from "lucide-react";
+import { useLang, t, type Lang } from "@/lib/i18n";
 
-// Three honest verification statuses (Stage 2).
-function statusBadge(status?: VerificationStatus): { label: string; className: string } {
+// Three honest verification statuses (Stage 2), localized.
+function statusBadge(status: VerificationStatus | undefined, lang: Lang): { label: string; className: string } {
   switch (status) {
     case "verified_applicable":
-      return {
-        label: "Verified applicable",
-        className: "border-green-200 bg-green-50 text-green-700",
-      };
+      return { label: t(lang, "vs_verified"), className: "border-green-200 bg-green-50 text-green-700" };
     case "official_unconfirmed":
-      return {
-        label: "Official requirement — applicability needs confirmation",
-        className: "border-amber-200 bg-amber-50 text-amber-800",
-      };
+      return { label: t(lang, "vs_unconfirmed"), className: "border-amber-200 bg-amber-50 text-amber-800" };
     default:
-      return {
-        label: "No verified source found",
-        className: "border-slate-200 bg-slate-50 text-slate-500",
-      };
+      return { label: t(lang, "vs_none"), className: "border-slate-200 bg-slate-50 text-slate-500" };
   }
 }
 
@@ -69,6 +61,7 @@ function overallTextColor(level: string) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
+  const lang = useLang();
   const relevant = scan.risk_categories.filter((c) => c.level !== "N/A");
 
   return (
@@ -115,7 +108,7 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                       {cat.level}
                     </Badge>
                     {(() => {
-                      const sb = statusBadge(cat.verification_status);
+                      const sb = statusBadge(cat.verification_status, lang);
                       return (
                         <Badge variant="outline" className={`text-xs ${sb.className}`}>
                           {sb.label}

@@ -23,6 +23,7 @@ import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
 import { ReadinessScore } from "@/components/ReadinessScore";
 import { Link } from "@tanstack/react-router";
+import { getLang } from "@/lib/i18n";
 import {
   CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch, MessageSquare,
 } from "lucide-react";
@@ -442,6 +443,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         destination_country: form.destination.trim() || "United States",
         alert_frequency: "weekly",
         estimated_value_usd: parseEstimatedValue(form.estimatedValue),
+        language: getLang(),
         ...finalAttrs,
       });
 

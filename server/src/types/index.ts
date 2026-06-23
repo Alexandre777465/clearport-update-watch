@@ -187,6 +187,7 @@ export interface WatchlistEntry {
   origin_country: string;
   destination_country: string;
   alert_frequency: AlertFrequency;
+  language?: 'en' | 'zh';
   last_alerted_at?: string;
   created_at: string;
   // Product attribute flags (added in migration 003)

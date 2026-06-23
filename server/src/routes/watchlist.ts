@@ -31,6 +31,7 @@ const watchlistSchema = z.object({
   origin_country: z.string().max(100).default('China'),
   destination_country: z.string().max(100).default('United States'),
   alert_frequency: z.enum(['instant', 'daily', 'weekly']).default('weekly'),
+  language: z.enum(['en', 'zh']).default('en'),
   // Honeypot: real users never fill this hidden field; bots often do.
   website: z.string().max(0).optional(),
   // Optional estimated customs value of the shipment (USD). Used only to
@@ -102,6 +103,7 @@ router.post('/', async (req, res) => {
       destination_country: data.destination_country.trim(),
       alert_frequency: data.alert_frequency,
       scan_status: 'pending',
+      language: data.language,
       is_children: data.is_children,
       has_battery: data.has_battery,
       is_electronic: data.is_electronic,
