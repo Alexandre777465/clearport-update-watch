@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { AppShell } from "@/components/AppShell";
+import { MarketingNav, MarketingFooter } from "@/components/MarketingNav";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -47,10 +47,15 @@ function Sources() {
   const lastRefresh = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : null;
 
   return (
-    <AppShell
-      title="Sources"
-      subtitle="Official sources ClearPort monitors for U.S. import-rule updates"
-    >
+    <div className="min-h-screen bg-background">
+      <MarketingNav />
+      <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Official sources</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          The official U.S. sources ClearPort monitors — with live status.
+        </p>
+      </div>
       <Card className="mb-6 border-blue-100 bg-blue-50/40 p-4 text-sm">
         <div className="font-medium">
           ClearPort checks official sources and matches updates to your monitored
@@ -145,6 +150,8 @@ function Sources() {
         ClearPort summaries describe what an update <em>may</em> mean. Final
         interpretation should be confirmed with a licensed customs broker.
       </p>
-    </AppShell>
+      </main>
+      <MarketingFooter />
+    </div>
   );
 }

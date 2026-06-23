@@ -22,10 +22,9 @@ import { RiskScanCard, riskColor } from "@/components/RiskScanCard";
 import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
 import { ReadinessScore } from "@/components/ReadinessScore";
-import { DocumentVault } from "@/components/DocumentVault";
-import { HumanReviewCta } from "@/components/HumanReviewCta";
+import { Link } from "@tanstack/react-router";
 import {
-  CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch,
+  CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch, MessageSquare,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -65,6 +64,7 @@ interface ConfirmedState {
   riskScan: ProductRiskScan;
   isLocal: boolean;
   emailEnabled: boolean;
+  entryId: string;
 }
 
 // ── Mock risk scan (client-side fallback when API not connected) ───────────────
@@ -478,6 +478,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         riskScan,
         isLocal: result.scan_status === "local",
         emailEnabled: result.email_enabled,
+        entryId: result.id,
       });
     } catch {
       setScanError("Something went wrong saving your product. Please try again.");
@@ -920,14 +921,6 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         />
       </section>
 
-      {/* Document vault */}
-      <section>
-        <h3 className="mb-4 font-semibold">Document vault</h3>
-        <DocumentVault
-          missingDocs={riskScan.document_checklist.filter((d) => d.required)}
-        />
-      </section>
-
       {/* Recent official updates — only real, HTS-relevant documents are shown.
           No example/mock government updates in production. */}
       <section>
@@ -952,10 +945,22 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         )}
       </section>
 
-      {/* Human review upsell */}
+      {/* Ask ClearPort about this product */}
       <section>
-        <h3 className="mb-4 font-semibold">Want a human expert to review this?</h3>
-        <HumanReviewCta productName={confirmed.productName} />
+        <Card className="flex flex-col items-start gap-3 border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold">Questions about this report?</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Ask ClearPort about duties, classification, tests, or documents — answered
+              only from your verified findings and matched official sources.
+            </p>
+          </div>
+          <Link to="/ask" search={{ entryId: confirmed.entryId }}>
+            <Button className="shrink-0">
+              <MessageSquare className="mr-2 h-4 w-4" /> Ask ClearPort
+            </Button>
+          </Link>
+        </Card>
       </section>
 
       <p className="text-xs text-muted-foreground">

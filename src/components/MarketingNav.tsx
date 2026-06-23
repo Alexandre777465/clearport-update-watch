@@ -13,17 +13,12 @@ export function MarketingNav() {
           <span className="text-lg font-semibold tracking-tight">ClearPort</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm text-muted-foreground md:flex">
-          <Link to="/sample-alert" className="hover:text-foreground">Sample alert</Link>
-          <Link to="/pricing" className="hover:text-foreground">Pricing</Link>
-          <Link to="/dashboard" className="hover:text-foreground">Dashboard</Link>
-          <Link to="/ask" className="hover:text-foreground">Ask ClearPort</Link>
+          <Link to="/ask" className="hover:text-foreground">ClearPort Assistant</Link>
+          <Link to="/sources" className="hover:text-foreground">Official sources</Link>
         </nav>
         <div className="flex items-center gap-2">
           <Link to="/onboarding">
-            <Button variant="ghost" size="sm">Sign in</Button>
-          </Link>
-          <Link to="/onboarding">
-            <Button size="sm">Start Monitoring</Button>
+            <Button size="sm">Check a product</Button>
           </Link>
         </div>
       </div>
@@ -49,22 +44,21 @@ export function MarketingFooter() {
         <div className="text-sm">
           <div className="mb-2 font-medium">Product</div>
           <ul className="space-y-1 text-muted-foreground">
-            <li><Link to="/dashboard">Dashboard</Link></li>
-            <li><Link to="/products">Monitored products</Link></li>
-            <li><Link to="/ask">Ask ClearPort</Link></li>
-            <li><Link to="/preferences">Alert preferences</Link></li>
+            <li><Link to="/onboarding">Check a product</Link></li>
+            <li><Link to="/ask">ClearPort Assistant</Link></li>
+            <li><Link to="/sources">Official sources</Link></li>
           </ul>
         </div>
         <div className="text-sm">
-          <div className="mb-2 font-medium">Company</div>
+          <div className="mb-2 font-medium">Legal</div>
           <ul className="space-y-1 text-muted-foreground">
-            <li><Link to="/pricing">Pricing</Link></li>
-            <li><Link to="/sample-alert">Sample alert</Link></li>
+            <li><Link to="/privacy">Privacy</Link></li>
+            <li><Link to="/terms">Terms &amp; disclaimer</Link></li>
           </ul>
         </div>
         <div className="text-xs text-muted-foreground">
           ClearPort provides source-backed summaries for preparation. It is not legal advice and
-          does not replace a licensed customs broker.
+          does not replace a licensed customs broker, lawyer, or accredited laboratory.
         </div>
       </div>
       <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">

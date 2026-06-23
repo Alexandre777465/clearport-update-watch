@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { AppShell } from "@/components/AppShell";
+import { MarketingNav, MarketingFooter } from "@/components/MarketingNav";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,10 @@ import { Sparkles, ExternalLink, Loader2 } from "lucide-react";
 import { alerts, savedProducts, whyYouSeeThis, type Alert } from "@/lib/mock";
 import { askClearportFn } from "@/api/ask";
 
-const searchSchema = z.object({ alertId: z.string().optional() });
+const searchSchema = z.object({
+  alertId: z.string().optional(),
+  entryId: z.string().optional(),
+});
 
 export const Route = createFileRoute("/ask")({
   component: Ask,
@@ -178,10 +181,15 @@ function Ask() {
   };
 
   return (
-    <AppShell
-      title="Ask ClearPort"
-      subtitle="Fact-based answers from official sources and your saved products"
-    >
+    <div className="min-h-screen bg-slate-50">
+      <MarketingNav />
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold tracking-tight">ClearPort Assistant</h1>
+        <p className="text-sm text-muted-foreground">
+          Fact-based answers from official sources and your scanned product.
+        </p>
+      </div>
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
         <Card className="flex h-[70vh] flex-col p-0">
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
@@ -307,6 +315,8 @@ function Ask() {
           </Card>
         </div>
       </div>
-    </AppShell>
+      </main>
+      <MarketingFooter />
+    </div>
   );
 }
