@@ -13,6 +13,7 @@ import { watchlistRouter } from './routes/watchlist';
 import { scanRouter } from './routes/scan';
 import { adminRouter } from './routes/admin';
 import { requireAuth } from './middleware/auth';
+import { rateLimit } from './middleware/rateLimit';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -28,8 +29,10 @@ app.use(express.json({ limit: '1mb' }));
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-app.use('/api/public/watchlist', watchlistRouter);
-app.use('/api/public/scan', scanRouter);
+// Rate limits for public endpoints (per IP). Submissions are heavier (scan),
+// Assistant questions are chattier.
+app.use('/api/public/watchlist', rateLimit({ key: 'submit', windowMs: 60_000, max: 8 }), watchlistRouter);
+app.use('/api/public/scan', rateLimit({ key: 'scan', windowMs: 60_000, max: 40 }), scanRouter);
 
 app.use('/api/public/sources', publicSourcesRouter);
 

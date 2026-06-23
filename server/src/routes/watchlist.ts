@@ -31,6 +31,8 @@ const watchlistSchema = z.object({
   origin_country: z.string().max(100).default('China'),
   destination_country: z.string().max(100).default('United States'),
   alert_frequency: z.enum(['instant', 'daily', 'weekly']).default('weekly'),
+  // Honeypot: real users never fill this hidden field; bots often do.
+  website: z.string().max(0).optional(),
   // Optional estimated customs value of the shipment (USD). Used only to
   // compute a dollar impact from a verified rate — never persisted.
   estimated_value_usd: z.number().positive().max(1_000_000_000).optional(),
