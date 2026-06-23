@@ -471,4 +471,52 @@ export async function pollScanResult(
   return { status: "pending", scan: null, error: "timeout" };
 }
 
+// ── ClearPort Assistant (product-grounded) ───────────────────────────────────
+
+export interface AssistantSource {
+  agency: string;
+  title: string;
+  citation?: string;
+  url: string;
+}
+
+export async function fetchScanContext(entryId: string): Promise<{
+  id: string;
+  product_name: string;
+  hts_code: string | null;
+  origin_country: string;
+  destination_country: string;
+} | null> {
+  if (!API_URL) return null;
+  const res = await fetch(`${API_URL}/api/public/scan/${entryId}/context`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function askProduct(
+  entryId: string,
+  question: string,
+): Promise<{ answer: string; grounded: boolean; sources: AssistantSource[] }> {
+  const res = await fetchWithTimeout(
+    `${API_URL}/api/public/scan/${entryId}/ask`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    },
+    90_000,
+  );
+  const json = (await res.json().catch(() => null)) as
+    | { answer: string; grounded: boolean; sources: AssistantSource[] }
+    | null;
+  if (!json) {
+    return {
+      answer: "Something went wrong answering your question. Please try again.",
+      grounded: false,
+      sources: [],
+    };
+  }
+  return json;
+}
+
 export { API_URL };
