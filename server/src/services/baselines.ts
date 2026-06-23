@@ -7,7 +7,7 @@
 
 import { db } from '../db/client';
 import type { WatchlistEntry, RiskCategory, RiskLevel } from '../types';
-import { fetchAndStoreHtsBaseline, normalizeHts } from './htsBaseline';
+import { lookupHtsBaseline, normalizeHts, type HtsLookupResult } from './htsBaseline';
 
 type AttrKey = keyof Pick<
   WatchlistEntry,
@@ -22,7 +22,8 @@ interface Applicability {
   hts_prefixes?: string[];
 }
 
-interface RegulatoryBaselineRow {
+export interface RegulatoryBaselineRow {
+  key?: string;
   category: string;
   agency: string;
   title: string;
@@ -52,14 +53,88 @@ export async function evaluateBaselines(
   entry: WatchlistEntry,
   estimatedValueUsd?: number,
 ): Promise<RiskCategory[]> {
+  // IO: fetch the official HTS state (always a structured result) and the
+  // curated regulatory baselines. The pure assembly happens in assembleBaselines.
+  const hts =
+    entry.hts_code && normalizeHts(entry.hts_code).length >= 4
+      ? await lookupHtsBaseline(entry.hts_code).catch(
+          (): HtsLookupResult => ({
+            match_level: 'outage',
+            requested: normalizeHts(entry.hts_code ?? ''),
+            hts8: null,
+            matched_htsno: null,
+            description: null,
+            mfn_text_rate: null,
+            mfn_ad_valorem_pct: null,
+            section301_ref: null,
+            candidates: [],
+            source_url: 'https://hts.usitc.gov/',
+            note: 'The official USITC HTS service could not be reached.',
+          }),
+        )
+      : null;
+
+  const { data: rows } = await db
+    .from('regulatory_baselines')
+    .select('*')
+    .eq('is_current', true);
+
+  return assembleBaselines(
+    entry,
+    typeof estimatedValueUsd === 'number' && estimatedValueUsd > 0 ? estimatedValueUsd : null,
+    hts,
+    (rows ?? []) as unknown as RegulatoryBaselineRow[],
+  );
+}
+
+/**
+ * PURE assembly of baseline RiskCategory[] from already-fetched inputs.
+ * Deterministic — no network, no DB — so the report-integrity invariants can be
+ * regression-tested (Stage 6) without external services.
+ */
+export function assembleBaselines(
+  entry: WatchlistEntry,
+  value: number | null,
+  hts: HtsLookupResult | null,
+  regRows: RegulatoryBaselineRow[],
+  today: string = new Date().toISOString().slice(0, 10),
+): RiskCategory[] {
   const out: RiskCategory[] = [];
-  const value = typeof estimatedValueUsd === 'number' && estimatedValueUsd > 0 ? estimatedValueUsd : null;
-  const today = new Date().toISOString().slice(0, 10);
+
+  // ── 0. Universal CBP entry filing (true for every commercial import) ─────────
+  // Backs the universally-required entry documents so each one traces to a
+  // verified, officially-sourced finding (no untraceable "required" docs).
+  out.push({
+    id: 'cbp_entry',
+    category: 'Customs Entry Filing',
+    level: 'Low',
+    explanation:
+      'Every commercial U.S. import must be entered with CBP. The importer of record (or their customs broker) files the entry and entry summary, supported by a commercial invoice, packing list, transport document, and country-of-origin marking.',
+    action:
+      'Make sure your customs broker has your commercial invoice, packing list, and product details to file the CBP entry (Form 3461) and entry summary (Form 7501).',
+    verification_status: 'verified_applicable',
+    applicability_conditions:
+      'Applies to all commercial merchandise entered for consumption into the United States.',
+    verified_rate_pct: null,
+    source: {
+      agency: 'CBP',
+      name: 'U.S. Customs and Border Protection',
+      title: 'Entry of merchandise — 19 U.S.C. 1484 / 19 CFR Part 142',
+      cfr_citation: '19 CFR Part 142; 19 CFR 141.86',
+      last_verified_at: today,
+      url: 'https://www.cbp.gov/trade/programs-administration/entry-summary',
+      why_relevant: 'All commercial shipments entered into the U.S. require a CBP entry and entry summary.',
+    },
+  });
 
   // ── 1. HTS duty baseline (official USITC) ───────────────────────────────────
-  if (entry.hts_code) {
-    const hts = await fetchAndStoreHtsBaseline(entry.hts_code).catch(() => null);
-    if (hts) {
+  // SYSTEM INVARIANT (Stage 2): when an HTS code is submitted, the tariff
+  // section is NEVER omitted. The lookup always resolves to a truthful state —
+  // exact / parent / ambiguous / not_found / outage — and each produces a card.
+  if (hts) {
+    const submitted = formatHts(hts.requested);
+
+    if (hts.match_level === 'exact' && hts.hts8) {
       const pct = hts.mfn_ad_valorem_pct;
       let financial: string | undefined;
       if (pct != null && value != null) {
@@ -70,6 +145,7 @@ export async function evaluateBaselines(
       }
 
       out.push({
+        id: 'hts_duty',
         category: 'Customs Duty (MFN / General Rate)',
         level: pct != null && pct >= 5 ? 'Medium' : 'Low',
         explanation: `Under HTS ${formatHts(hts.hts8)} (${hts.description}), the official General (MFN) duty rate is ${hts.mfn_text_rate ?? 'as published'}. This is the base duty before any trade-remedy tariffs.`,
@@ -89,41 +165,98 @@ export async function evaluateBaselines(
           why_relevant: 'The product was submitted under this HTS code.',
         },
       });
+    } else if (hts.match_level === 'parent' || hts.match_level === 'ambiguous') {
+      // Official heading found, but the exact tariff line / rate is NOT
+      // confirmed. We never present a parent heading's rate as the exact rate.
+      const candidateText = hts.candidates.length
+        ? ' Subheadings found: ' +
+          hts.candidates
+            .map((c) => `${c.htsno} (${(c.description || '').slice(0, 60)}; General ${c.general ?? 'see HTS'})`)
+            .join('; ') +
+          '.'
+        : '';
+      out.push({
+        id: 'hts_duty',
+        category: 'Customs Duty (HTS classification needs confirmation)',
+        level: 'Medium',
+        explanation:
+          `Official HTS heading found for ${submitted}${hts.description ? ` (${hts.description})` : ''}, but the exact 10-digit tariff line — and therefore the precise MFN duty rate — still needs confirmation.${candidateText} ClearPort does not assume a parent heading's rate is the rate for your goods.`,
+        action:
+          'Provide the exact 10-digit HTS statistical line (or confirm it with your customs broker) so ClearPort can verify the official MFN duty rate.',
+        verification_status: 'official_unconfirmed',
+        applicability_conditions:
+          'A specific 10-digit HTS classification is required to confirm the official duty rate.',
+        verified_rate_pct: null,
+        missing_info: 'the exact 10-digit HTS statistical suffix for this product',
+        source: {
+          agency: 'USITC',
+          name: 'Harmonized Tariff Schedule of the United States',
+          title: `HTS heading ${submitted} — exact tariff line to be confirmed`,
+          cfr_citation: hts.hts8 ? `HTSUS ${formatHts(hts.hts8)}` : `HTSUS ${submitted}`,
+          last_verified_at: today,
+          url: hts.source_url,
+          why_relevant: 'The product was submitted under this HTS heading.',
+        },
+      });
+    } else if (hts.match_level === 'not_found') {
+      // Truthful "could not be verified" — makes NO duty claim and does NOT
+      // influence the risk score, but the tariff section is still present.
+      out.push({
+        id: 'hts_duty',
+        category: 'Customs Duty (HTS code not found)',
+        level: 'N/A',
+        explanation: `ClearPort could not find an official USITC HTS line matching ${submitted}. No duty rate is being asserted. The most likely cause is a typo, a withdrawn code, or a code that needs its full 10-digit statistical suffix.`,
+        action: '',
+        verification_status: 'no_verified_source',
+        missing_info:
+          'a valid official HTS classification — re-check the code against hts.usitc.gov or ask your customs broker.',
+      });
+    } else {
+      // Outage — the official source did not respond. Truthful, never silent.
+      out.push({
+        id: 'hts_duty',
+        category: 'Customs Duty (official source temporarily unavailable)',
+        level: 'N/A',
+        explanation: `The official USITC HTS service was temporarily unavailable when this report was generated, so the duty rate for ${submitted} could not be verified right now. This is a source outage — not a finding about your product. ClearPort will not display an unverified rate.`,
+        action: '',
+        verification_status: 'no_verified_source',
+        missing_info:
+          'a live response from the official USITC HTS service — re-run this check shortly, or confirm the rate with your customs broker.',
+      });
+    }
 
-      // ── 2. Section 301 (detected from the official HTS Ch.99 footnote) ───────
-      if (hts.section301_ref && entry.origin_country.toLowerCase().includes('china')) {
-        out.push({
-          category: 'Section 301 China Tariff',
-          level: 'High',
-          explanation: `The HTS entry for this product carries an official footnote referencing ${hts.section301_ref} (a Section 301 Chapter 99 provision). Section 301 duties are added on top of the base rate for China-origin goods, but the exact additional rate and any exclusions depend on the specific Chapter 99 subheading.`,
-          action: 'Ask your broker to confirm the exact Section 301 rate and exclusion status for the applicable 9903.88 subheading.',
-          verification_status: 'official_unconfirmed',
-          applicability_conditions: `China-origin goods classified under an HTS code cross-referenced to ${hts.section301_ref}.`,
-          verified_rate_pct: null,
-          source: {
-            agency: 'USTR',
-            name: 'USITC HTS Chapter 99 / USTR Section 301',
-            title: `Section 301 cross-reference ${hts.section301_ref}`,
-            cfr_citation: `HTSUS ${hts.section301_ref}`,
-            last_verified_at: today,
-            url: 'https://ustr.gov/issue-areas/enforcement/section-301-investigations',
-            why_relevant: 'The official HTS footnote cross-references this product to a Section 301 provision.',
-          },
-        });
-      }
+    // ── 2. Section 301 (only from the official HTS Ch.99 footnote) ────────────
+    // Requires both an official 9903.88 cross-reference AND China origin; never
+    // inferred from origin alone.
+    if (hts.section301_ref && entry.origin_country.toLowerCase().includes('china')) {
+      out.push({
+        id: 'hts_section301',
+        category: 'Section 301 China Tariff',
+        level: 'High',
+        explanation: `The HTS entry for this product carries an official footnote referencing ${hts.section301_ref} (a Section 301 Chapter 99 provision). Section 301 duties are added on top of the base rate for China-origin goods, but the exact additional rate and any exclusions depend on the specific Chapter 99 subheading.`,
+        action: 'Ask your broker to confirm the exact Section 301 rate and exclusion status for the applicable 9903.88 subheading.',
+        verification_status: 'official_unconfirmed',
+        applicability_conditions: `China-origin goods classified under an HTS code cross-referenced to ${hts.section301_ref}.`,
+        verified_rate_pct: null,
+        source: {
+          agency: 'USTR',
+          name: 'USITC HTS Chapter 99 / USTR Section 301',
+          title: `Section 301 cross-reference ${hts.section301_ref}`,
+          cfr_citation: `HTSUS ${hts.section301_ref}`,
+          last_verified_at: today,
+          url: 'https://ustr.gov/issue-areas/enforcement/section-301-investigations',
+          why_relevant: 'The official HTS footnote cross-references this product to a Section 301 provision.',
+        },
+      });
     }
   }
 
   // ── 3. Curated standing regulatory baselines ────────────────────────────────
-  const { data: rows } = await db
-    .from('regulatory_baselines')
-    .select('*')
-    .eq('is_current', true);
-
-  for (const r of (rows ?? []) as unknown as RegulatoryBaselineRow[]) {
+  for (const r of regRows) {
     if (!attrsMatch(entry, r.applicability ?? {})) continue;
     const definite = r.applicability_certainty === 'definite';
     out.push({
+      id: r.key ? `reg_${r.key}` : undefined,
       category: r.category,
       level: (r.level as RiskLevel) ?? 'Medium',
       explanation: r.explanation,

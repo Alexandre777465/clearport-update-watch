@@ -49,7 +49,7 @@ fuel/emissions EPA). Do not force a requirement under the wrong agency.
 
 Respond ONLY with valid JSON — no markdown, no code fences, no explanation outside the JSON object.`;
 
-type ScanResult = Omit<ProductRiskScan, 'id' | 'watchlist_entry_id' | 'created_at'>;
+export type ScanResult = Omit<ProductRiskScan, 'id' | 'watchlist_entry_id' | 'created_at'>;
 
 export interface ScanDocument {
   id: string;
@@ -282,8 +282,91 @@ function topicsOf(name: string): Set<string> {
   return t;
 }
 
-// Universally-required CBP entry documents (required for ALL imports).
-const ALWAYS_REQUIRED_DOCS = /commercial invoice|packing list|country of origin|bill of lading|entry summary/i;
+// ── Deterministic document derivation (Stage 4) ───────────────────────────────
+// Every checklist item is derived from a SUPPORTED finding (never from the
+// model, never untraceable) and is tagged with the responsible party:
+//   supplier        — your overseas supplier/factory provides it
+//   importer_broker — the U.S. importer of record / customs broker files it
+// Items from "official_unconfirmed" findings are downgraded to the conditional
+// ("applicability needs confirmation") group.
+type DocSpec = { document: string; owner: 'supplier' | 'importer_broker'; reason: string };
+
+function documentsForFinding(c: RiskCategory): DocSpec[] {
+  const id = c.id ?? '';
+
+  if (id === 'cbp_entry') {
+    return [
+      { document: 'Commercial Invoice', owner: 'supplier', reason: 'Required for the CBP entry — must show price, quantity, parties, and country of origin.' },
+      { document: 'Packing List', owner: 'supplier', reason: 'Must match the commercial invoice; used for examination and entry.' },
+      { document: 'Country-of-origin marking / declaration', owner: 'importer_broker', reason: 'Imported articles must be legibly marked with country of origin (19 U.S.C. 1304); the importer is responsible.' },
+      { document: 'CBP Form 3461 (entry) & CBP Form 7501 (entry summary)', owner: 'importer_broker', reason: 'Filed by the importer of record or customs broker to enter the goods — these are importer/broker filings, not supplier documents.' },
+      { document: 'Bill of Lading / Air Waybill', owner: 'importer_broker', reason: 'Transport document presented with the entry.' },
+    ];
+  }
+  if (id === 'hts_duty') {
+    if (c.verification_status === 'official_unconfirmed') {
+      return [{ document: 'Exact 10-digit HTS classification confirmation', owner: 'importer_broker', reason: 'Confirm the precise statistical line with your customs broker so the official MFN duty rate can be verified.' }];
+    }
+    return [];
+  }
+  if (id === 'hts_section301') {
+    return [{ document: 'Section 301 / Chapter 99 applicability & exclusion confirmation', owner: 'importer_broker', reason: 'Confirm the exact 9903.88 subheading and any exclusion with your broker before estimating landed cost.' }];
+  }
+
+  const topics = topicsOf(c.category);
+  if (topics.has('children')) {
+    return [
+      { document: 'CPSC-accredited third-party test reports (CPSIA)', owner: 'supplier', reason: 'Children’s products require testing by a CPSC-accepted laboratory; your supplier/factory arranges it.' },
+      { document: 'Children’s Product Certificate (CPC)', owner: 'importer_broker', reason: 'The U.S. importer issues the CPC based on the accredited test reports — not the supplier.' },
+    ];
+  }
+  if (topics.has('battery')) {
+    return [
+      { document: 'UN 38.3 test summary', owner: 'supplier', reason: 'Required to ship lithium cells/batteries; obtained from the cell/battery manufacturer.' },
+      { document: 'Safety Data Sheet (SDS)', owner: 'supplier', reason: 'Required for lithium battery transport.' },
+      { document: 'Lithium battery shipping declaration / hazmat paperwork', owner: 'importer_broker', reason: 'Transport documentation handled by the importer/forwarder for the chosen mode (air/ocean).' },
+    ];
+  }
+  if (topics.has('fda_food')) {
+    return [{ document: 'FDA food-contact material compliance declaration (21 CFR 174–178)', owner: 'supplier', reason: 'Supplier confirms the food-contact materials meet FDA requirements.' }];
+  }
+  if (topics.has('fda_cosmetic')) {
+    return [{ document: 'Cosmetic safety substantiation & facility/product listing info (MoCRA)', owner: 'supplier', reason: 'Supplier provides ingredient and safety information; confirm listing obligations.' }];
+  }
+  if (topics.has('fda_supplement')) {
+    return [{ document: 'Dietary-supplement cGMP & labeling documentation', owner: 'supplier', reason: 'Supplier provides cGMP and labeling evidence.' }];
+  }
+  if (topics.has('fcc')) {
+    return [{ document: 'FCC equipment authorization (SDoC/Grant) & Part 15 test report', owner: 'supplier', reason: 'RF/electronic devices need FCC authorization evidence from the manufacturer.' }];
+  }
+  if (topics.has('textile')) {
+    return [{ document: 'Fiber content & care-labeling information (FTC 16 CFR 303)', owner: 'supplier', reason: 'Supplier provides fiber content and care-label data for FTC textile labeling compliance.' }];
+  }
+  return [];
+}
+
+function buildChecklist(supported: RiskCategory[]): DocumentChecklistItem[] {
+  const out: DocumentChecklistItem[] = [];
+  const seen = new Set<string>();
+  for (const c of supported) {
+    const verified = c.verification_status === 'verified_applicable';
+    for (const d of documentsForFinding(c)) {
+      const key = d.document.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        document: d.document,
+        reason: d.reason,
+        required: verified,
+        status: verified ? 'required' : 'needs_confirmation',
+        responsibility: verified ? d.owner : 'conditional',
+        finding_id: c.id,
+        source: c.source,
+      });
+    }
+  }
+  return out;
+}
 
 // Final report integrity pass (Stage 1):
 //  - baselines are authoritative and replace overlapping model categories;
@@ -292,7 +375,7 @@ const ALWAYS_REQUIRED_DOCS = /commercial invoice|packing list|country of origin|
 //  - marketplace cards with no official source are hidden entirely;
 //  - overall risk is recomputed from verified + official-unconfirmed only;
 //  - the document checklist is gated so "required" needs a verified rule.
-function finalizeScan(scan: ScanResult, baselines: RiskCategory[], lang: 'en' | 'zh' = 'en'): ScanResult {
+export function finalizeScan(scan: ScanResult, baselines: RiskCategory[], lang: 'en' | 'zh' = 'en'): ScanResult {
   const baselineTopics = new Set<string>();
   baselines.forEach((b) => topicsOf(b.category).forEach((t) => baselineTopics.add(t)));
 
@@ -381,17 +464,11 @@ function finalizeScan(scan: ScanResult, baselines: RiskCategory[], lang: 'en' | 
   readiness -= 4 * unconfirmed.length;
   const readiness_score = Math.max(10, Math.min(95, readiness));
 
-  // Gate the document checklist: "required" only when a verified rule backs it.
-  const verifiedTopics = new Set<string>();
-  baselines
-    .filter((b) => b.verification_status === 'verified_applicable')
-    .forEach((b) => topicsOf(b.category).forEach((t) => verifiedTopics.add(t)));
-  const checklist = (scan.document_checklist ?? []).map((d) => {
-    const backed =
-      ALWAYS_REQUIRED_DOCS.test(d.document) ||
-      [...topicsOf(`${d.document} ${d.reason}`)].some((t) => verifiedTopics.has(t));
-    return { ...d, required: backed, status: backed ? 'required' : 'needs_confirmation' } as DocumentChecklistItem;
-  });
+  // Document checklist: derived deterministically from SUPPORTED findings only,
+  // grouped by responsible party, each item traceable to its finding + source.
+  // The model's proposed checklist is intentionally discarded so no untraceable
+  // or unsupported document can ever appear.
+  const checklist = buildChecklist(supported);
 
   return {
     ...scan,

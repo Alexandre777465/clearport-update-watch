@@ -75,6 +75,25 @@ const DICT: Record<string, { en: string; zh: string }> = {
     zh: "请先检查产品，然后从报告中打开助手。",
   },
 
+  // Document checklist (responsibility groups)
+  doc_group_supplier: { en: "Ask your supplier for these", zh: "向供应商索取以下文件" },
+  doc_group_broker: { en: "Importer / customs-broker tasks", zh: "进口商 / 报关行的任务" },
+  doc_group_conditional: { en: "Applicability needs confirmation", zh: "适用性需确认" },
+  doc_group_conditional_help: {
+    en: "These may apply depending on your product's exact classification and attributes — confirm with your supplier or broker before treating them as mandatory.",
+    zh: "这些文件是否适用取决于产品的确切归类和属性——在视为强制要求之前，请与供应商或报关行确认。",
+  },
+  doc_required: { en: "Required", zh: "必需" },
+  doc_needs_confirmation: { en: "Needs confirmation", zh: "需确认" },
+  doc_view_source: { en: "View official source", zh: "查看官方来源" },
+  doc_missing_prefix: { en: "Not yet collected:", zh: "尚未收集：" },
+  doc_missing_suffix: { en: "required document(s)", zh: "项必需文件" },
+  doc_none: {
+    en: "No required documents could be tied to a verified finding for this product yet.",
+    zh: "目前尚无可与已核实结论关联的必需文件。",
+  },
+  docs_section_title: { en: "Documents & responsibilities", zh: "文件与责任分工" },
+
   banner_saved: { en: "Product saved for monitoring.", zh: "产品已保存以进行监测。" },
   err_generic: { en: "Something went wrong. Please try again.", zh: "出现问题，请重试。" },
 };

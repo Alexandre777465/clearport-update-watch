@@ -229,6 +229,7 @@ export type VerificationStatus =
   | 'no_verified_source';
 
 export interface RiskCategory {
+  id?: string;           // stable finding id — lets documents/questions trace back
   category: string;
   level: RiskLevel;
   explanation: string;   // "how it affects this product"
@@ -244,11 +245,20 @@ export interface RiskCategory {
   source?: SourceCitation;
 }
 
+// Who is responsible for a document (Stage 4):
+//  supplier        — your overseas supplier/factory must produce or provide it
+//  importer_broker — the U.S. importer of record / customs broker files it
+//  conditional     — only applies if a requirement's applicability is confirmed
+export type DocumentResponsibility = 'supplier' | 'importer_broker' | 'conditional';
+
 export interface DocumentChecklistItem {
   document: string;
   required: boolean;                 // true only when backed by a verified rule
   status?: 'required' | 'needs_confirmation';
   reason: string;
+  responsibility: DocumentResponsibility;
+  finding_id?: string;               // originating baseline/finding id (traceable)
+  source?: SourceCitation;           // official source backing this requirement
 }
 
 export interface ProductRiskScan {

@@ -23,7 +23,7 @@ import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
 import { ReadinessScore } from "@/components/ReadinessScore";
 import { Link } from "@tanstack/react-router";
-import { getLang } from "@/lib/i18n";
+import { getLang, t } from "@/lib/i18n";
 import {
   CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch, MessageSquare,
 } from "lucide-react";
@@ -240,33 +240,32 @@ function generateMockRiskScan(
   score = Math.max(10, Math.min(85, score));
 
   const docs: DocumentChecklistItem[] = [
-    { document: "Commercial Invoice", required: true, reason: "Required for all imports — must show price, quantity, and party details." },
-    { document: "Packing List", required: true, reason: "Must match the commercial invoice exactly." },
-    { document: "Country of Origin Declaration", required: true, reason: "Required to confirm origin for tariff calculation." },
-    { document: "Product Photos", required: false, reason: "Strongly recommended — speeds up inspection if CBP queries the shipment." },
-    { document: "Bill of Materials", required: false, reason: "Useful for classification and compliance documentation." },
+    { document: "Commercial Invoice", required: true, responsibility: "supplier", reason: "Required for all imports — must show price, quantity, and party details." },
+    { document: "Packing List", required: true, responsibility: "supplier", reason: "Must match the commercial invoice exactly." },
+    { document: "Country-of-origin marking / declaration", required: true, responsibility: "importer_broker", reason: "Importer is responsible for legible country-of-origin marking (19 U.S.C. 1304)." },
+    { document: "CBP Form 3461 & 7501 (entry / entry summary)", required: true, responsibility: "importer_broker", reason: "Filed by the importer of record or customs broker — not a supplier document." },
+    { document: "Bill of Lading / Air Waybill", required: true, responsibility: "importer_broker", reason: "Transport document presented with the entry." },
   ];
 
   if (attrs.has_battery) {
-    docs.push({ document: "UN 38.3 Test Report", required: true, reason: "Required for battery transport and CPSC compliance." });
-    docs.push({ document: "SDS / MSDS", required: true, reason: "Required for lithium battery shipments." });
+    docs.push({ document: "UN 38.3 test summary", required: true, responsibility: "supplier", reason: "Required for lithium battery transport." });
+    docs.push({ document: "Safety Data Sheet (SDS)", required: true, responsibility: "supplier", reason: "Required for lithium battery shipments." });
   }
   if (attrs.is_children) {
-    docs.push({ document: "Children's Product Certificate (CPC)", required: true, reason: "Mandatory under CPSIA for products intended for children under 12." });
-    docs.push({ document: "CPSC-accredited test reports", required: true, reason: "Must be from a CPSC-accredited testing laboratory." });
+    docs.push({ document: "CPSC-accredited third-party test reports", required: true, responsibility: "supplier", reason: "Must be from a CPSC-accepted testing laboratory." });
+    docs.push({ document: "Children's Product Certificate (CPC)", required: true, responsibility: "importer_broker", reason: "Issued by the U.S. importer based on the accredited test reports." });
   }
   if (attrs.is_food_contact) {
-    docs.push({ document: "Food Contact Safety Declaration", required: true, reason: "Required to confirm materials meet FDA food-contact standards." });
+    docs.push({ document: "FDA food-contact compliance declaration", required: true, responsibility: "supplier", reason: "Confirms materials meet FDA food-contact standards (21 CFR 174–178)." });
   }
   if (attrs.is_cosmetic || attrs.is_supplement) {
-    docs.push({ document: "Safety Data Sheet (SDS)", required: true, reason: "Required for FDA-regulated products." });
-    docs.push({ document: "Ingredient / Formula List", required: true, reason: "Required for FDA labeling compliance." });
+    docs.push({ document: "Ingredient / safety documentation", required: false, responsibility: "conditional", reason: "Applicability depends on the product — confirm FDA obligations." });
   }
   if (attrs.is_electronic) {
-    docs.push({ document: "FCC Authorization / SDoC", required: true, reason: "Required before sale of electronic devices in the US." });
+    docs.push({ document: "FCC authorization / SDoC", required: false, responsibility: "conditional", reason: "Applicability depends on whether the device is an intentional/unintentional radiator." });
   }
   if (attrs.is_textile) {
-    docs.push({ document: "Fiber Content Certificate", required: true, reason: "Required for FTC textile labeling compliance." });
+    docs.push({ document: "Fiber content & care-labeling information (FTC 16 CFR 303)", required: true, responsibility: "supplier", reason: "Supplier provides fiber content and care-label data for FTC compliance." });
   }
 
   const brokerQuestions = [
@@ -887,9 +886,9 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         <ReadinessScore scan={riskScan} htsCode={confirmed.htsCode} />
       </section>
 
-      {/* Document checklist */}
+      {/* Document checklist — grouped by responsibility (supplier / importer-broker / conditional) */}
       <section>
-        <h3 className="mb-4 font-semibold">Ask your supplier for these documents</h3>
+        <h3 className="mb-4 font-semibold">{t(getLang(), "docs_section_title")}</h3>
         <DocumentChecklist items={riskScan.document_checklist} />
       </section>
 

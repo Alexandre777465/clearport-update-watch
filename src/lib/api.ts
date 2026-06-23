@@ -317,11 +317,16 @@ export interface RiskCategory {
   source?: SourceCitation;
 }
 
+export type DocumentResponsibility = "supplier" | "importer_broker" | "conditional";
+
 export interface DocumentChecklistItem {
   document: string;
   required: boolean;
   status?: "required" | "needs_confirmation";
   reason: string;
+  responsibility?: DocumentResponsibility;
+  finding_id?: string;
+  source?: SourceCitation;
   uploaded?: boolean;  // client-side state only
 }
 
