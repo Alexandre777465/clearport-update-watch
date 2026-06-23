@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 import { db } from '../db/client';
+import { htsCodesRelated } from './matchingEngine';
 import type { Alert, EmailType, WatchlistEntry } from '../types';
 
 // Lazy init — the server must start even when RESEND_API_KEY is not set
@@ -9,6 +10,50 @@ function getResend(): Resend | null {
   if (!process.env.RESEND_API_KEY) return null;
   if (!resendClient) resendClient = new Resend(process.env.RESEND_API_KEY);
   return resendClient;
+}
+
+function emailEnabled(): boolean {
+  return Boolean(process.env.RESEND_API_KEY) && process.env.ENABLE_EMAIL_ALERTS === 'true';
+}
+
+// Send with one retry on transient failure.
+async function sendWithRetry(opts: { to: string; subject: string; html: string }): Promise<void> {
+  const resend = getResend();
+  if (!resend) throw new Error('Resend not configured');
+  let lastErr: any;
+  for (let i = 0; i < 2; i++) {
+    try {
+      await resend.emails.send({ from: FROM, to: opts.to, subject: opts.subject, html: opts.html });
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (i === 0) await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  throw lastErr;
+}
+
+// Confirmation email when a product is registered for monitoring.
+export async function sendWatchlistConfirmation(entry: WatchlistEntry): Promise<void> {
+  if (!emailEnabled()) {
+    console.log(`[watchlist] (email disabled) would confirm monitoring to ${entry.email}`);
+    return;
+  }
+  const subject = `ClearPort is now monitoring: ${entry.product_name}`;
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;">
+      <h2 style="color:#1a1a2e;">Monitoring is active ✅</h2>
+      <p>ClearPort is now monitoring official U.S. trade sources for updates relevant to:</p>
+      <p style="font-size:16px;"><strong>${escHtml(entry.product_name)}</strong>${entry.hts_code ? ` <span style="color:#666;">(HTS ${escHtml(entry.hts_code)})</span>` : ''}</p>
+      <p>We'll email you only when a newly published official document genuinely matches this product or its HTS code. Each alert links to the official source.</p>
+      ${DISCLAIMER_HTML}
+    </div>`;
+  try {
+    await sendWithRetry({ to: entry.email, subject, html });
+    console.log(`[watchlist] Sent monitoring confirmation to ${entry.email}`);
+  } catch (err: any) {
+    console.error(`[watchlist] Confirmation email failed for ${entry.email}:`, err?.message);
+  }
 }
 const FROM = `${process.env.RESEND_FROM_NAME ?? 'ClearPort Alerts'} <${process.env.RESEND_FROM_EMAIL ?? 'alerts@clearport.io'}>`;
 const APP_URL = process.env.APP_URL ?? 'https://app.clearport.io';
@@ -174,49 +219,61 @@ export async function sendWatchlistAlerts(): Promise<void> {
 }
 
 async function sendWatchlistEntryAlert(entry: WatchlistEntry, since: string): Promise<void> {
-  const conditions: string[] = [];
-  if (entry.hts_code) conditions.push(`affected_hts_codes.cs.{"${entry.hts_code}"}`);
-  conditions.push(`affected_origin_countries.cs.{"${entry.origin_country}"}`);
+  // Alerts require an HTS code — match the same way the report does (no
+  // origin-only matching, which produced irrelevant alerts).
+  const digits = (entry.hts_code ?? '').replace(/[^0-9]/g, '');
+  if (digits.length < 4) return;
 
-  const { data: docs } = await db
+  const { data: candidates } = await db
     .from('source_documents')
-    .select(
-      'id, title, source_name, source_url, published_at, plain_english_summary, broker_questions, effective_date',
-    )
+    .select('id, title, source_name, source_url, published_at, plain_english_summary, effective_date, affected_hts_codes')
     .eq('is_processed', true)
     .gte('published_at', since)
-    .or(conditions.join(','))
     .order('published_at', { ascending: false })
-    .limit(10);
+    .limit(100);
 
-  if (!docs?.length) return;
+  const matched = (candidates ?? []).filter(
+    (d: any) => Array.isArray(d.affected_hts_codes) && d.affected_hts_codes.some((c: string) => htsCodesRelated(c, entry.hts_code!)),
+  );
+  if (!matched.length) return;
 
-  if (process.env.ENABLE_EMAIL_ALERTS !== 'true') {
-    console.log(
-      `[watchlist] Would send ${docs.length} update(s) to ${entry.email} for "${entry.product_name}"`,
-    );
-    await db
-      .from('watchlist_entries')
-      .update({ last_alerted_at: new Date().toISOString() })
-      .eq('id', entry.id);
-    return;
+  // Per-event dedup: drop documents already logged for this entry.
+  const { data: already } = await db
+    .from('watchlist_alert_log')
+    .select('source_document_id')
+    .eq('watchlist_entry_id', entry.id);
+  const sentIds = new Set((already ?? []).map((r: any) => r.source_document_id));
+  const fresh = matched.filter((d: any) => !sentIds.has(d.id));
+  if (!fresh.length) return;
+
+  if (!emailEnabled()) {
+    console.log(`[watchlist] (email disabled) would send ${fresh.length} matched update(s) to ${entry.email} for "${entry.product_name}"`);
+    return; // do NOT mark as sent while disabled, so they go out once enabled
   }
 
-  const resend = getResend();
-  if (!resend) {
-    console.log(`[watchlist] RESEND_API_KEY not set — skipped alert to ${entry.email}`);
-    return;
+  const count = fresh.length;
+  const subject = `[ClearPort] ${count} official update${count !== 1 ? 's' : ''} may affect: ${entry.product_name}`;
+  const html = buildWatchlistEmailHtml(entry, fresh as any[]);
+
+  let status = 'sent';
+  let error: string | null = null;
+  try {
+    await sendWithRetry({ to: entry.email, subject, html });
+  } catch (err: any) {
+    status = 'failed';
+    error = err?.message ?? 'send failed';
+    console.error(`[watchlist] Alert send failed for ${entry.email}:`, error);
   }
 
-  const count = docs.length;
-  const subject = `[ClearPort] ${count} trade update${count !== 1 ? 's' : ''} may affect: ${entry.product_name}`;
-  const html = buildWatchlistEmailHtml(entry, docs as any[]);
-
-  await resend.emails.send({ from: FROM, to: entry.email, subject, html });
-  await db
-    .from('watchlist_entries')
-    .update({ last_alerted_at: new Date().toISOString() })
-    .eq('id', entry.id);
+  // Log each document so it is never re-sent (and failures are visible).
+  const rows = fresh.map((d: any) => ({
+    watchlist_entry_id: entry.id, source_document_id: d.id, email: entry.email,
+    kind: 'alert', status, error_message: error,
+  }));
+  await db.from('watchlist_alert_log').insert(rows).then(() => {}, () => {});
+  if (status === 'sent') {
+    await db.from('watchlist_entries').update({ last_alerted_at: new Date().toISOString() }).eq('id', entry.id);
+  }
 }
 
 function buildWatchlistEmailHtml(entry: WatchlistEntry, docs: any[]): string {

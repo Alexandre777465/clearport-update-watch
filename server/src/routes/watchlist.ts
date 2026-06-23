@@ -13,6 +13,7 @@ import { db } from '../db/client';
 import { generateRiskScan } from '../services/riskScanner';
 import { htsCodesRelated } from '../services/matchingEngine';
 import { evaluateBaselines } from '../services/baselines';
+import { sendWatchlistConfirmation } from '../services/emailService';
 
 // Email is only truthfully "active" when a Resend key is present AND alerts
 // are enabled. The frontend uses this to avoid promising emails it can't send.
@@ -120,6 +121,8 @@ router.post('/', async (req, res) => {
 
   // Kick off the scan in the background — do NOT await. Respond immediately.
   void runScanInBackground(entry, previewDocs, data.estimated_value_usd);
+  // Confirmation email (no-op unless Resend + ENABLE_EMAIL_ALERTS are configured).
+  void sendWatchlistConfirmation(entry as any);
 
   return res.status(201).json({
     id: entry.id,
