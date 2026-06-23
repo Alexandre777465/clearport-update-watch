@@ -51,8 +51,13 @@ export async function fetchAndStoreHtsBaseline(rawHts: string): Promise<HtsBasel
   if (digits.length < 6) return null;
 
   const hts8 = digits.slice(0, 8);
-  const dotted = toDotted(digits);
-  const url = `${HTS_API}?from=${encodeURIComponent(dotted)}&to=${encodeURIComponent(dotted)}&format=JSON&styles=false`;
+  // The rate often lives on a 10-digit statistical line, not the 8-digit code,
+  // so an exact from=to query on an 8-digit code returns []. Query a RANGE that
+  // covers all children of the provided heading/subheading and pick the leaf.
+  const base = digits.slice(0, 8).padEnd(8, '0');
+  const fromDotted = toDotted(base + '0000');
+  const toDotted_ = toDotted(base + '9999');
+  const url = `${HTS_API}?from=${encodeURIComponent(fromDotted)}&to=${encodeURIComponent(toDotted_)}&format=JSON&styles=false`;
 
   let rows: any[];
   try {
@@ -96,7 +101,7 @@ export async function fetchAndStoreHtsBaseline(rawHts: string): Promise<HtsBasel
     mfn_text_rate,
     mfn_ad_valorem_pct,
     section301_ref,
-    source_url: `https://hts.usitc.gov/?query=${encodeURIComponent(dotted)}`,
+    source_url: `https://hts.usitc.gov/?query=${encodeURIComponent(toDotted(digits))}`,
   };
 
   await persist(result);

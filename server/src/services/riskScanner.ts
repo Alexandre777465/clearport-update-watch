@@ -325,12 +325,51 @@ function finalizeScan(scan: ScanResult, baselines: RiskCategory[]): ScanResult {
   const supported = merged.filter(
     (c) => c.verification_status === 'verified_applicable' || c.verification_status === 'official_unconfirmed',
   );
+  const verified = supported.filter((c) => c.verification_status === 'verified_applicable');
+  const unconfirmed = supported.filter((c) => c.verification_status === 'official_unconfirmed');
   const rank = (lvl: string) => order[lvl] ?? 5;
   const worst = supported.reduce<string>((acc, c) => (rank(c.level) < rank(acc) ? c.level : acc), 'Low');
   const overall_risk = (['Critical', 'High', 'Medium', 'Low'].includes(worst) ? worst : 'Low') as ScanResult['overall_risk'];
+
+  // Deterministic summary built ONLY from supported findings.
   const overall_summary = supported.length
-    ? scan.overall_summary
+    ? `Based on official sources, ClearPort verified ${verified.length} applicable requirement${verified.length === 1 ? '' : 's'}` +
+      (unconfirmed.length
+        ? ` and found ${unconfirmed.length} official requirement${unconfirmed.length === 1 ? '' : 's'} whose applicability needs confirmation`
+        : '') +
+      `. Highest verified/applicable risk: ${overall_risk}.`
     : 'ClearPort could not verify any applicable requirements from official sources for the details provided. Add an HTS code and product attributes for a fuller, source-backed assessment.';
+
+  // Next actions / broker / supplier questions — derived ONLY from supported findings.
+  const next_actions = dedupeStrings(
+    supported.map((c) => c.action).filter((a): a is string => !!a),
+  ).slice(0, 6);
+
+  const broker_questions = dedupeStrings([
+    ...(scan.risk_categories.some((c) => c.category.toLowerCase().includes('duty') && c.verification_status === 'verified_applicable')
+      ? ['Can you confirm the HTS classification so the verified base duty rate applies, and the total duty including any trade-remedy tariffs?']
+      : []),
+    ...unconfirmed.map(
+      (c) => `Does "${c.category}" apply to this product${c.source?.cfr_citation ? ` under ${c.source.cfr_citation}` : ''}, and what exactly is required?`,
+    ),
+    ...verified
+      .filter((c) => c.source?.agency && c.source.agency !== 'USITC')
+      .map((c) => `What documentation proves compliance with ${c.category} (${c.source?.cfr_citation ?? c.source?.agency})?`),
+  ]).slice(0, 6);
+
+  const supplier_questions = dedupeStrings(
+    verified
+      .filter((c) => c.source?.agency && c.source.agency !== 'USITC')
+      .map((c) => `Can you provide documentation/test evidence for ${c.category} (${c.source?.cfr_citation ?? c.source?.agency})?`),
+  ).slice(0, 6);
+
+  // Readiness from supported findings only: clearer (verified rate) raises it;
+  // each mandatory requirement / unconfirmed item lowers it (more to resolve).
+  let readiness = 60;
+  if (verified.some((c) => c.category.toLowerCase().includes('duty'))) readiness += 15;
+  readiness -= 7 * verified.filter((c) => c.source?.agency !== 'USITC').length;
+  readiness -= 4 * unconfirmed.length;
+  const readiness_score = Math.max(10, Math.min(95, readiness));
 
   // Gate the document checklist: "required" only when a verified rule backs it.
   const verifiedTopics = new Set<string>();
@@ -350,5 +389,19 @@ function finalizeScan(scan: ScanResult, baselines: RiskCategory[]): ScanResult {
     overall_summary,
     risk_categories: merged,
     document_checklist: checklist,
+    broker_questions,
+    supplier_questions,
+    next_actions,
+    readiness_score,
   };
+}
+
+function dedupeStrings(arr: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of arr) {
+    const k = s.trim().toLowerCase();
+    if (k && !seen.has(k)) { seen.add(k); out.push(s.trim()); }
+  }
+  return out;
 }
