@@ -61,6 +61,17 @@ function toDotted(digits: string): string {
   return parts.join('.');
 }
 
+// Format a normalized digit string (8 or 10 digits) as a dotted HTS code.
+// 8 digits → "XXXX.XX.XX"    (heading + subheading)
+// 10 digits → "XXXX.XX.XX.XX" (full statistical line)
+export function formatHts(raw: string): string {
+  const n = (raw ?? '').replace(/[^0-9]/g, '');
+  if (n.length > 8) {
+    return [n.slice(0, 4), n.slice(4, 6), n.slice(6, 8), n.slice(8, 10)].filter(Boolean).join('.');
+  }
+  return [n.slice(0, 4), n.slice(4, 6), n.slice(6, 8)].filter(Boolean).join('.');
+}
+
 function parseAdValorem(rate: string | null): number | null {
   if (!rate) return null;
   if (/free/i.test(rate)) return 0;
@@ -154,11 +165,16 @@ export function resolveHtsRows(requestedRaw: string, rows: any[] | null): HtsLoo
 
     if (rated) {
       const mfn_text_rate = (rated.general as string) || null;
+      // Preserve the full 10-digit statistical line when the user submitted one.
+      // Using only 8 digits would truncate a valid code like 8708.30.50.20 to
+      // 8708.30.50, losing the statistical suffix in every display and citation.
+      const resolvedCode = requested.length === 10 ? requested : req8;
+      const ratedHtsno: string = (rated as any).htsno ?? toDotted(resolvedCode);
       return {
         match_level: 'exact',
         requested,
-        hts8: req8,
-        matched_htsno: rated.htsno ?? toDotted(req8),
+        hts8: resolvedCode,  // 10-digit when input was 10-digit
+        matched_htsno: ratedHtsno,
         description: (rated.description as string) || 'Classified merchandise',
         mfn_text_rate,
         mfn_ad_valorem_pct: parseAdValorem(mfn_text_rate),

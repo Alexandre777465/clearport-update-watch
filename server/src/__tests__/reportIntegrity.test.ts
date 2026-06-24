@@ -23,9 +23,10 @@
  */
 
 import { test, expect, describe } from 'bun:test';
-import { resolveHtsRows } from '../services/htsBaseline';
-import { assembleBaselines, type RegulatoryBaselineRow } from '../services/baselines';
+import { resolveHtsRows, formatHts } from '../services/htsBaseline';
+import { assembleBaselines, buildCoverageMatrix, type RegulatoryBaselineRow } from '../services/baselines';
 import { finalizeScan, translateScanToZh, type ScanResult } from '../services/riskScanner';
+import { evaluateScopeMatch, type AdcvdOrderRow } from '../services/adcvdScanner';
 import type { WatchlistEntry, RiskCategory } from '../types';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -496,6 +497,218 @@ describe('Canonical pipeline identity (EN = ZH baseline)', () => {
     // Section 301 + FTC textile must be present.
     expect(enFinal.risk_categories.some((c) => c.id === 'hts_section301')).toBe(true);
     expect(enFinal.risk_categories.some((c) => c.id === 'reg_ftc_textile_labeling')).toBe(true);
+  });
+});
+
+// ── NEW: 10-digit HTS formatting ──────────────────────────────────────────────
+describe('10-digit HTS formatting and resolution', () => {
+  test('formatHts handles 8-digit codes (3 groups)', () => {
+    expect(formatHts('87083050')).toBe('8708.30.50');
+    expect(formatHts('61091000')).toBe('6109.10.00');
+  });
+
+  test('formatHts handles 10-digit statistical lines (4 groups)', () => {
+    expect(formatHts('8708305020')).toBe('8708.30.50.20');
+    expect(formatHts('8708305060')).toBe('8708.30.50.60');
+  });
+
+  test('formatHts strips dots before formatting', () => {
+    expect(formatHts('8708.30.5020')).toBe('8708.30.50.20');
+    expect(formatHts('8708.30.50.20')).toBe('8708.30.50.20');
+  });
+
+  test('8708.30.5020 resolves as exact — not downgraded to 8708.30.50', () => {
+    // USITC returns a 10-digit row "8708.30.50.20" with a rate.
+    // The brake drum statistical line must survive normalization.
+    const rows = [
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '2.5%', footnotes: [] },
+    ];
+    const r = resolveHtsRows('8708.30.5020', rows);
+    expect(r.match_level).toBe('exact');
+    // hts8 must preserve the 10-digit code, not truncate to 8.
+    expect(r.hts8).toBe('8708305020');
+    expect(formatHts(r.hts8!)).toBe('8708.30.50.20');
+    expect(r.mfn_ad_valorem_pct).toBe(2.5);
+  });
+
+  test('8708305020 and 8708.30.50.20 and 8708.30.5020 all resolve identically', () => {
+    const rows = [
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '2.5%', footnotes: [] },
+    ];
+    const a = resolveHtsRows('8708305020', rows);
+    const b = resolveHtsRows('8708.30.50.20', rows);
+    const c = resolveHtsRows('8708.30.5020', rows);
+    expect(a.match_level).toBe('exact');
+    expect(b.match_level).toBe('exact');
+    expect(c.match_level).toBe('exact');
+    expect(a.hts8).toBe(b.hts8);
+    expect(b.hts8).toBe(c.hts8);
+    expect(a.mfn_ad_valorem_pct).toBe(2.5);
+  });
+});
+
+// ── NEW: AD/CVD scope match (pure, no DB) ────────────────────────────────────
+const BRAKE_DRUM_AD_ORDER: AdcvdOrderRow = {
+  id: 'A-570-174',
+  case_type: 'AD',
+  product_description: 'Brake Drums from China',
+  origin_country: 'China',
+  scope_text: 'Brake drums that are composed primarily of gray cast iron, inside diameter 14.75–16.60 inches, weigh at least 50 pounds.',
+  hts_codes: ['8708.30.50.20', '8708.30.50.60'],
+  order_published_at: '2022-09-12',
+  effective_date: '2022-09-12',
+  status: 'active',
+  china_wide_rate_pct: null,
+  rates_jsonb: null,
+  official_url: 'https://www.federalregister.gov/documents/2022/09/12/2022-19571/brake-drums-from-the-peoples-republic-of-china-antidumping-duty-order',
+  federal_register_ref: '87 FR 55699 (Sept. 12, 2022)',
+  scope_exclusions: ['Composite brake drums (more than 38 percent steel by weight)'],
+  last_verified_at: '2024-06-01',
+};
+
+describe('AD/CVD scope match — pure (no DB)', () => {
+  const brakeDrumEntry: WatchlistEntry = entry({
+    product_name: 'Heavy-Duty Cast-Iron Truck Brake Drum',
+    product_description:
+      'Finished gray cast-iron brake drum for a commercial truck or trailer, inside diameter 15.5 inches, weight 65 pounds, manufactured in China. Not a composite drum and contains less than 38% steel by weight.',
+    hts_code: '8708.30.5020',
+    origin_country: 'China',
+  });
+
+  test('brake drum with full facts → likely_match', () => {
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, brakeDrumEntry);
+    expect(r.scope_match).toBe('likely_match');
+    expect(r.matched_facts.some((f) => /brake drum/i.test(f))).toBe(true);
+    expect(r.matched_facts.some((f) => /cast iron/i.test(f))).toBe(true);
+    expect(r.matched_facts.some((f) => /15\.5/i.test(f))).toBe(true);
+    expect(r.matched_facts.some((f) => /65/i.test(f))).toBe(true);
+    expect(r.matched_facts.some((f) => /composite/i.test(f))).toBe(true);
+  });
+
+  test('brake drum missing weight and diameter → official_unconfirmed', () => {
+    const incompleteEntry: WatchlistEntry = entry({
+      product_name: 'Cast-Iron Brake Drum',
+      product_description: 'Gray cast iron brake drum from China.',
+      origin_country: 'China',
+    });
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, incompleteEntry);
+    expect(r.scope_match).toBe('official_unconfirmed');
+    expect(r.missing_facts.some((f) => /diameter/i.test(f))).toBe(true);
+    expect(r.missing_facts.some((f) => /weight/i.test(f))).toBe(true);
+  });
+
+  test('composite drum (>38% steel) → excluded', () => {
+    const compositeEntry: WatchlistEntry = entry({
+      product_name: 'Composite Brake Drum',
+      product_description: 'Composite brake drum, 45% steel by weight.',
+      origin_country: 'China',
+    });
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, compositeEntry);
+    expect(r.scope_match).toBe('excluded');
+    expect(r.excluded_by).toBeTruthy();
+  });
+
+  test('outside diameter range → excluded', () => {
+    const smallEntry: WatchlistEntry = entry({
+      product_name: 'Small Brake Drum',
+      product_description: 'Gray cast iron brake drum, inside diameter 12 inches, weight 65 pounds.',
+      origin_country: 'China',
+    });
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, smallEntry);
+    expect(r.scope_match).toBe('excluded');
+    expect(r.excluded_by).toMatch(/diameter/i);
+  });
+
+  test('non-brake-drum product → no_match', () => {
+    const unrelatedEntry: WatchlistEntry = entry({
+      product_name: 'Cotton T-Shirt',
+      product_description: 'Men\'s cotton t-shirt',
+      origin_country: 'China',
+    });
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, unrelatedEntry);
+    expect(r.scope_match).toBe('no_match');
+  });
+
+  test('missing producer/exporter does NOT suppress a scope match', () => {
+    // Missing producer/exporter → still returns likely_match (never suppressed).
+    // Producer/exporter goes into missing_facts for rate purposes only.
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, brakeDrumEntry);
+    expect(r.scope_match).toBe('likely_match');
+    // Missing facts include producer/exporter but result is still likely_match.
+    expect(r.missing_facts.some((f) => /producer|exporter/i.test(f))).toBe(true);
+  });
+});
+
+// ── NEW: Coverage matrix completeness ────────────────────────────────────────
+describe('Coverage matrix — completeness invariants', () => {
+  test('brake drum coverage matrix includes MFN, AD/CVD, NHTSA, customs', () => {
+    const e = entry({
+      product_name: 'Heavy-Duty Brake Drum',
+      product_description: 'Gray cast iron brake drum, 15.5 inches, 65 lbs.',
+      hts_code: '8708.30.5020',
+      origin_country: 'China',
+    });
+    const hts = resolveHtsRows('8708305020', [
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '2.5%', footnotes: [] },
+    ]);
+
+    const baselines = assembleBaselines(e, 50_000, hts, REG_BASELINES);
+    // Coverage matrix: no adcvd findings from pure assembleBaselines, but all domains present.
+    const coverage = buildCoverageMatrix(e, baselines, [], hts, '8708305020', REG_BASELINES);
+
+    expect(coverage.length).toBeGreaterThan(0);
+
+    // MFN duty must be in coverage
+    const mfn = coverage.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('verified_applicable');
+
+    // Customs entry must be in coverage
+    const customs = coverage.find((c) => c.domain_key === 'customs_entry');
+    expect(customs).toBeDefined();
+    expect(customs!.status).toBe('verified_applicable');
+
+    // NHTSA must be in coverage (HTS 8708.xx triggers it)
+    const nhtsa = coverage.find((c) => c.domain_key === 'nhtsa_fmvss');
+    expect(nhtsa).toBeDefined();
+    expect(['official_unconfirmed', 'insufficient_info']).toContain(nhtsa!.status);
+
+    // Children's products must be not_applicable (is_children = false)
+    const cpsc = coverage.find((c) => c.domain_key === 'cpsc');
+    expect(cpsc?.status).toBe('not_applicable');
+  });
+
+  test('every product gets a coverage matrix with at least customs + MFN entries', () => {
+    const e = entry({ product_name: 'Generic Widget', hts_code: '8716.39.00' });
+    const hts = resolveHtsRows('8716.39.00', exactRows('8716.39.00', 'Trailers', 'Free'));
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const coverage = buildCoverageMatrix(e, baselines, [], hts, '87163900', REG_BASELINES);
+
+    expect(coverage.find((c) => c.domain_key === 'customs_entry')).toBeDefined();
+    expect(coverage.find((c) => c.domain_key === 'mfn_duty')).toBeDefined();
+    // Coverage must never be empty — always at least customs + tariff domains
+    expect(coverage.length).toBeGreaterThan(3);
+  });
+
+  test('coverage matrix never silently omits a domain for a previously failing product', () => {
+    // Regression: the brake-drum report only showed 2 findings. After this fix,
+    // the coverage matrix must list every domain that was screened.
+    const e = entry({ product_name: 'Brake Drum', hts_code: '8708.30.5020', origin_country: 'China' });
+    const hts = resolveHtsRows('8708305020', [
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '2.5%', footnotes: [] },
+    ]);
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const coverage = buildCoverageMatrix(e, baselines, [], hts, '8708305020', REG_BASELINES);
+
+    // All 7+ domains checked — none silently dropped.
+    const domainKeys = coverage.map((c) => c.domain_key);
+    expect(domainKeys).toContain('mfn_duty');
+    expect(domainKeys).toContain('section_301');
+    expect(domainKeys).toContain('customs_entry');
+    expect(domainKeys).toContain('nhtsa_fmvss');
+    expect(domainKeys).toContain('cpsc');
+    expect(domainKeys).toContain('fda');
+    expect(domainKeys).toContain('dot_phmsa');
   });
 });
 

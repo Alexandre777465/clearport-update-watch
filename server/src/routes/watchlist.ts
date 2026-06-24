@@ -144,13 +144,17 @@ async function runScanInBackground(
   estimatedValueUsd?: number,
 ): Promise<void> {
   try {
-    // Deterministic, source-backed baselines first (USITC HTS + curated registry).
-    const baselineCategories = await evaluateBaselines(entry, estimatedValueUsd).catch(() => []);
+    // Deterministic, source-backed baselines first (USITC HTS + curated registry + AD/CVD).
+    const baselineResult = await evaluateBaselines(entry, estimatedValueUsd).catch(
+      () => ({ categories: [] as any[], coverage: [] as any[], missingFacts: [] as string[] }),
+    );
 
     const result = await generateRiskScan(entry, {
       documents: previewDocs as any,
       estimatedValueUsd,
-      baselineCategories,
+      baselineCategories: baselineResult.categories,
+      coverageMatrix: baselineResult.coverage,
+      missingFacts: baselineResult.missingFacts,
     });
 
     if (!result) {
@@ -178,6 +182,8 @@ async function runScanInBackground(
         next_actions: result.next_actions,
         readiness_score: result.readiness_score,
         confidence_level: result.confidence_level,
+        coverage_matrix: result.coverage_matrix ?? null,
+        missing_facts: result.missing_facts ?? null,
         translation_status: needsTranslation ? 'pending' : null,
       })
       .select('id')

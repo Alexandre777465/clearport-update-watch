@@ -6,8 +6,9 @@
  */
 
 import { db } from '../db/client';
-import type { WatchlistEntry, RiskCategory, RiskLevel } from '../types';
-import { lookupHtsBaseline, normalizeHts, type HtsLookupResult } from './htsBaseline';
+import type { WatchlistEntry, RiskCategory, RiskLevel, CoverageItem, CoverageStatus } from '../types';
+import { lookupHtsBaseline, normalizeHts, formatHts, type HtsLookupResult } from './htsBaseline';
+import { screenAdcvd, adcvdFindingsToCategories, adcvdFindingsToCoverage } from './adcvdScanner';
 
 type AttrKey = keyof Pick<
   WatchlistEntry,
@@ -49,18 +50,25 @@ function attrsMatch(entry: WatchlistEntry, a: Applicability): boolean {
   return true;
 }
 
+export interface BaselineResult {
+  categories: RiskCategory[];
+  coverage: CoverageItem[];
+  missingFacts: string[];
+}
+
 export async function evaluateBaselines(
   entry: WatchlistEntry,
   estimatedValueUsd?: number,
-): Promise<RiskCategory[]> {
-  // IO: fetch the official HTS state (always a structured result) and the
-  // curated regulatory baselines. The pure assembly happens in assembleBaselines.
-  const hts =
-    entry.hts_code && normalizeHts(entry.hts_code).length >= 4
-      ? await lookupHtsBaseline(entry.hts_code).catch(
+): Promise<BaselineResult> {
+  const normalizedHts = normalizeHts(entry.hts_code ?? '');
+
+  // Parallel IO: HTS lookup + regulatory baselines + AD/CVD screening
+  const [hts, regRowsResult, adcvdFindings] = await Promise.all([
+    entry.hts_code && normalizedHts.length >= 4
+      ? lookupHtsBaseline(entry.hts_code).catch(
           (): HtsLookupResult => ({
             match_level: 'outage',
-            requested: normalizeHts(entry.hts_code ?? ''),
+            requested: normalizedHts,
             hts8: null,
             matched_htsno: null,
             description: null,
@@ -72,19 +80,32 @@ export async function evaluateBaselines(
             note: 'The official USITC HTS service could not be reached.',
           }),
         )
-      : null;
+      : Promise.resolve(null),
 
-  const { data: rows } = await db
-    .from('regulatory_baselines')
-    .select('*')
-    .eq('is_current', true);
+    db.from('regulatory_baselines').select('*').eq('is_current', true),
 
-  return assembleBaselines(
-    entry,
-    typeof estimatedValueUsd === 'number' && estimatedValueUsd > 0 ? estimatedValueUsd : null,
-    hts,
-    (rows ?? []) as unknown as RegulatoryBaselineRow[],
+    // AD/CVD screening is fault-tolerant — returns [] if table not yet created
+    screenAdcvd(entry, normalizedHts).catch(() => []),
+  ]);
+
+  const regRows = (regRowsResult.data ?? []) as unknown as RegulatoryBaselineRow[];
+  const value = typeof estimatedValueUsd === 'number' && estimatedValueUsd > 0 ? estimatedValueUsd : null;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const baseCategories = assembleBaselines(entry, value, hts, regRows, today);
+  const adcvdCategories = adcvdFindingsToCategories(adcvdFindings, today);
+  const categories = [...baseCategories, ...adcvdCategories];
+
+  // Build coverage matrix from all checked domains
+  const adcvdCoverage = adcvdFindingsToCoverage(adcvdFindings, adcvdCategories);
+  const coverage = buildCoverageMatrix(entry, categories, adcvdCoverage, hts, normalizedHts, regRows);
+
+  // Aggregate missing facts from AD/CVD scope analysis
+  const missingFacts = Array.from(
+    new Set(adcvdFindings.flatMap((f) => f.missing_facts)),
   );
+
+  return { categories, coverage, missingFacts };
 }
 
 /**
@@ -280,10 +301,6 @@ export function assembleBaselines(
   return out;
 }
 
-function formatHts(d: string): string {
-  return [d.slice(0, 4), d.slice(4, 6), d.slice(6, 8)].filter(Boolean).join('.');
-}
-
 function describeApplicability(a: Applicability): string {
   const parts: string[] = [];
   if (a.all_of?.length) parts.push(a.all_of.map(prettyAttr).join(' and '));
@@ -303,4 +320,224 @@ function prettyAttr(k: AttrKey): string {
     is_supplement: 'a supplement/food/medical-adjacent product',
   };
   return map[k];
+}
+
+// ── Coverage matrix builder ───────────────────────────────────────────────────
+// Produces the "What ClearPort checked" matrix. Every domain that ClearPort
+// knows how to screen for this product class gets a status — even when the
+// result is "no applicable rule found" or "not applicable."
+
+const DOMAIN_REGISTRY: Array<{
+  key: string;
+  label: string;
+  cat: CoverageItem['category'];
+  // Returns whether to include this domain at all (true = check it)
+  relevant: (entry: WatchlistEntry, hts: string) => boolean;
+  // Returns status given what was found in categories
+  resolve: (
+    cats: RiskCategory[],
+    entry: WatchlistEntry,
+    hts: HtsLookupResult | null,
+    regRows: RegulatoryBaselineRow[],
+  ) => { status: CoverageStatus; note?: string; missing?: string[] };
+}> = [
+  {
+    key: 'mfn_duty',
+    label: 'MFN / Base Duty (USITC HTS)',
+    cat: 'tariff',
+    relevant: (_e, hts) => hts.length >= 4,
+    resolve: (cats, _e, hts) => {
+      if (!hts) return { status: 'insufficient_info', note: 'No HTS code submitted' };
+      const c = cats.find((x) => x.id === 'hts_duty');
+      if (!c) return { status: 'source_unavailable', note: 'HTS lookup did not return a duty card' };
+      if (c.verification_status === 'verified_applicable')
+        return { status: 'verified_applicable', note: `MFN rate: ${hts.mfn_text_rate ?? 'confirmed from USITC'}` };
+      if (c.verification_status === 'official_unconfirmed')
+        return { status: 'official_unconfirmed', note: 'HTS heading found; exact 10-digit line needed to confirm rate', missing: ['exact 10-digit HTS statistical line'] };
+      if (hts.match_level === 'outage') return { status: 'source_unavailable', note: 'USITC HTS service temporarily unavailable' };
+      return { status: 'insufficient_info', note: 'HTS code not found in USITC database' };
+    },
+  },
+  {
+    key: 'section_301',
+    label: 'Section 301 China Tariff (Chapter 99)',
+    cat: 'tariff',
+    relevant: (_e, _hts) => true,
+    resolve: (cats, entry, hts) => {
+      if (!entry.origin_country.toLowerCase().includes('china'))
+        return { status: 'not_applicable', note: 'Not applicable — origin is not China' };
+      const c = cats.find((x) => x.id === 'hts_section301');
+      if (c) return { status: 'official_unconfirmed', note: `Chapter 99 cross-reference ${hts?.section301_ref ?? ''} found in official HTS footnote` };
+      if (hts && hts.match_level === 'exact' && !hts.section301_ref)
+        return { status: 'no_applicable_rule', note: 'No Section 301 footnote found on the matched HTS line' };
+      if (hts && (hts.match_level === 'parent' || hts.match_level === 'ambiguous'))
+        return { status: 'insufficient_info', note: '10-digit HTS line needed to confirm Section 301 cross-reference', missing: ['exact 10-digit HTS code'] };
+      return { status: 'insufficient_info', note: 'HTS code required to screen Section 301 footnotes', missing: ['exact HTS code'] };
+    },
+  },
+  {
+    key: 'section_232',
+    label: 'Section 232 (Steel / Aluminum)',
+    cat: 'tariff',
+    relevant: (_e, hts) => {
+      const h = hts.slice(0, 4);
+      // Core S232 chapters: 72 (steel), 73 (iron/steel articles), 76 (aluminum)
+      return ['7201','7202','7203','7204','7205','7206','7207','7208','7209','7210',
+              '7211','7212','7213','7214','7215','7216','7217','7218','7219','7220',
+              '7221','7222','7223','7224','7225','7226','7227','7228','7229',
+              '7301','7302','7303','7304','7305','7306','7307','7308','7309','7310',
+              '7311','7312','7313','7314','7315','7316','7317','7318','7319','7320',
+              '7321','7322','7323','7324','7325','7326',
+              '7601','7602','7603','7604','7605','7606','7607','7608','7609','7610',
+              '7611','7612','7613','7614','7615','7616'].some((p) => h === p.slice(0, 4));
+    },
+    resolve: () => ({ status: 'official_unconfirmed', note: 'Product HTS falls in steel/aluminum tariff chapters — confirm Section 232 applicability with your broker' }),
+  },
+  {
+    key: 'adcvd_screened',
+    label: 'AD/CVD Orders (standing)',
+    cat: 'trade_remedy',
+    relevant: () => true,
+    resolve: (cats) => {
+      const adcvd = cats.filter((c) => c.id?.startsWith('adcvd_'));
+      if (adcvd.length > 0) return { status: 'likely_match', note: `${adcvd.length} active AD/CVD order(s) screened — see detailed findings` };
+      return { status: 'no_applicable_rule', note: 'No active AD/CVD orders matched this HTS code and origin' };
+    },
+  },
+  {
+    key: 'customs_entry',
+    label: 'Customs Entry & CBP Filing',
+    cat: 'customs',
+    relevant: () => true,
+    resolve: (cats) => {
+      const c = cats.find((x) => x.id === 'cbp_entry');
+      return c ? { status: 'verified_applicable', note: 'Required for all commercial U.S. imports' } : { status: 'insufficient_info' };
+    },
+  },
+  {
+    key: 'origin_marking',
+    label: 'Country-of-Origin Marking (CBP)',
+    cat: 'customs',
+    relevant: () => true,
+    resolve: (cats) => {
+      const c = cats.find((x) => x.id === 'cbp_entry');
+      return c ? { status: 'verified_applicable', note: 'Required — goods must be legibly marked with country of origin (19 U.S.C. 1304)' } : { status: 'insufficient_info' };
+    },
+  },
+  {
+    key: 'cpsc',
+    label: 'Product Safety (CPSC / CPSIA)',
+    cat: 'product_regulation',
+    relevant: () => true,
+    resolve: (cats, entry) => {
+      const c = cats.find((x) => x.id === 'reg_cpsia_childrens_product');
+      if (c) return { status: c.verification_status === 'verified_applicable' ? 'verified_applicable' : 'official_unconfirmed' };
+      if (!entry.is_children) return { status: 'not_applicable', note: 'Not a children\'s product — CPSIA third-party testing not required' };
+      return { status: 'no_applicable_rule' };
+    },
+  },
+  {
+    key: 'fda',
+    label: 'FDA Requirements',
+    cat: 'product_regulation',
+    relevant: () => true,
+    resolve: (cats, entry) => {
+      const fdaCats = cats.filter((c) => c.id?.startsWith('reg_fda'));
+      if (fdaCats.length > 0) return { status: fdaCats[0].verification_status === 'verified_applicable' ? 'verified_applicable' : 'official_unconfirmed' };
+      if (!entry.is_food_contact && !entry.is_cosmetic && !entry.is_supplement)
+        return { status: 'not_applicable', note: 'Not food-contact, cosmetic, or supplement — no FDA requirement triggered' };
+      return { status: 'no_applicable_rule' };
+    },
+  },
+  {
+    key: 'fcc',
+    label: 'FCC Emissions & Equipment Authorization',
+    cat: 'product_regulation',
+    relevant: () => true,
+    resolve: (cats, entry) => {
+      const c = cats.find((x) => x.id === 'reg_fcc_part15_rf');
+      if (c) return { status: 'official_unconfirmed', note: 'Electronic device — FCC authorization may be required' };
+      if (!entry.is_electronic) return { status: 'not_applicable', note: 'Not an electronic device — FCC Part 15 not triggered' };
+      return { status: 'no_applicable_rule' };
+    },
+  },
+  {
+    key: 'dot_phmsa',
+    label: 'Hazardous Materials Transport (DOT/PHMSA)',
+    cat: 'product_regulation',
+    relevant: () => true,
+    resolve: (cats, entry) => {
+      const c = cats.find((x) => x.id === 'reg_lithium_battery_transport');
+      if (c) return { status: c.verification_status === 'verified_applicable' ? 'verified_applicable' : 'official_unconfirmed' };
+      if (!entry.has_battery) return { status: 'not_applicable', note: 'No battery — DOT/PHMSA lithium battery transport rules not triggered' };
+      return { status: 'no_applicable_rule' };
+    },
+  },
+  {
+    key: 'nhtsa_fmvss',
+    label: 'NHTSA / FMVSS (Motor Vehicle Equipment)',
+    cat: 'product_regulation',
+    relevant: (_e, hts) => hts.startsWith('8708') || hts.startsWith('8711') || hts.startsWith('8714') || hts.startsWith('8701') || hts.startsWith('8702') || hts.startsWith('8703') || hts.startsWith('8704') || hts.startsWith('8705') || hts.startsWith('8706') || hts.startsWith('8707'),
+    resolve: (cats) => {
+      const c = cats.find((x) => x.id === 'reg_nhtsa_fmvss');
+      if (c) return { status: 'official_unconfirmed', note: 'Automotive parts may be subject to FMVSS — confirm with NHTSA and importer', missing: ['vehicle type and use (OEM vs. replacement)', 'whether vehicle is subject to FMVSS 121'] };
+      // NHTSA row not in DB yet → show as official_unconfirmed for automotive HTS
+      return { status: 'official_unconfirmed', note: 'Automotive part (HTS 8708.xx) — FMVSS applicability should be confirmed with NHTSA', missing: ['vehicle type', 'OEM vs. replacement equipment'] };
+    },
+  },
+  {
+    key: 'ftc_labeling',
+    label: 'FTC Labeling Requirements',
+    cat: 'product_regulation',
+    relevant: () => true,
+    resolve: (cats, entry) => {
+      const c = cats.find((x) => x.id === 'reg_ftc_textile_labeling');
+      if (c) return { status: c.verification_status === 'verified_applicable' ? 'verified_applicable' : 'official_unconfirmed' };
+      if (!entry.is_textile) return { status: 'not_applicable', note: 'Not a textile — FTC fiber-content labeling not triggered' };
+      return { status: 'no_applicable_rule' };
+    },
+  },
+  {
+    key: 'epa_tsca',
+    label: 'EPA / TSCA / FIFRA',
+    cat: 'product_regulation',
+    relevant: () => true,
+    resolve: (_cats, _entry) => ({
+      status: 'no_applicable_rule',
+      note: 'No EPA/TSCA/FIFRA trigger detected from submitted product attributes',
+    }),
+  },
+];
+
+export function buildCoverageMatrix(
+  entry: WatchlistEntry,
+  categories: RiskCategory[],
+  adcvdCoverage: CoverageItem[],
+  hts: HtsLookupResult | null,
+  normalizedHts: string,
+  regRows: RegulatoryBaselineRow[],
+): CoverageItem[] {
+  const result: CoverageItem[] = [];
+
+  // Domains from the registry
+  for (const d of DOMAIN_REGISTRY) {
+    if (!d.relevant(entry, normalizedHts)) continue;
+    const resolved = d.resolve(categories, entry, hts, regRows);
+    result.push({
+      domain: d.label,
+      domain_key: d.key,
+      category: d.cat,
+      status: resolved.status,
+      note: resolved.note,
+      missing_facts: resolved.missing?.length ? resolved.missing : undefined,
+    });
+  }
+
+  // Replace the generic AD/CVD_screened row with the specific per-order rows
+  const adcvdIdx = result.findIndex((r) => r.domain_key === 'adcvd_screened');
+  if (adcvdCoverage.length > 0) {
+    result.splice(adcvdIdx, 1, ...adcvdCoverage);
+  }
+
+  return result;
 }

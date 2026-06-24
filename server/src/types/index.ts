@@ -261,6 +261,29 @@ export interface DocumentChecklistItem {
   source?: SourceCitation;           // official source backing this requirement
 }
 
+// CoverageItem — one entry in the "What ClearPort checked" matrix.
+// Every domain ClearPort screens for the submitted product gets a status so the
+// user sees what was checked, even when nothing was found.
+export type CoverageStatus =
+  | 'verified_applicable'   // confirmed applies to this product
+  | 'likely_match'          // scope criteria met; producer/exporter or formal entry needed
+  | 'official_unconfirmed'  // real rule exists; applicability not yet confirmed from facts
+  | 'no_applicable_rule'    // checked — no matching official rule or order found
+  | 'not_applicable'        // definitively does not apply based on submitted product facts
+  | 'insufficient_info'     // cannot assess — key product facts are missing
+  | 'source_unavailable';   // official source temporarily unavailable
+
+export interface CoverageItem {
+  domain: string;         // display label, e.g. "AD/CVD — Brake Drums (A-570-174)"
+  domain_key: string;     // stable machine key, e.g. "adcvd_A-570-174"
+  category: 'tariff' | 'trade_remedy' | 'customs' | 'product_regulation';
+  status: CoverageStatus;
+  finding_id?: string;    // links to risk_category.id when a finding was produced
+  note?: string;          // one-sentence result summary shown to user
+  missing_facts?: string[]; // specific facts needed to resolve this domain
+  official_url?: string;
+}
+
 export interface ProductRiskScan {
   id: string;
   watchlist_entry_id: string;
@@ -273,5 +296,8 @@ export interface ProductRiskScan {
   next_actions: string[];
   readiness_score: number;
   confidence_level: 'Low' | 'Medium' | 'High';
+  coverage_matrix?: CoverageItem[];
+  missing_facts?: string[];
+  translation_status?: string | null;
   created_at: string;
 }

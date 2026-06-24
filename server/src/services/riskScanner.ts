@@ -77,6 +77,9 @@ export interface ScanOptions {
   // are authoritative: they are merged in and take precedence over any model
   // category with the same name, and only THEY may be "verified_applicable".
   baselineCategories?: RiskCategory[];
+  // Coverage matrix and missing facts passed through from evaluateBaselines.
+  coverageMatrix?: import('../types').CoverageItem[];
+  missingFacts?: string[];
 }
 
 export async function generateRiskScan(
@@ -210,7 +213,7 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
 
     const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
     // Always finalize in English — translation is a separate phase handled in watchlist.ts.
-    return finalizeScan(sanitized, opts.baselineCategories ?? [], 'en');
+    return finalizeScan(sanitized, opts.baselineCategories ?? [], 'en', opts.coverageMatrix, opts.missingFacts);
   } catch (err: any) {
     console.error(`[riskScanner] Failed to generate scan (lang=${entry.language}, hts=${entry.hts_code}): ${err.message}`);
     return null;
@@ -385,7 +388,13 @@ function buildChecklist(supported: RiskCategory[]): DocumentChecklistItem[] {
 //  - marketplace cards with no official source are hidden entirely;
 //  - overall risk is recomputed from verified + official-unconfirmed only;
 //  - the document checklist is gated so "required" needs a verified rule.
-export function finalizeScan(scan: ScanResult, baselines: RiskCategory[], lang: 'en' | 'zh' = 'en'): ScanResult {
+export function finalizeScan(
+  scan: ScanResult,
+  baselines: RiskCategory[],
+  lang: 'en' | 'zh' = 'en',
+  coverageMatrix?: import('../types').CoverageItem[],
+  missingFacts?: string[],
+): ScanResult {
   const baselineTopics = new Set<string>();
   baselines.forEach((b) => topicsOf(b.category).forEach((t) => baselineTopics.add(t)));
 
@@ -490,6 +499,8 @@ export function finalizeScan(scan: ScanResult, baselines: RiskCategory[], lang: 
     supplier_questions,
     next_actions,
     readiness_score,
+    coverage_matrix: coverageMatrix,
+    missing_facts: missingFacts,
   };
 }
 
