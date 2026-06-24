@@ -10,7 +10,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/client';
-import { generateRiskScan } from '../services/riskScanner';
+import { generateRiskScan, translateScanToZh } from '../services/riskScanner';
 import { htsCodesRelated } from '../services/matchingEngine';
 import { evaluateBaselines } from '../services/baselines';
 import { sendWatchlistConfirmation } from '../services/emailService';
@@ -163,20 +163,64 @@ async function runScanInBackground(
       return;
     }
 
-    await db.from('product_risk_scans').insert({
-      watchlist_entry_id: entry.id,
-      overall_risk: result.overall_risk,
-      overall_summary: result.overall_summary,
-      risk_categories: result.risk_categories,
-      document_checklist: result.document_checklist,
-      broker_questions: result.broker_questions,
-      supplier_questions: result.supplier_questions,
-      next_actions: result.next_actions,
-      readiness_score: result.readiness_score,
-      confidence_level: result.confidence_level,
-    });
+    const needsTranslation = entry.language === 'zh';
 
+    const { data: scanRow, error: scanInsertError } = await db
+      .from('product_risk_scans')
+      .insert({
+        watchlist_entry_id: entry.id,
+        overall_risk: result.overall_risk,
+        overall_summary: result.overall_summary,
+        risk_categories: result.risk_categories,
+        document_checklist: result.document_checklist,
+        broker_questions: result.broker_questions,
+        supplier_questions: result.supplier_questions,
+        next_actions: result.next_actions,
+        readiness_score: result.readiness_score,
+        confidence_level: result.confidence_level,
+        translation_status: needsTranslation ? 'pending' : null,
+      })
+      .select('id')
+      .single();
+
+    if (scanInsertError || !scanRow) {
+      console.error(`[watchlist] Failed to insert scan for ${entry.id}:`, scanInsertError?.message);
+      await db.from('watchlist_entries').update({ scan_status: 'failed', scan_error: 'SCAN_INSERT_FAILED' }).eq('id', entry.id);
+      return;
+    }
+
+    // scan_status is ready regardless of what happens in translation.
     await db.from('watchlist_entries').update({ scan_status: 'ready' }).eq('id', entry.id);
+
+    if (needsTranslation) {
+      // Translation runs after scan_status is already 'ready'. Failure is isolated.
+      let translated = await translateScanToZh(result);
+      if (!translated) {
+        // One retry before giving up.
+        console.warn(`[watchlist] Translation attempt 1 failed for ${entry.id}, retrying…`);
+        translated = await translateScanToZh(result);
+      }
+      if (translated) {
+        await db
+          .from('product_risk_scans')
+          .update({
+            overall_summary: translated.overall_summary,
+            risk_categories: translated.risk_categories,
+            document_checklist: translated.document_checklist,
+            broker_questions: translated.broker_questions,
+            supplier_questions: translated.supplier_questions,
+            next_actions: translated.next_actions,
+            translation_status: 'ready',
+          })
+          .eq('id', scanRow.id);
+      } else {
+        console.error(`[watchlist] Translation failed after retry for entry ${entry.id} — scan remains English`);
+        await db
+          .from('product_risk_scans')
+          .update({ translation_status: 'failed' })
+          .eq('id', scanRow.id);
+      }
+    }
   } catch (err: any) {
     console.error(`[watchlist] Background scan failed for ${entry.id}:`, err?.message);
     await db

@@ -1,16 +1,25 @@
 /**
- * Generates a structured import risk scan for a watchlist entry using Claude.
+ * Two-phase multilingual risk scan pipeline.
  *
- * Phase 2: the scan is grounded in official documents. Relevant source
- * documents (matched by HTS) are passed in and Claude may only assert a
- * CURRENT tariff rate, rule change, publication date or effective date if it
- * is supported by one of those documents — in which case it must cite it.
- * Standing requirements that are not tied to a supplied document are returned
- * as unverified "general guidance". Dollar impacts are computed in code from a
- * verified rate, never invented by the model.
+ * Phase A — Canonical English scan (always):
+ *   The Anthropic model always receives an English-only prompt and returns a
+ *   fully structured English JSON scan. Language is never a factor here.
+ *   The canonical result is validated, finalized (baselines merged, checklist
+ *   built, risk recomputed) and stored. English and Chinese submissions produce
+ *   an IDENTICAL canonical scan for the same product.
  *
- * Returns null if ANTHROPIC_API_KEY is not set — the frontend falls back to
- * a client-side mock scan in that case.
+ * Phase B — Translation (Chinese products only):
+ *   After the canonical scan is finalized, a separate, bounded translation
+ *   pass translates only the user-facing narrative fields (explanations,
+ *   actions, broker questions, etc.) into Simplified Chinese. This is sent as
+ *   a FLAT key-value dictionary — never as nested JSON — to eliminate the
+ *   unescaped-quote failure mode that broke the old single-pass Chinese prompt.
+ *   Official citations, URLs, HTS codes, rates and agency names are never
+ *   translated or modified.
+ *
+ * Translation failure never fails the scan:
+ *   scan_status stays "ready"; only translation_status is "failed".
+ *   The frontend falls back to English narrative for failed translations.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -178,16 +187,12 @@ READINESS SCORE calculation:
 - -10 if cosmetic
 - Never go below 10, never above 90 for a new product
 
-CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "Medium" if HTS missing or product has complex characteristics, "Low" if very limited information.${
-    entry.language === 'zh'
-      ? '\n\nLANGUAGE: Write every "explanation", "action", "what_changed", "overall_summary", broker_questions, supplier_questions and next_actions value in Simplified Chinese (简体中文) using professional import/compliance terminology. Keep agency names, document titles, CFR citations, HTS codes and URLs in their original English/numeric form — never translate or alter those.'
-      : ''
-  }`;
+CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "Medium" if HTS missing or product has complex characteristics, "Low" if very limited information.`;
 
   try {
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 8192, // Chinese responses are token-denser; 4096 caused truncation
+      max_tokens: 4096, // English-only canonical output; 4096 is sufficient
       system: [
         { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
       ],
@@ -195,20 +200,17 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
     });
 
     const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
-    // Extract the outermost JSON object. When the Chinese language directive is
-    // active, Claude sometimes prepends/appends a brief Chinese sentence outside
-    // the JSON object. Simple code-fence stripping silently fails in that case.
-    // Slicing from first '{' to last '}' is robust to any surrounding text.
     const jsonStart = raw.indexOf('{');
     const jsonEnd = raw.lastIndexOf('}');
     if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
-      console.error(`[riskScanner] No JSON object in model response (lang=${entry.language}): ${raw.slice(0, 200)}`);
+      console.error(`[riskScanner] No JSON object in model response (hts=${entry.hts_code}): ${raw.slice(0, 200)}`);
       return null;
     }
     const parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1)) as ScanResult;
 
     const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
-    return finalizeScan(sanitized, opts.baselineCategories ?? [], entry.language === 'zh' ? 'zh' : 'en');
+    // Always finalize in English — translation is a separate phase handled in watchlist.ts.
+    return finalizeScan(sanitized, opts.baselineCategories ?? [], 'en');
   } catch (err: any) {
     console.error(`[riskScanner] Failed to generate scan (lang=${entry.language}, hts=${entry.hts_code}): ${err.message}`);
     return null;
@@ -489,6 +491,112 @@ export function finalizeScan(scan: ScanResult, baselines: RiskCategory[], lang: 
     next_actions,
     readiness_score,
   };
+}
+
+// ── Phase B: bounded translation to Simplified Chinese ───────────────────────
+// Takes a finalized English scan and translates ONLY the user-facing narrative
+// fields (explanations, actions, questions, summary) in ONE compact flat-dict
+// batch request.
+//
+// Safety properties:
+//   • Flat key-value input — eliminates the nested-JSON unescaped-quote failure
+//     that caused SCAN_GENERATION_FAILED on the old single-pass Chinese prompt.
+//   • Bounded output: max_tokens=2048 covers ~10 categories and all list fields.
+//   • Validates every returned key maps to an existing canonical field; extra
+//     keys are silently dropped; missing keys fall back to English.
+//   • NEVER translates: category IDs/names, source.agency, source.name,
+//     source.title, source.url, source.cfr_citation, HTS codes, numeric rates,
+//     dates, verification_status, document names, "required" flags.
+//   • Returns null on any unrecoverable error — the caller sets
+//     translation_status='failed' but scan_status remains 'ready'.
+export async function translateScanToZh(scan: ScanResult): Promise<ScanResult | null> {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+
+  // Build a flat dictionary of stable keys → English narrative text.
+  const dict: Record<string, string> = {};
+
+  if (scan.overall_summary) dict['summary'] = scan.overall_summary;
+
+  (scan.risk_categories ?? []).forEach((c, i) => {
+    if (c.explanation) dict[`cat_${i}_expl`] = c.explanation;
+    if (c.action) dict[`cat_${i}_action`] = c.action;
+    if (c.what_changed) dict[`cat_${i}_changed`] = c.what_changed;
+  });
+
+  (scan.document_checklist ?? []).forEach((d, i) => {
+    if (d.reason) dict[`doc_${i}_reason`] = d.reason;
+  });
+
+  (scan.broker_questions ?? []).forEach((q, i) => { dict[`bq_${i}`] = q; });
+  (scan.supplier_questions ?? []).forEach((q, i) => { dict[`sq_${i}`] = q; });
+  (scan.next_actions ?? []).forEach((a, i) => { dict[`na_${i}`] = a; });
+
+  if (Object.keys(dict).length === 0) return scan;
+
+  const prompt = `Translate the following import-compliance advisory text from English to Simplified Chinese (简体中文).
+
+Rules:
+- Translate ONLY the values — never the keys.
+- Use professional trade/import terminology appropriate for a Chinese small business owner.
+- Do NOT translate or alter: agency names (CBP, FDA, CPSC, FCC, USTR, DOT/PHMSA), regulation citations (e.g. "21 CFR 174", "16 CFR 303"), HTS codes, URLs, numeric percentages, or document titles (e.g. "UN 38.3", "CPSIA").
+- Do NOT add new requirements, risks, legal obligations, documents, or actions that are not in the original text.
+- Return ONLY a JSON object with the same keys and translated values — no markdown, no code fences, no explanation.
+
+Input:
+${JSON.stringify(dict)}`;
+
+  try {
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
+    const jsonStart = raw.indexOf('{');
+    const jsonEnd = raw.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
+      console.error(`[translateScanToZh] No JSON in translation response: ${raw.slice(0, 200)}`);
+      return null;
+    }
+    const translated: Record<string, unknown> = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
+
+    const get = (key: string): string | undefined => {
+      const v = translated[key];
+      return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+    };
+
+    // Merge translated values back into the scan structure — fall back to
+    // English for any key the model omitted or returned with wrong type.
+    const newCategories = (scan.risk_categories ?? []).map((c, i) => ({
+      ...c,
+      explanation: get(`cat_${i}_expl`) ?? c.explanation,
+      action: get(`cat_${i}_action`) ?? c.action,
+      what_changed: get(`cat_${i}_changed`) ?? c.what_changed,
+    }));
+
+    const newChecklist = (scan.document_checklist ?? []).map((d, i) => ({
+      ...d,
+      reason: get(`doc_${i}_reason`) ?? d.reason,
+    }));
+
+    const newBrokerQs = (scan.broker_questions ?? []).map((q, i) => get(`bq_${i}`) ?? q);
+    const newSupplierQs = (scan.supplier_questions ?? []).map((q, i) => get(`sq_${i}`) ?? q);
+    const newNextActions = (scan.next_actions ?? []).map((a, i) => get(`na_${i}`) ?? a);
+
+    return {
+      ...scan,
+      overall_summary: get('summary') ?? scan.overall_summary,
+      risk_categories: newCategories,
+      document_checklist: newChecklist,
+      broker_questions: newBrokerQs,
+      supplier_questions: newSupplierQs,
+      next_actions: newNextActions,
+    };
+  } catch (err: any) {
+    console.error(`[translateScanToZh] Translation failed: ${err.message}`);
+    return null;
+  }
 }
 
 function dedupeStrings(arr: string[]): string[] {
