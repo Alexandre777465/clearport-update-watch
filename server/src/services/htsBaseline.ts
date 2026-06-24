@@ -169,13 +169,24 @@ export function resolveHtsRows(requestedRaw: string, rows: any[] | null): HtsLoo
       // Using only 8 digits would truncate a valid code like 8708.30.50.20 to
       // 8708.30.50, losing the statistical suffix in every display and citation.
       const resolvedCode = requested.length === 10 ? requested : req8;
-      const ratedHtsno: string = (rated as any).htsno ?? toDotted(resolvedCode);
+
+      // When the rate came from the 8-digit parent row (USITC pattern: rates are
+      // published at the 8-digit subheading level, statistical suffixes inherit them)
+      // prefer the 10-digit child row's htsno and description for display so the
+      // cited tariff line is the exact statistical line, not the parent heading.
+      const childRow = requested.length === 10
+        ? under8.find((r) => digitsOf(r) === requested)
+        : null;
+      const displayRow = childRow ?? rated;
+      const displayHtsno: string =
+        (displayRow as any).htsno ?? toDotted(resolvedCode);
+
       return {
         match_level: 'exact',
         requested,
         hts8: resolvedCode,  // 10-digit when input was 10-digit
-        matched_htsno: ratedHtsno,
-        description: (rated.description as string) || 'Classified merchandise',
+        matched_htsno: displayHtsno,
+        description: ((displayRow.description as string) || (rated.description as string) || 'Classified merchandise'),
         mfn_text_rate,
         mfn_ad_valorem_pct: parseAdValorem(mfn_text_rate),
         section301_ref: detect301(under8),
@@ -257,8 +268,14 @@ export async function lookupHtsBaseline(rawHts: string): Promise<HtsLookupResult
   const requested = normalizeHts(rawHts);
   if (requested.length < 4) return resolveHtsRows(requested, []);
 
-  // Range covers all children of the provided prefix (heading/subheading/line).
-  const prefix = requested.slice(0, 10);
+  // Range covers all children of the provided prefix.
+  // For 10-digit statistical lines, use the 8-digit subheading as the range
+  // prefix: the USITC publishes MFN rates on 8-digit rows; the 10-digit
+  // statistical suffix rows inherit them but may have an empty "general" field.
+  // Querying the 8-digit parent range returns BOTH the rated parent row and all
+  // statistical-suffix child rows so resolveHtsRows can pick the right rate.
+  const queryLen = requested.length === 10 ? 8 : requested.length;
+  const prefix = requested.slice(0, queryLen);
   const fromDotted = toDotted(prefix.padEnd(10, '0'));
   const toDotted_ = toDotted(prefix.padEnd(10, '9'));
   const url = `${HTS_API}?from=${encodeURIComponent(fromDotted)}&to=${encodeURIComponent(toDotted_)}&format=JSON&styles=false`;

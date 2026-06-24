@@ -545,6 +545,25 @@ describe('10-digit HTS formatting and resolution', () => {
     expect(b.hts8).toBe(c.hts8);
     expect(a.mfn_ad_valorem_pct).toBe(2.5);
   });
+
+  test('USITC rate-on-parent pattern: 10-digit input, rate on 8-digit row, child row has empty general', () => {
+    // Real USITC behavior: MFN rate is on the 8-digit subheading row;
+    // 10-digit statistical-suffix rows have general="" and inherit the parent rate.
+    // The lookup now queries the 8-digit parent range so both rows are returned.
+    const rows = [
+      { htsno: '8708.30.50', description: 'Brakes and servo-brakes; parts thereof', general: '2.5%', footnotes: [] },
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '', footnotes: [] },
+      { htsno: '8708.30.50.60', description: 'Other', general: '', footnotes: [] },
+    ];
+    const r = resolveHtsRows('8708305020', rows);
+    // Must resolve as exact using the parent rate — not downgraded to parent match level.
+    expect(r.match_level).toBe('exact');
+    expect(r.hts8).toBe('8708305020');        // preserves full 10-digit code
+    expect(r.matched_htsno).toBe('8708.30.50.20'); // cites the statistical line, not the heading
+    expect(r.description).toBe('Brake drums'); // description from child row
+    expect(r.mfn_ad_valorem_pct).toBe(2.5);    // rate inherited from parent
+    expect(formatHts(r.hts8!)).toBe('8708.30.50.20');
+  });
 });
 
 // ── NEW: AD/CVD scope match (pure, no DB) ────────────────────────────────────
