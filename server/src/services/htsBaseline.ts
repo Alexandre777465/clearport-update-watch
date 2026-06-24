@@ -268,25 +268,40 @@ export async function lookupHtsBaseline(rawHts: string): Promise<HtsLookupResult
   const requested = normalizeHts(rawHts);
   if (requested.length < 4) return resolveHtsRows(requested, []);
 
-  // Range covers all children of the provided prefix.
-  // For 10-digit statistical lines, use the 8-digit subheading as the range
-  // prefix: the USITC publishes MFN rates on 8-digit rows; the 10-digit
-  // statistical suffix rows inherit them but may have an empty "general" field.
-  // Querying the 8-digit parent range returns BOTH the rated parent row and all
-  // statistical-suffix child rows so resolveHtsRows can pick the right rate.
-  const queryLen = requested.length === 10 ? 8 : requested.length;
-  const prefix = requested.slice(0, queryLen);
+  // The USITC API never includes a parent row in a child range query.
+  // For 10-digit statistical lines (e.g. 8708.30.50.20):
+  //   - querying from=8708.30.50.00&to=8708.30.50.99 returns only the 4
+  //     statistical-suffix rows, all with general="" (no rate)
+  //   - the MFN rate lives exclusively on the 8-digit parent row (8708.30.50)
+  //     which only appears when queried directly by its exact code
+  // Solution: make two parallel calls and merge the rows so resolveHtsRows sees
+  // both the rated parent row and the correct 10-digit child row.
+  const prefix = requested.slice(0, Math.min(requested.length, 10));
   const fromDotted = toDotted(prefix.padEnd(10, '0'));
   const toDotted_ = toDotted(prefix.padEnd(10, '9'));
-  const url = `${HTS_API}?from=${encodeURIComponent(fromDotted)}&to=${encodeURIComponent(toDotted_)}&format=JSON&styles=false`;
+  const rangeUrl = `${HTS_API}?from=${encodeURIComponent(fromDotted)}&to=${encodeURIComponent(toDotted_)}&format=JSON&styles=false`;
+
+  const opts = {
+    timeout: 25000,
+    headers: { 'User-Agent': 'ClearPort/1.0 (+https://clearport.io)', Accept: 'application/json' },
+  };
 
   let rows: any[] | null;
   try {
-    const { data } = await axios.get(url, {
-      timeout: 25000,
-      headers: { 'User-Agent': 'ClearPort/1.0 (+https://clearport.io)', Accept: 'application/json' },
-    });
-    rows = Array.isArray(data) ? data : [];
+    if (requested.length === 10) {
+      // Fetch parent 8-digit row (for rate) + statistical-suffix range (for child rows) in parallel.
+      const parent8 = toDotted(requested.slice(0, 8));
+      const parentUrl = `${HTS_API}?from=${encodeURIComponent(parent8)}&to=${encodeURIComponent(parent8)}&format=JSON&styles=false`;
+      const [parentRes, rangeRes] = await Promise.all([
+        axios.get(parentUrl, opts).then((r) => (Array.isArray(r.data) ? r.data : [])).catch(() => [] as any[]),
+        axios.get(rangeUrl, opts).then((r) => (Array.isArray(r.data) ? r.data : [])).catch(() => [] as any[]),
+      ]);
+      rows = [...parentRes, ...rangeRes];
+      if (rows.length === 0) rows = null; // both calls failed → outage
+    } else {
+      const { data } = await axios.get(rangeUrl, opts);
+      rows = Array.isArray(data) ? data : [];
+    }
   } catch (err: any) {
     await logRefresh('hts', 'error', 0, err?.message);
     rows = null; // outage
