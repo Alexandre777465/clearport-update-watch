@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
 import type { ProductRiskScan } from "@/lib/api";
+import { useLang, t } from "@/lib/i18n";
 
 function scoreColor(score: number) {
   if (score >= 70) return "text-green-700";
@@ -16,6 +17,7 @@ function scoreBg(score: number) {
 // supported findings (verified applicable + official-unconfirmed). The items
 // shown are those same supported findings — never unsourced guidance.
 export function ReadinessScore({ scan }: { scan: ProductRiskScan; htsCode?: string }) {
+  const lang = useLang();
   const verified = scan.risk_categories.filter((c) => c.verification_status === "verified_applicable");
   const unconfirmed = scan.risk_categories.filter((c) => c.verification_status === "official_unconfirmed");
   const score = scan.readiness_score;
@@ -25,12 +27,13 @@ export function ReadinessScore({ scan }: { scan: ProductRiskScan; htsCode?: stri
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Launch readiness
+            {t(lang, "rep_readiness")}
           </p>
           <p className={`mt-1 text-3xl font-bold ${scoreColor(score)}`}>{score}%</p>
           <p className="text-xs text-muted-foreground">
-            {verified.length} verified requirement{verified.length === 1 ? "" : "s"} ·{" "}
-            {unconfirmed.length} need{unconfirmed.length === 1 ? "s" : ""} confirmation
+            {verified.length}{" "}
+            {t(lang, verified.length === 1 ? "ready_verified_req_one" : "ready_verified_req")} ·{" "}
+            {unconfirmed.length} {t(lang, "ready_need_confirm")}
           </p>
         </div>
         <div className="flex-1">
@@ -52,7 +55,7 @@ export function ReadinessScore({ scan }: { scan: ProductRiskScan; htsCode?: stri
               </span>
               <span className="text-foreground">{c.category}</span>
               <span className="rounded bg-green-100 px-1 py-0.5 text-[10px] font-medium text-green-700">
-                Verified applicable
+                {t(lang, "vs_verified")}
               </span>
             </li>
           ))}
@@ -61,14 +64,14 @@ export function ReadinessScore({ scan }: { scan: ProductRiskScan; htsCode?: stri
               <span className="h-4 w-4 shrink-0 rounded-full border-2 border-amber-400" />
               <span className="text-foreground">{c.category}</span>
               <span className="rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-700">
-                Needs confirmation
+                {t(lang, "doc_needs_confirmation")}
               </span>
             </li>
           ))}
         </ul>
       ) : (
         <p className="mt-4 text-xs text-muted-foreground">
-          No requirements were verified from official sources for the details provided.
+          {t(lang, "ready_none")}
         </p>
       )}
     </Card>

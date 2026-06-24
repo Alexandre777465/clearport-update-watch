@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { ProductRiskScan } from "@/lib/api";
 import { Copy, Check, FileText } from "lucide-react";
+import { useLang, t } from "@/lib/i18n";
 
 interface BrokerPackProps {
   productName: string;
@@ -57,6 +58,7 @@ ${"─".repeat(60)}`;
 }
 
 export function BrokerPack(props: BrokerPackProps) {
+  const lang = useLang();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const text = buildBrokerPackText(props);
@@ -72,7 +74,7 @@ export function BrokerPack(props: BrokerPackProps) {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-primary" />
-          <span className="font-semibold text-sm">Broker Pack</span>
+          <span className="font-semibold text-sm">{t(lang, "bp_title")}</span>
         </div>
         <div className="flex gap-2">
           <Button
@@ -80,20 +82,19 @@ export function BrokerPack(props: BrokerPackProps) {
             size="sm"
             onClick={() => setExpanded((e) => !e)}
           >
-            {expanded ? "Hide" : "Preview"}
+            {expanded ? t(lang, "bp_hide") : t(lang, "bp_preview")}
           </Button>
           <Button size="sm" onClick={copy}>
             {copied ? (
-              <><Check className="mr-1.5 h-3.5 w-3.5" /> Copied</>
+              <><Check className="mr-1.5 h-3.5 w-3.5" /> {t(lang, "bp_copied")}</>
             ) : (
-              <><Copy className="mr-1.5 h-3.5 w-3.5" /> Copy to clipboard</>
+              <><Copy className="mr-1.5 h-3.5 w-3.5" /> {t(lang, "bp_copy")}</>
             )}
           </Button>
         </div>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
-        A ready-to-send summary for your customs broker — includes product details,
-        risk flags, and questions to ask.
+        {t(lang, "bp_desc")}
       </p>
       {expanded && (
         <pre className="mt-4 overflow-x-auto whitespace-pre-wrap rounded-md border border-border bg-slate-50 p-4 font-mono text-xs text-foreground">

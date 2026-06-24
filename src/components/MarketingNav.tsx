@@ -50,6 +50,7 @@ export function MarketingNav() {
 }
 
 export function MarketingFooter() {
+  const lang = useLang();
   return (
     <footer className="border-t border-border bg-slate-50">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-4">
@@ -61,31 +62,30 @@ export function MarketingFooter() {
             <span className="font-semibold">ClearPort</span>
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
-            U.S. import rule updates, simplified for importers.
+            {t(lang, "footer_tagline")}
           </p>
         </div>
         <div className="text-sm">
-          <div className="mb-2 font-medium">Product</div>
+          <div className="mb-2 font-medium">{t(lang, "footer_product")}</div>
           <ul className="space-y-1 text-muted-foreground">
-            <li><Link to="/onboarding">Check a product</Link></li>
-            <li><Link to="/ask">ClearPort Assistant</Link></li>
-            <li><Link to="/sources">Official sources</Link></li>
+            <li><Link to="/onboarding">{t(lang, "nav_check")}</Link></li>
+            <li><Link to="/ask">{t(lang, "nav_assistant")}</Link></li>
+            <li><Link to="/sources">{t(lang, "nav_sources")}</Link></li>
           </ul>
         </div>
         <div className="text-sm">
-          <div className="mb-2 font-medium">Legal</div>
+          <div className="mb-2 font-medium">{t(lang, "footer_legal")}</div>
           <ul className="space-y-1 text-muted-foreground">
-            <li><Link to="/privacy">Privacy</Link></li>
-            <li><Link to="/terms">Terms &amp; disclaimer</Link></li>
+            <li><Link to="/privacy">{t(lang, "footer_privacy")}</Link></li>
+            <li><Link to="/terms">{t(lang, "footer_terms")}</Link></li>
           </ul>
         </div>
         <div className="text-xs text-muted-foreground">
-          ClearPort provides source-backed summaries for preparation. It is not legal advice and
-          does not replace a licensed customs broker, lawyer, or accredited laboratory.
+          {t(lang, "footer_disclaimer")}
         </div>
       </div>
       <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()} ClearPort. All rights reserved.
+        © {new Date().getFullYear()} ClearPort. {t(lang, "footer_rights")}
       </div>
     </footer>
   );

@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { SourceStatus } from "@/lib/mock";
 import { fetchSources } from "@/lib/api";
 import { ExternalLink, AlertTriangle } from "lucide-react";
+import { useLang, t, tStatus } from "@/lib/i18n";
 
 export const Route = createFileRoute("/sources")({
   component: Sources,
@@ -37,6 +38,7 @@ function statusClasses(status: SourceStatus["status"]): string {
 }
 
 function Sources() {
+  const lang = useLang();
   const { data: sources, isLoading, isError, dataUpdatedAt } = useQuery({
     queryKey: ["sources"],
     queryFn: fetchSources,
@@ -51,20 +53,18 @@ function Sources() {
       <MarketingNav />
       <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Official sources</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t(lang, "nav_sources")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          The official U.S. sources ClearPort monitors — with live status.
+          {t(lang, "srcp_sub")}
         </p>
       </div>
       <Card className="mb-6 border-blue-100 bg-blue-50/40 p-4 text-sm">
         <div className="font-medium">
-          ClearPort checks official sources and matches updates to your monitored
-          products. Status below is read live from the monitoring backend.
+          {t(lang, "srcp_banner")}
         </div>
         {!isLoading && !isError && sources && lastRefresh && (
           <div className="mt-1 text-xs text-muted-foreground">
-            Status loaded {lastRefresh}. Each source shows its real schedule and
-            last successful sync.
+            {t(lang, "srcp_loaded_pre")} {lastRefresh}. {t(lang, "srcp_loaded_post")}
           </div>
         )}
       </Card>
@@ -79,16 +79,15 @@ function Sources() {
         <Card className="flex flex-col items-center gap-3 p-8 text-center">
           <AlertTriangle className="h-7 w-7 text-amber-500" />
           <div>
-            <p className="font-medium">Status unavailable</p>
+            <p className="font-medium">{t(lang, "srcp_unavailable_title")}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              We can't reach the monitoring backend right now, so live source
-              health can't be shown. Please check back shortly.
+              {t(lang, "srcp_unavailable_body")}
             </p>
           </div>
         </Card>
       ) : sources.length === 0 ? (
         <Card className="p-8 text-center text-sm text-muted-foreground">
-          No sources are configured.
+          {t(lang, "srcp_none")}
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
@@ -100,34 +99,33 @@ function Sources() {
                   <p className="mt-1 text-sm text-muted-foreground">{s.type}</p>
                 </div>
                 <Badge variant="outline" className={statusClasses(s.status)}>
-                  {s.status}
+                  {tStatus(lang, s.status)}
                 </Badge>
               </div>
 
               {s.status === "Unavailable" ? (
                 <p className="mt-4 text-xs text-muted-foreground">
-                  This source is deactivated — no reliable official feed is
-                  currently connected. It is not being checked.
+                  {t(lang, "srcp_deactivated")}
                 </p>
               ) : (
                 <div className="mt-4 grid gap-1 text-xs text-muted-foreground">
                   <div>
-                    <span className="font-medium text-foreground">Schedule:</span>{" "}
+                    <span className="font-medium text-foreground">{t(lang, "srcp_schedule")}</span>{" "}
                     {s.frequency}
                   </div>
                   <div>
-                    <span className="font-medium text-foreground">Last checked:</span>{" "}
+                    <span className="font-medium text-foreground">{t(lang, "srcp_last_checked")}</span>{" "}
                     {s.lastChecked}
                   </div>
                   <div>
                     <span className="font-medium text-foreground">
-                      Last successful sync:
+                      {t(lang, "srcp_last_sync")}
                     </span>{" "}
                     {s.lastSuccessfulSync}
                   </div>
                   {s.error && (
                     <div className="mt-1 text-red-700">
-                      <span className="font-medium">Recent error:</span> {s.error}
+                      <span className="font-medium">{t(lang, "srcp_recent_error")}</span> {s.error}
                     </div>
                   )}
                 </div>
@@ -139,7 +137,7 @@ function Sources() {
                 rel="noreferrer"
                 className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline"
               >
-                Visit official source <ExternalLink className="h-3 w-3" />
+                {t(lang, "visit_official_source")} <ExternalLink className="h-3 w-3" />
               </a>
             </Card>
           ))}
@@ -147,8 +145,7 @@ function Sources() {
       )}
 
       <p className="mt-8 text-xs text-muted-foreground">
-        ClearPort summaries describe what an update <em>may</em> mean. Final
-        interpretation should be confirmed with a licensed customs broker.
+        {t(lang, "srcp_footer")}
       </p>
       </main>
       <MarketingFooter />

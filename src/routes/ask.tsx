@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sparkles, ExternalLink, Loader2, ShieldCheck } from "lucide-react";
 import { fetchScanContext, askProduct, type AssistantSource } from "@/lib/api";
+import { useLang, t, type DictKey } from "@/lib/i18n";
 
 const searchSchema = z.object({
   alertId: z.string().optional(),
@@ -28,17 +29,18 @@ export const Route = createFileRoute("/ask")({
   }),
 });
 
-const CHIPS = [
-  "What duties or tariffs apply?",
-  "What documents do I need?",
-  "What tests or certificates are required?",
-  "What should I ask my customs broker?",
-  "What are my next steps?",
+const CHIP_KEYS: DictKey[] = [
+  "ask_chip_1",
+  "ask_chip_2",
+  "ask_chip_3",
+  "ask_chip_4",
+  "ask_chip_5",
 ];
 
 type Msg = { role: "user" | "assistant"; text: string; sources?: AssistantSource[]; grounded?: boolean };
 
 function Ask() {
+  const lang = useLang();
   const { entryId } = Route.useSearch();
   const [product, setProduct] = useState<{ product_name: string; hts_code: string | null } | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -71,21 +73,19 @@ function Ask() {
       <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
         <div className="mb-2 flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-primary" />
-          <h1 className="text-2xl font-semibold tracking-tight">ClearPort Assistant</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t(lang, "asst_title")}</h1>
         </div>
         <p className="mb-6 text-sm text-muted-foreground">
-          Answers use only your product's verified findings and matched official sources. When the
-          official sources don't cover something, ClearPort says so rather than guessing.
+          {t(lang, "ask_intro")}
         </p>
 
         {!entryId ? (
           <Card className="p-6 text-center">
             <p className="text-sm text-muted-foreground">
-              The Assistant answers questions about a specific product you've checked. Run a product
-              check first, then open the Assistant from your report.
+              {t(lang, "ask_need_product")}
             </p>
             <Link to="/onboarding" className="mt-4 inline-block">
-              <Button>Check a product</Button>
+              <Button>{t(lang, "nav_check")}</Button>
             </Link>
           </Card>
         ) : (
@@ -103,15 +103,18 @@ function Ask() {
               <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-5">
                 {messages.length === 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {CHIPS.map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => send(c)}
-                        className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                      >
-                        {c}
-                      </button>
-                    ))}
+                    {CHIP_KEYS.map((key) => {
+                      const label = t(lang, key);
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => send(label)}
+                          className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 {messages.map((m, i) => (
@@ -128,7 +131,7 @@ function Ask() {
                       <p className="whitespace-pre-line">{m.text}</p>
                       {m.sources && m.sources.length > 0 && (
                         <div className="mt-3 space-y-1 border-t border-slate-200 pt-2">
-                          <p className="text-xs font-medium">Official sources</p>
+                          <p className="text-xs font-medium">{t(lang, "ask_official_sources")}</p>
                           {m.sources.map((s) => (
                             <a
                               key={s.url}
@@ -150,7 +153,7 @@ function Ask() {
                 {loading && (
                   <div className="flex justify-start">
                     <div className="flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-3 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" /> Checking your verified findings…
+                      <Loader2 className="h-4 w-4 animate-spin" /> {t(lang, "ask_checking")}
                     </div>
                   </div>
                 )}
@@ -165,10 +168,10 @@ function Ask() {
                 <Input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask about duties, classification, tests, documents…"
+                  placeholder={t(lang, "asst_placeholder")}
                   disabled={loading}
                 />
-                <Button type="submit" disabled={loading || !input.trim()}>Ask</Button>
+                <Button type="submit" disabled={loading || !input.trim()}>{t(lang, "asst_send")}</Button>
               </form>
             </Card>
           </>
@@ -176,7 +179,7 @@ function Ask() {
 
         <p className="mt-6 text-xs text-muted-foreground">
           <ShieldCheck className="mr-1 inline h-3 w-3" />
-          Informational only. Verify with a licensed customs broker before importing.
+          {t(lang, "ask_disclaimer")}
         </p>
       </main>
       <MarketingFooter />

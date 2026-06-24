@@ -2,7 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { ProductRiskScan, RiskLevel, VerificationStatus } from "@/lib/api";
 import { AlertTriangle, CheckCircle2, ExternalLink, Info, ShieldAlert, ShieldCheck } from "lucide-react";
-import { useLang, t, type Lang } from "@/lib/i18n";
+import { useLang, t, tLevel, tConfidence, type Lang } from "@/lib/i18n";
 
 // Three honest verification statuses (Stage 2), localized.
 function statusBadge(status: VerificationStatus | undefined, lang: Lang): { label: string; className: string } {
@@ -76,10 +76,10 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
           <div>
             <div className="flex items-center gap-2">
               <span className={`font-semibold ${overallTextColor(scan.overall_risk)}`}>
-                Overall risk: {scan.overall_risk}
+                {t(lang, "rs_overall_risk")} {tLevel(lang, scan.overall_risk)}
               </span>
               <Badge variant="outline" className={riskColor(scan.overall_risk as RiskLevel)}>
-                {scan.overall_risk}
+                {tLevel(lang, scan.overall_risk)}
               </Badge>
             </div>
             <p className={`mt-1 text-sm ${overallTextColor(scan.overall_risk)}`}>
@@ -89,13 +89,13 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
         </div>
         <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
           <ShieldCheck className="h-3 w-3" />
-          Confidence: {scan.confidence_level} · Generated from official regulatory requirements
+          {t(lang, "rs_conf_label")} {tConfidence(lang, scan.confidence_level)} · {t(lang, "rs_conf_suffix")}
         </div>
       </Card>
 
       {/* Risk categories */}
       <div>
-        <h3 className="mb-3 text-sm font-semibold">Risk breakdown</h3>
+        <h3 className="mb-3 text-sm font-semibold">{t(lang, "rs_breakdown")}</h3>
         <div className="space-y-2">
           {relevant.map((cat) => (
             <Card key={cat.category} className="p-4">
@@ -105,7 +105,7 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium">{cat.category}</span>
                     <Badge variant="outline" className={`text-xs ${riskColor(cat.level as RiskLevel)}`}>
-                      {cat.level}
+                      {tLevel(lang, cat.level)}
                     </Badge>
                     {(() => {
                       const sb = statusBadge(cat.verification_status, lang);
@@ -125,7 +125,7 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                       {cat.missing_info && (
                         <p className="mt-1.5 text-xs">
                           <span className="font-semibold text-foreground">
-                            What ClearPort needs to verify this:{" "}
+                            {t(lang, "rs_needs_verify")}{" "}
                           </span>
                           <span className="text-muted-foreground">{cat.missing_info}</span>
                         </p>
@@ -136,21 +136,21 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                       {/* 1. What changed (sourced items only) */}
                       {cat.what_changed && (
                         <p className="mt-2 text-xs">
-                          <span className="font-semibold text-foreground">What changed: </span>
+                          <span className="font-semibold text-foreground">{t(lang, "rs_what_changed")} </span>
                           <span className="text-muted-foreground">{cat.what_changed}</span>
                         </p>
                       )}
 
                       {/* 2. How it affects this product */}
                       <p className="mt-1.5 text-xs">
-                        <span className="font-semibold text-foreground">How it affects this product: </span>
+                        <span className="font-semibold text-foreground">{t(lang, "rs_how_affects")} </span>
                         <span className="text-muted-foreground">{cat.explanation}</span>
                       </p>
 
                       {/* Applicability conditions */}
                       {cat.applicability_conditions && (
                         <p className="mt-1.5 text-xs">
-                          <span className="font-semibold text-foreground">Applies when: </span>
+                          <span className="font-semibold text-foreground">{t(lang, "rs_applies_when")} </span>
                           <span className="text-muted-foreground">{cat.applicability_conditions}</span>
                         </p>
                       )}
@@ -158,7 +158,7 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                       {/* 3. Estimated financial impact (only from a verified rate) */}
                       {cat.financial_impact && (
                         <p className="mt-1.5 text-xs">
-                          <span className="font-semibold text-foreground">Estimated financial impact: </span>
+                          <span className="font-semibold text-foreground">{t(lang, "rs_fin_impact")} </span>
                           <span className="text-muted-foreground">{cat.financial_impact}</span>
                         </p>
                       )}
@@ -166,7 +166,7 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                       {/* 4. Required action */}
                       {cat.action && (
                         <p className="mt-1.5 text-xs">
-                          <span className="font-semibold text-foreground">Required action: </span>
+                          <span className="font-semibold text-foreground">{t(lang, "rs_required_action")} </span>
                           <span className="text-muted-foreground">{cat.action}</span>
                         </p>
                       )}
@@ -176,21 +176,21 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                   {/* 5. Official source (when present) */}
                   {cat.source && (
                     <div className="mt-2.5 rounded-md border border-slate-200 bg-slate-50/60 p-2.5 text-xs">
-                      <p className="font-medium text-foreground">Official source</p>
+                      <p className="font-medium text-foreground">{t(lang, "rs_official_source")}</p>
                       <p className="mt-0.5 text-muted-foreground">
                         {cat.source.agency ? `${cat.source.agency} · ` : ""}
                         {cat.source.name} — {cat.source.title}
                       </p>
                       {cat.source.cfr_citation && (
-                        <p className="mt-0.5 text-muted-foreground">Citation: {cat.source.cfr_citation}</p>
+                        <p className="mt-0.5 text-muted-foreground">{t(lang, "rs_citation")} {cat.source.cfr_citation}</p>
                       )}
                       <p className="mt-0.5 text-muted-foreground">
-                        {cat.source.published_at ? `Published ${cat.source.published_at.slice(0, 10)}` : ""}
+                        {cat.source.published_at ? `${t(lang, "rs_published")} ${cat.source.published_at.slice(0, 10)}` : ""}
                         {cat.source.effective_date
-                          ? ` · Effective/rev ${cat.source.effective_date.slice(0, 10)}`
+                          ? ` · ${t(lang, "rs_effective_rev")} ${cat.source.effective_date.slice(0, 10)}`
                           : ""}
                         {cat.source.last_verified_at
-                          ? ` · Last verified ${cat.source.last_verified_at.slice(0, 10)}`
+                          ? ` · ${t(lang, "rs_last_verified")} ${cat.source.last_verified_at.slice(0, 10)}`
                           : ""}
                       </p>
                       {cat.source.why_relevant && (
@@ -203,7 +203,7 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
                           rel="noreferrer"
                           className="mt-1 inline-flex items-center gap-1 text-primary hover:underline"
                         >
-                          View official document <ExternalLink className="h-3 w-3" />
+                          {t(lang, "rs_view_doc")} <ExternalLink className="h-3 w-3" />
                         </a>
                       )}
                     </div>
@@ -218,7 +218,7 @@ export function RiskScanCard({ scan }: { scan: ProductRiskScan }) {
       {/* Next actions */}
       {scan.next_actions.length > 0 && (
         <div>
-          <h3 className="mb-3 text-sm font-semibold">What to do next</h3>
+          <h3 className="mb-3 text-sm font-semibold">{t(lang, "rs_next")}</h3>
           <Card className="p-4">
             <ol className="space-y-2">
               {scan.next_actions.map((action, i) => (

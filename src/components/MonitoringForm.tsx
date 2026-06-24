@@ -23,7 +23,7 @@ import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
 import { ReadinessScore } from "@/components/ReadinessScore";
 import { Link } from "@tanstack/react-router";
-import { getLang, t } from "@/lib/i18n";
+import { getLang, useLang, t, tLevel, type DictKey } from "@/lib/i18n";
 import {
   CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch, MessageSquare,
 } from "lucide-react";
@@ -317,17 +317,17 @@ function generateMockRiskScan(
 
 // ── Attribute toggle ──────────────────────────────────────────────────────────
 
-const ATTR_QUESTIONS: Array<{ key: keyof ProductAttributes; label: string }> = [
-  { key: "is_children",    label: "For children under 12" },
-  { key: "has_battery",    label: "Contains a battery" },
-  { key: "is_electronic",  label: "Electronic product" },
-  { key: "is_textile",     label: "Textile / apparel" },
-  { key: "is_cosmetic",    label: "Cosmetic / beauty / personal care" },
-  { key: "is_food_contact",label: "Touches food or drink" },
-  { key: "is_supplement",  label: "Supplement / food / medical-adjacent" },
-  { key: "sold_on_amazon", label: "Selling on Amazon" },
-  { key: "sold_on_tiktok", label: "Selling on TikTok Shop" },
-  { key: "sold_in_eu",     label: "Also selling in the EU" },
+const ATTR_QUESTIONS: Array<{ key: keyof ProductAttributes; labelKey: DictKey }> = [
+  { key: "is_children",    labelKey: "attr_children" },
+  { key: "has_battery",    labelKey: "attr_battery" },
+  { key: "is_electronic",  labelKey: "attr_electronic" },
+  { key: "is_textile",     labelKey: "attr_textile" },
+  { key: "is_cosmetic",    labelKey: "attr_cosmetic" },
+  { key: "is_food_contact",labelKey: "attr_food_contact" },
+  { key: "is_supplement",  labelKey: "attr_supplement" },
+  { key: "sold_on_amazon", labelKey: "attr_amazon" },
+  { key: "sold_on_tiktok", labelKey: "attr_tiktok" },
+  { key: "sold_in_eu",     labelKey: "attr_eu" },
 ];
 
 // ── Attribute inference ───────────────────────────────────────────────────────
@@ -338,39 +338,39 @@ const ATTR_QUESTIONS: Array<{ key: keyof ProductAttributes; label: string }> = [
 
 const INFERENCE_RULES: Array<{
   key: keyof ProductAttributes;
-  label: string;
+  labelKey: DictKey;
   keywords: string[];
 }> = [
-  { key: "is_food_contact", label: "Touches food or drink",
+  { key: "is_food_contact", labelKey: "attr_food_contact",
     keywords: ["water bottle", "bottle", "tumbler", "flask", "thermos", "mug", "cup",
       "drinkware", "drinking", "food", "plate", "bowl", "cutlery", "utensil",
       "straw", "lunchbox", "lunch box", "kettle", "sippy"] },
-  { key: "is_children", label: "For children under 12",
+  { key: "is_children", labelKey: "attr_children",
     keywords: ["kids", "kid", "child", "children", "toddler", "baby", "infant",
       "nursery", "toy"] },
-  { key: "has_battery", label: "Contains a battery",
+  { key: "has_battery", labelKey: "attr_battery",
     keywords: ["battery", "rechargeable", "li-ion", "lithium", "power bank", "cordless"] },
-  { key: "is_electronic", label: "Electronic product",
+  { key: "is_electronic", labelKey: "attr_electronic",
     keywords: ["bluetooth", "wifi", "wi-fi", "usb", "charger", "speaker", "earbud",
       "headphone", "camera", "sensor", "electronic"] },
-  { key: "is_textile", label: "Textile / apparel",
+  { key: "is_textile", labelKey: "attr_textile",
     keywords: ["shirt", "apparel", "clothing", "fabric", "textile", "cotton",
       "polyester", "garment", "sock", "hoodie", "jacket", "dress", "towel"] },
-  { key: "is_cosmetic", label: "Cosmetic / beauty / personal care",
+  { key: "is_cosmetic", labelKey: "attr_cosmetic",
     keywords: ["cosmetic", "cream", "lotion", "serum", "makeup", "lipstick",
       "shampoo", "skincare", "beauty", "fragrance", "perfume"] },
-  { key: "is_supplement", label: "Supplement / food / medical-adjacent",
+  { key: "is_supplement", labelKey: "attr_supplement",
     keywords: ["supplement", "vitamin", "protein", "probiotic", "capsule", "gummies"] },
 ];
 
 function inferAttributes(
   name: string,
   description: string,
-): Array<{ key: keyof ProductAttributes; label: string }> {
+): Array<{ key: keyof ProductAttributes; labelKey: DictKey }> {
   const text = `${name} ${description}`.toLowerCase();
   return INFERENCE_RULES
     .filter((rule) => rule.keywords.some((kw) => text.includes(kw)))
-    .map(({ key, label }) => ({ key, label }));
+    .map(({ key, labelKey }) => ({ key, labelKey }));
 }
 
 // Parse the optional shipment value into a positive number, or undefined.
@@ -382,6 +382,7 @@ function parseEstimatedValue(raw: string): number | undefined {
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "h2" }) {
+  const lang = useLang();
   const [form, setForm] = useState<FormState>({
     email: "",
     productName: "",
@@ -397,7 +398,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   const [confirmed, setConfirmed] = useState<ConfirmedState | null>(null);
   // Inferred attributes awaiting user confirmation before the scan runs.
   const [pendingInferred, setPendingInferred] = useState<
-    Array<{ key: keyof ProductAttributes; label: string }> | null
+    Array<{ key: keyof ProductAttributes; labelKey: DictKey }> | null
   >(null);
   const [inferredAccept, setInferredAccept] = useState<Record<string, boolean>>({});
   // Async-scan failure state + the attributes to retry with.
@@ -415,10 +416,10 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   const validate = (): boolean => {
     const errs: Partial<FormState> = {};
     if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      errs.email = "A valid email address is required.";
+      errs.email = t(lang, "err_email");
     }
     if (!form.productName.trim()) {
-      errs.productName = "Product name is required.";
+      errs.productName = t(lang, "err_product");
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -460,8 +461,8 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         } else {
           setScanError(
             polled.status === "failed"
-              ? "We couldn't complete the risk scan. Your product was saved — please try again."
-              : "The scan is taking longer than usual. Your product was saved — please try again.",
+              ? t(lang, "err_scan_failed")
+              : t(lang, "err_scan_timeout"),
           );
           setLoadingStage(null);
           return;
@@ -482,7 +483,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         entryId: result.id,
       });
     } catch {
-      setScanError("Something went wrong saving your product. Please try again.");
+      setScanError(t(lang, "err_save"));
     } finally {
       setLoadingStage(null);
     }
@@ -518,17 +519,17 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     return (
       <div className="mx-auto max-w-xl">
         <Card className="p-6 text-center sm:p-8">
-          <p className="font-semibold text-foreground">Scan not completed</p>
+          <p className="font-semibold text-foreground">{t(lang, "scan_not_completed")}</p>
           <p className="mt-2 text-sm text-muted-foreground">{scanError}</p>
           <div className="mt-5 flex justify-center gap-2">
             <Button
               onClick={() => retryAttrs && void runScan(retryAttrs)}
               disabled={!retryAttrs}
             >
-              Try again
+              {t(lang, "btn_try_again")}
             </Button>
             <Button variant="outline" onClick={() => setScanError(null)}>
-              Back to edit
+              {t(lang, "btn_back_edit")}
             </Button>
           </div>
         </Card>
@@ -550,11 +551,9 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           <div className="mb-4 flex items-start gap-3">
             <ScanSearch className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div>
-              <h3 className="font-semibold">Quick check before we scan</h3>
+              <h3 className="font-semibold">{t(lang, "inf_title")}</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Based on your product name and description, these characteristics
-                look likely but weren't selected. Confirm the ones that apply —
-                they change which compliance requirements we check.
+                {t(lang, "inf_body")}
               </p>
             </div>
           </div>
@@ -582,7 +581,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
                   >
                     {checked ? "✓" : ""}
                   </span>
-                  {item.label}
+                  {t(lang, item.labelKey)}
                 </button>
               );
             })}
@@ -591,7 +590,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           <div className="mt-6 flex flex-col gap-2 sm:flex-row">
             <Button onClick={proceed} size="lg" className="flex-1">
               <ScanSearch className="mr-2 h-4 w-4" />
-              Run analysis
+              {t(lang, "inf_run")}
             </Button>
             <Button
               type="button"
@@ -599,12 +598,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
               size="lg"
               onClick={() => setPendingInferred(null)}
             >
-              Back to edit
+              {t(lang, "btn_back_edit")}
             </Button>
           </div>
           <p className="mt-3 text-center text-xs text-muted-foreground">
-            We never change your answers without asking. Uncheck anything that
-            doesn't apply.
+            {t(lang, "inf_note")}
           </p>
         </Card>
       </div>
@@ -618,12 +616,10 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     <div>
       <div className="mb-6">
         <Heading className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-          Start monitoring a product
+          {t(lang, "form_title")}
         </Heading>
         <p className="mt-2 text-sm text-muted-foreground">
-          We'll scan your product against official U.S. trade sources and check
-          for relevant customs, tariff, and regulatory risks. We'll save it to
-          your monitoring list so you can track it over time.
+          {t(lang, "form_intro")}
         </p>
       </div>
 
@@ -632,14 +628,14 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           {/* Email */}
           <div>
             <Label htmlFor="cp-email">
-              Your email address <span className="text-destructive">*</span>
+              {t(lang, "form_email")} <span className="text-destructive">*</span>
             </Label>
             <Input
               id="cp-email"
               type="email"
               value={form.email}
               onChange={set("email")}
-              placeholder="you@company.com"
+              placeholder={t(lang, "form_email_ph")}
               className="mt-1.5"
               autoComplete="email"
             />
@@ -651,13 +647,13 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           {/* Product name */}
           <div>
             <Label htmlFor="cp-productName">
-              Product name <span className="text-destructive">*</span>
+              {t(lang, "form_product")} <span className="text-destructive">*</span>
             </Label>
             <Input
               id="cp-productName"
               value={form.productName}
               onChange={set("productName")}
-              placeholder="e.g. Bluetooth speaker"
+              placeholder={t(lang, "form_product_ph")}
               className="mt-1.5"
             />
             {errors.productName && (
@@ -668,14 +664,14 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           {/* Description */}
           <div>
             <Label htmlFor="cp-description">
-              Product description{" "}
-              <span className="text-xs text-muted-foreground">(optional — improves scan accuracy)</span>
+              {t(lang, "form_desc")}{" "}
+              <span className="text-xs text-muted-foreground">{t(lang, "form_desc_opt")}</span>
             </Label>
             <Textarea
               id="cp-description"
               value={form.description}
               onChange={set("description")}
-              placeholder="e.g. Portable rechargeable Bluetooth speaker, ABS plastic, 10W output"
+              placeholder={t(lang, "form_desc_ph")}
               className="mt-1.5 resize-none"
               rows={2}
             />
@@ -684,44 +680,44 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           {/* HTS code */}
           <div>
             <Label htmlFor="cp-htsCode">
-              HTS / HS code{" "}
-              <span className="text-xs text-muted-foreground">(optional — significantly improves scan)</span>
+              {t(lang, "form_hts")}{" "}
+              <span className="text-xs text-muted-foreground">{t(lang, "form_hts_opt")}</span>
             </Label>
             <Input
               id="cp-htsCode"
               value={form.htsCode}
               onChange={set("htsCode")}
-              placeholder="e.g. 8517.13.00"
+              placeholder={t(lang, "form_hts_ph")}
               className="mt-1.5"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Find on past customs entries or ask your factory for their export HS code.
+              {t(lang, "form_hts_help")}
             </p>
           </div>
 
           {/* Estimated shipment value */}
           <div>
             <Label htmlFor="cp-value">
-              Estimated customs value of shipment (USD){" "}
-              <span className="text-xs text-muted-foreground">(optional — enables dollar impact)</span>
+              {t(lang, "form_value")}{" "}
+              <span className="text-xs text-muted-foreground">{t(lang, "form_value_opt")}</span>
             </Label>
             <Input
               id="cp-value"
               inputMode="decimal"
               value={form.estimatedValue}
               onChange={set("estimatedValue")}
-              placeholder="e.g. 25000"
+              placeholder={t(lang, "form_value_ph")}
               className="mt-1.5"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Used only to estimate dollar impact from verified official rates. Leave blank to see rates only.
+              {t(lang, "form_value_help")}
             </p>
           </div>
 
           {/* Route */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="cp-origin">Country of origin</Label>
+              <Label htmlFor="cp-origin">{t(lang, "form_origin")}</Label>
               <Input
                 id="cp-origin"
                 value={form.originCountry}
@@ -730,7 +726,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
               />
             </div>
             <div>
-              <Label htmlFor="cp-destination">Import destination</Label>
+              <Label htmlFor="cp-destination">{t(lang, "form_dest")}</Label>
               <Input
                 id="cp-destination"
                 value={form.destination}
@@ -744,19 +740,19 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           <div>
             <div className="mb-3 flex items-center justify-between">
               <Label className="text-sm">
-                Product details{" "}
+                {t(lang, "form_details")}{" "}
                 <span className="text-xs font-normal text-muted-foreground">
-                  — check everything that applies
+                  — {t(lang, "form_check_all")}
                 </span>
               </Label>
               {activeAttrs > 0 && (
                 <Badge variant="outline" className="text-xs">
-                  {activeAttrs} selected
+                  {activeAttrs} {t(lang, "form_selected")}
                 </Badge>
               )}
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {ATTR_QUESTIONS.map(({ key, label }) => {
+              {ATTR_QUESTIONS.map(({ key, labelKey }) => {
                 const checked = attrs[key];
                 return (
                   <button
@@ -769,26 +765,26 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
                         : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
                     }`}
                   >
-                    {checked ? "✓ " : ""}{label}
+                    {checked ? "✓ " : ""}{t(lang, labelKey)}
                   </button>
                 );
               })}
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              These answers determine which risk categories and compliance requirements we check.
+              {t(lang, "form_details_help")}
             </p>
           </div>
 
           <Button type="submit" size="lg" className="w-full">
             <ScanSearch className="mr-2 h-4 w-4" />
-            Start monitoring + generate risk scan
+            {t(lang, "form_submit")}
           </Button>
         </form>
       </Card>
 
       <p className="mt-4 text-center text-xs text-muted-foreground">
         <ShieldCheck className="mr-1 inline h-3 w-3" />
-        This is not legal or customs advice. Verify with your customs broker.
+        {t(lang, "form_disclaimer")}
       </p>
     </div>
   );
@@ -803,6 +799,7 @@ function ScanningState({
   stage: "saving" | "scanning";
   productName: string;
 }) {
+  const lang = useLang();
   return (
     <div className="flex min-h-[320px] flex-col items-center justify-center py-12 text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -810,13 +807,13 @@ function ScanningState({
       </div>
       <p className="mt-5 font-semibold text-foreground">
         {stage === "saving"
-          ? "Saving your product…"
-          : `Scanning import risks for "${productName}"…`}
+          ? t(lang, "scan_saving")
+          : `${t(lang, "scan_scanning_for")} "${productName}"…`}
       </p>
       <p className="mt-2 text-sm text-muted-foreground">
         {stage === "saving"
-          ? "Setting up monitoring."
-          : "Checking tariff exposure, compliance requirements, and documentation needs."}
+          ? t(lang, "scan_saving_sub")
+          : t(lang, "scan_scanning_sub")}
       </p>
     </div>
   );
@@ -825,6 +822,7 @@ function ScanningState({
 // ── Confirmation + cockpit view ───────────────────────────────────────────────
 
 function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
+  const lang = useLang();
   const { riskScan } = confirmed;
   const hasLivePreview = confirmed.preview.length > 0;
 
@@ -836,27 +834,33 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
           <div>
             <p className="font-semibold text-green-900">
-              {confirmed.isLocal ? "Risk scan generated." : "Product saved for monitoring."}
+              {confirmed.isLocal ? t(lang, "conf_scan_generated") : t(lang, "conf_saved")}
             </p>
             <p className="mt-1 text-sm text-green-800">
               {confirmed.emailEnabled ? (
-                <>
-                  We'll monitor official U.S. trade sources and email{" "}
-                  <strong>{confirmed.email}</strong> when a relevant update may affect{" "}
-                  <strong>{confirmed.productName}</strong>.
-                </>
+                lang === "zh" ? (
+                  <>
+                    {t(lang, "conf_email_pre")}
+                    <strong>{confirmed.productName}</strong>
+                    {t(lang, "conf_email_mid")}
+                    <strong>{confirmed.email}</strong>。
+                  </>
+                ) : (
+                  <>
+                    {t(lang, "conf_email_pre")}{" "}
+                    <strong>{confirmed.email}</strong> {t(lang, "conf_email_mid")}{" "}
+                    <strong>{confirmed.productName}</strong>.
+                  </>
+                )
               ) : (
                 <>
-                  <strong>{confirmed.productName}</strong> has been saved for
-                  monitoring. Email alerts are not yet active — your risk scan is
-                  ready below.
+                  <strong>{confirmed.productName}</strong> {t(lang, "conf_email_disabled")}
                 </>
               )}
             </p>
             {confirmed.isLocal && !API_URL && (
               <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-                ⚠️ Backend not connected — entry not persisted. Set{" "}
-                <code>VITE_API_URL</code> to connect the live backend.
+                {t(lang, "conf_backend_warn")}
               </p>
             )}
           </div>
@@ -867,35 +871,33 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       <section>
         <div className="mb-1 flex items-center gap-2">
           <ScanSearch className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold">Current verified baseline</h3>
+          <h3 className="font-semibold">{t(lang, "rep_baseline")}</h3>
           <Badge variant="outline" className={`text-xs ${riskColor(riskScan.overall_risk)}`}>
-            {riskScan.overall_risk} risk
+            {tLevel(lang, riskScan.overall_risk)} {t(lang, "rep_risk_suffix")}
           </Badge>
         </div>
         <p className="mb-4 text-xs text-muted-foreground">
-          What is true for this product right now, from official sources — duty
-          rates and standing compliance requirements. Recent changes are shown
-          separately below.
+          {t(lang, "rep_baseline_sub")}
         </p>
         <RiskScanCard scan={riskScan} />
       </section>
 
       {/* Readiness score */}
       <section>
-        <h3 className="mb-4 font-semibold">Launch readiness</h3>
+        <h3 className="mb-4 font-semibold">{t(lang, "rep_readiness")}</h3>
         <ReadinessScore scan={riskScan} htsCode={confirmed.htsCode} />
       </section>
 
       {/* Document checklist — grouped by responsibility (supplier / importer-broker / conditional) */}
       <section>
-        <h3 className="mb-4 font-semibold">{t(getLang(), "docs_section_title")}</h3>
+        <h3 className="mb-4 font-semibold">{t(lang, "docs_section_title")}</h3>
         <DocumentChecklist items={riskScan.document_checklist} />
       </section>
 
       {/* Broker questions */}
       {riskScan.broker_questions.length > 0 && (
         <section>
-          <h3 className="mb-3 font-semibold">Questions to ask your customs broker</h3>
+          <h3 className="mb-3 font-semibold">{t(lang, "rep_broker_q")}</h3>
           <Card className="p-5">
             <ul className="space-y-2">
               {riskScan.broker_questions.map((q, i) => (
@@ -911,7 +913,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
 
       {/* Broker pack */}
       <section>
-        <h3 className="mb-4 font-semibold">Broker pack</h3>
+        <h3 className="mb-4 font-semibold">{t(lang, "rep_broker_pack")}</h3>
         <BrokerPack
           productName={confirmed.productName}
           description={confirmed.description}
@@ -925,12 +927,11 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       {/* Recent official updates — only real, HTS-relevant documents are shown.
           No example/mock government updates in production. */}
       <section>
-        <h3 className="mb-2 font-semibold">Recent verified changes</h3>
+        <h3 className="mb-2 font-semibold">{t(lang, "rep_changes")}</h3>
         {hasLivePreview ? (
           <>
             <p className="mb-4 text-sm text-muted-foreground">
-              Official publications from the last 30 days relevant to your HTS code —
-              newly published rules, tariff actions, or notices, each linked to its source.
+              {t(lang, "rep_changes_sub")}
             </p>
             <div className="space-y-4">
               {confirmed.preview.map((doc) => (
@@ -940,8 +941,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
           </>
         ) : (
           <Card className="p-5 text-sm text-muted-foreground">
-            No relevant change found in the last 30 days for this product.
-            ClearPort will alert you here when a relevant official update is published.
+            {t(lang, "rep_no_change")}
           </Card>
         )}
       </section>
@@ -950,15 +950,14 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       <section>
         <Card className="flex flex-col items-start gap-3 border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="font-semibold">Questions about this report?</h3>
+            <h3 className="font-semibold">{t(lang, "ask_q_title")}</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Ask ClearPort about duties, classification, tests, or documents — answered
-              only from your verified findings and matched official sources.
+              {t(lang, "ask_q_body")}
             </p>
           </div>
           <Link to="/ask" search={{ entryId: confirmed.entryId }}>
             <Button className="shrink-0">
-              <MessageSquare className="mr-2 h-4 w-4" /> Ask ClearPort
+              <MessageSquare className="mr-2 h-4 w-4" /> {t(lang, "ask_clearport")}
             </Button>
           </Link>
         </Card>
@@ -966,8 +965,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
 
       <p className="text-xs text-muted-foreground">
         <ShieldCheck className="mr-1 inline h-3 w-3" />
-        This is not legal or customs advice. Verify all findings with your customs
-        broker before making import decisions.
+        {t(lang, "disclaimer_long")}
       </p>
     </div>
   );
@@ -976,6 +974,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
 // ── Alert preview cards ───────────────────────────────────────────────────────
 
 function LivePreviewCard({ doc }: { doc: WatchlistPreviewDoc }) {
+  const lang = useLang();
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between gap-3">
@@ -984,7 +983,7 @@ function LivePreviewCard({ doc }: { doc: WatchlistPreviewDoc }) {
           <p className="mt-0.5 text-xs text-muted-foreground">
             {doc.source_name}
             {doc.published_at ? ` · ${doc.published_at.slice(0, 10)}` : ""}
-            {doc.effective_date ? ` · Effective ${doc.effective_date.slice(0, 10)}` : ""}
+            {doc.effective_date ? ` · ${t(lang, "prev_effective")} ${doc.effective_date.slice(0, 10)}` : ""}
           </p>
         </div>
         {doc.source_url && (
@@ -998,7 +997,7 @@ function LivePreviewCard({ doc }: { doc: WatchlistPreviewDoc }) {
       )}
       {doc.broker_questions?.length > 0 && (
         <div className="mt-4 rounded-md bg-slate-50 p-3 text-xs">
-          <p className="mb-1 font-medium text-foreground">What to ask your customs broker</p>
+          <p className="mb-1 font-medium text-foreground">{t(lang, "prev_what_ask")}</p>
           <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
             {doc.broker_questions.slice(0, 3).map((q) => <li key={q}>{q}</li>)}
           </ul>
