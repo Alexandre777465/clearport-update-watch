@@ -19,6 +19,7 @@ import {
   API_URL,
 } from "@/lib/api";
 import { RiskScanCard, riskColor } from "@/components/RiskScanCard";
+import { LATEST_ENTRY_KEY } from "@/components/FloatingAssistant";
 import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
 import { ReadinessScore } from "@/components/ReadinessScore";
@@ -467,6 +468,12 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           setLoadingStage(null);
           return;
         }
+      }
+
+      // Persist the entryId so the FloatingAssistant stays bound after refresh.
+      if (result.scan_status !== "local") {
+        localStorage.setItem(LATEST_ENTRY_KEY, result.id);
+        window.dispatchEvent(new CustomEvent("clearport:entry", { detail: result.id }));
       }
 
       setConfirmed({

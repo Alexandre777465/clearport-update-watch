@@ -10,6 +10,7 @@ import {
 
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
+import { FloatingAssistant } from "@/components/FloatingAssistant";
 
 function NotFoundComponent() {
   return (
@@ -119,6 +120,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
+      <FloatingAssistant />
       <Toaster />
     </QueryClientProvider>
   );

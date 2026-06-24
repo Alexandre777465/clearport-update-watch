@@ -154,10 +154,11 @@ async function runScanInBackground(
     });
 
     if (!result) {
-      // No API key (or transient null) — mark failed so the client stops polling.
+      const reason = process.env.ANTHROPIC_API_KEY ? 'SCAN_GENERATION_FAILED' : 'ANTHROPIC_KEY_MISSING';
+      console.error(`[watchlist] Scan returned null for entry ${entry.id} (lang=${entry.language}): ${reason}`);
       await db
         .from('watchlist_entries')
-        .update({ scan_status: 'failed', scan_error: 'Scan unavailable' })
+        .update({ scan_status: 'failed', scan_error: reason })
         .eq('id', entry.id);
       return;
     }

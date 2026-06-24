@@ -195,14 +195,22 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
     });
 
     const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
-    // Strip any accidental markdown code fences
-    const json = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const parsed = JSON.parse(json) as ScanResult;
+    // Extract the outermost JSON object. When the Chinese language directive is
+    // active, Claude sometimes prepends/appends a brief Chinese sentence outside
+    // the JSON object. Simple code-fence stripping silently fails in that case.
+    // Slicing from first '{' to last '}' is robust to any surrounding text.
+    const jsonStart = raw.indexOf('{');
+    const jsonEnd = raw.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
+      console.error(`[riskScanner] No JSON object in model response (lang=${entry.language}): ${raw.slice(0, 200)}`);
+      return null;
+    }
+    const parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1)) as ScanResult;
 
     const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
     return finalizeScan(sanitized, opts.baselineCategories ?? [], entry.language === 'zh' ? 'zh' : 'en');
   } catch (err: any) {
-    console.error('[riskScanner] Failed to generate scan:', err.message);
+    console.error(`[riskScanner] Failed to generate scan (lang=${entry.language}, hts=${entry.hts_code}): ${err.message}`);
     return null;
   }
 }
