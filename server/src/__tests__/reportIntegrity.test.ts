@@ -898,3 +898,117 @@ describe('translateScanToZh isolation', () => {
     }
   });
 });
+
+// ── HTS persistence: end-to-end pipeline with 8708.30.50.20 ──────────────────
+//
+// Regression for the June-25 production submission a9ed0531 where hts_code was
+// null because:
+//   1. The user submitted without entering the HTS code (form.htsCode was "").
+//   2. The inference bug (false battery/electronics keywords in "No electronics,
+//      battery, ..." description) caused the quick-check screen to appear.
+//   3. The user confirmed on the quick-check screen and the scan ran without HTS.
+//
+// With the inference fix: the brake-drum description NO LONGER triggers the
+// quick-check screen, so form.htsCode = "8708.30.50.20" reaches the backend.
+// These tests assert the full deterministic pipeline from that entry forward.
+describe('HTS persistence: 8708.30.50.20 through the pipeline', () => {
+  // Simulates the exact entry the user submits after the inference fix.
+  const brakeDrumWithHts: WatchlistEntry = entry({
+    product_name: 'Cast-iron brake drum for passenger vehicles',
+    product_description:
+      'Aftermarket brake drum for passenger motor vehicles, made in China. ' +
+      'Cast-iron braking component designed to fit inside the vehicle wheel assembly. ' +
+      'Non-composite construction. Steel content approximately 38% by weight. ' +
+      'No electronics, battery, radio transmitter, chemicals or food-contact use. ' +
+      'Manufacturer and exporter are currently unknown.',
+    hts_code: '8708.30.50.20',
+    origin_country: 'China',
+    destination_country: 'United States',
+  });
+
+  // The USITC rows returned for 8708.30.50.20 (real USITC pattern: rate on the
+  // 8-digit parent; child rows inherit it but show empty general field).
+  const usitcRows = [
+    { htsno: '8708.30.50', description: 'Brakes and servo-brakes; parts thereof', general: '2.5%', footnotes: [] },
+    { htsno: '8708.30.50.20', description: 'Brake drums', general: '', footnotes: [] },
+    { htsno: '8708.30.50.60', description: 'Other', general: '', footnotes: [] },
+  ];
+
+  test('USITC resolves 8708.30.50.20 as exact match with MFN 2.5%', () => {
+    const hts = resolveHtsRows('8708.30.50.20', usitcRows);
+    expect(hts.match_level).toBe('exact');
+    expect(hts.mfn_ad_valorem_pct).toBe(2.5);
+    // The cited HTS number must be the 10-digit statistical line, not the 8-digit parent
+    expect(formatHts(hts.hts8!)).toBe('8708.30.50.20');
+    expect(hts.matched_htsno).toBe('8708.30.50.20');
+    expect(hts.description).toBe('Brake drums');
+  });
+
+  test('assembleBaselines produces hts_duty category with verified_rate_pct = 2.5', () => {
+    const hts = resolveHtsRows('8708.30.50.20', usitcRows);
+    const baselines = assembleBaselines(brakeDrumWithHts, null, hts, REG_BASELINES);
+    const mfnCat = baselines.find((c) => c.id === 'hts_duty');
+    expect(mfnCat).toBeDefined();
+    expect(mfnCat!.verification_status).toBe('verified_applicable');
+    expect(mfnCat!.verified_rate_pct).toBe(2.5);
+    expect(mfnCat!.category).toMatch(/MFN/);
+  });
+
+  test('coverage_matrix includes mfn_duty with finding_id hts_duty', () => {
+    const hts = resolveHtsRows('8708.30.50.20', usitcRows);
+    const baselines = assembleBaselines(brakeDrumWithHts, null, hts, REG_BASELINES);
+    const coverage = buildCoverageMatrix(brakeDrumWithHts, baselines, [], hts, '8708305020', REG_BASELINES);
+    const mfn = coverage.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('verified_applicable');
+    expect(mfn!.finding_id).toBe('hts_duty');
+  });
+
+  test('coverage_matrix includes nhtsa_fmvss for brake drum keyword match', () => {
+    const hts = resolveHtsRows('8708.30.50.20', usitcRows);
+    const baselines = assembleBaselines(brakeDrumWithHts, null, hts, REG_BASELINES);
+    const coverage = buildCoverageMatrix(brakeDrumWithHts, baselines, [], hts, '8708305020', REG_BASELINES);
+    const nhtsa = coverage.find((c) => c.domain_key === 'nhtsa_fmvss');
+    expect(nhtsa).toBeDefined();
+  });
+
+  test('non-composite brake drum with "Steel content approximately 38%" is NOT excluded from AD scope', () => {
+    // After the extractSteelPct fix: "steel content approximately 38%" parses as 38%
+    // After the isComposite fix: "non-composite" guards against false composite detection
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, brakeDrumWithHts);
+    expect(r.scope_match).not.toBe('excluded');
+    expect(r.scope_match).toBe('official_unconfirmed'); // diameter/weight not in description
+    expect(r.matched_facts.some((f) => /non.composite/i.test(f))).toBe(true);
+    expect(r.matched_facts.some((f) => /38%/i.test(f))).toBe(true);
+  });
+
+  test('AD/CVD coverage items include adcvd_A-570-174 and adcvd_C-570-175 when HTS matches', () => {
+    // Verifies the scope-match flow that was silently broken in the June-25 scan.
+    // With HTS 8708.30.50.20 and the composite-detection fix, both orders are screened.
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, brakeDrumWithHts);
+    expect(['likely_match', 'official_unconfirmed']).toContain(r.scope_match);
+  });
+
+  test('finalizeScan with HTS preserves hts_duty in risk_categories and does not degrade to N/A', () => {
+    const hts = resolveHtsRows('8708.30.50.20', usitcRows);
+    const baselines = assembleBaselines(brakeDrumWithHts, null, hts, REG_BASELINES);
+    const final = finalizeScan(noisyModelScan(), baselines, 'en');
+    // hts_duty must survive finalization as a supported finding (not N/A)
+    const mfnCat = final.risk_categories.find((c) => c.id === 'hts_duty');
+    expect(mfnCat).toBeDefined();
+    expect(mfnCat!.verification_status).toBe('verified_applicable');
+    expect(mfnCat!.verified_rate_pct).toBe(2.5);
+    expect(mfnCat!.level).not.toBe('N/A');
+  });
+
+  test('mfn_duty coverage item status is verified_applicable (not insufficient_info) when HTS supplied', () => {
+    // Regression: when HTS is null, mfn_duty status is insufficient_info.
+    // When HTS 8708.30.50.20 is supplied and resolves as exact, it must be verified_applicable.
+    const hts = resolveHtsRows('8708.30.50.20', usitcRows);
+    const baselines = assembleBaselines(brakeDrumWithHts, null, hts, REG_BASELINES);
+    const coverage = buildCoverageMatrix(brakeDrumWithHts, baselines, [], hts, '8708305020', REG_BASELINES);
+    const mfn = coverage.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn!.status).toBe('verified_applicable');
+    // Contrast: without HTS the same domain is insufficient_info (tested in June-25 group)
+  });
+});
