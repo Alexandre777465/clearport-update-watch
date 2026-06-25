@@ -75,10 +75,11 @@ function extractPounds(text: string): number | null {
   return null;
 }
 
-// Extract a steel percentage from text like "38% steel", "less than 38% steel"
+// Extract a steel percentage from text like "38% steel", "steel content approximately 38%".
+// No character limit on the second pattern — "steel content approximately 38%" spans 23 chars.
 function extractSteelPct(text: string): number | null {
   const m = text.match(/(\d+(?:\.\d+)?)\s*%\s*steel/i)
-    ?? text.match(/steel[^.]{0,20}?(\d+(?:\.\d+)?)\s*%/i);
+    ?? text.match(/steel[^.]*?(\d+(?:\.\d+)?)\s*%/i);
   return m ? parseFloat(m[1]) : null;
 }
 
@@ -103,12 +104,17 @@ export function evaluateScopeMatch(
     }
     matched.push('Product identified as a brake drum');
 
-    // Exclusion check: composite drum with > 38% steel by weight
+    // Exclusion check: composite drum with > 38% steel by weight.
+    // "non-composite" must be detected FIRST: the hyphen before "composite" creates
+    // a word boundary, so /\bcomposite\b/ would otherwise match "non-composite" and
+    // incorrectly classify the product as a composite drum.
     const steelPct = extractSteelPct(text);
-    const isComposite =
-      /\bcomposite\b/.test(text) ||
-      /\bsteel.*drum\b/.test(text) ||
-      /\bdrum.*steel\b/.test(text);
+    const isNonComposite = /non[-\s]composite|not\s+composite/i.test(text);
+    const isComposite = !isNonComposite && (
+      /\bcomposite\b/i.test(text) ||
+      /\bsteel.*drum\b/i.test(text) ||
+      /\bdrum.*steel\b/i.test(text)
+    );
     if (isComposite && (steelPct === null || steelPct > 38)) {
       return {
         scope_match: 'excluded',
@@ -117,14 +123,17 @@ export function evaluateScopeMatch(
         excluded_by: 'Composite brake drums (more than 38% steel by weight) are excluded from the order scope.',
       };
     }
-    if (steelPct !== null && steelPct <= 38) {
+    if (isNonComposite) {
+      matched.push('Described as non-composite — composite exclusion does not apply');
+      if (steelPct !== null) {
+        matched.push(`Steel content ${steelPct}% by weight stated`);
+      }
+    } else if (steelPct !== null && steelPct <= 38) {
       matched.push(`Steel content ≤38% by weight (${steelPct}%) — composite exclusion does not apply`);
-    } else if (steelPct === null && /\bcomposite\b/.test(text)) {
+    } else if (steelPct === null && isComposite) {
       missing.push('percentage of steel by weight (to confirm composite exclusion does not apply)');
     } else if (steelPct !== null && steelPct > 38 && !isComposite) {
       missing.push('confirmation whether this is a composite drum (steel > 38% by weight stated)');
-    } else if (/not\s+composite|non.composite/i.test(text)) {
-      matched.push('Described as non-composite — composite exclusion does not apply');
     }
 
     // Material: gray cast iron

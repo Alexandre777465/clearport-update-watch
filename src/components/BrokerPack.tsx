@@ -42,11 +42,7 @@ ${riskFlags || "No high-risk flags identified — please confirm."}
 QUESTIONS FOR YOUR REVIEW
 ${brokerQs}
 
-ADDITIONAL CONTEXT
-Overall risk assessment: ${scan.overall_risk}
-${scan.overall_summary}
-
-Please advise on:
+${scan.overall_summary ? `NOTES\n${scan.overall_summary}\n\n` : ""}Please advise on:
 - Confirmed duty rate including all applicable tariffs
 - Any active exclusions or tariff relief programs
 - Required documentation for customs entry

@@ -731,6 +731,129 @@ describe('Coverage matrix — completeness invariants', () => {
   });
 });
 
+// ── Regression: June 25 brake-drum production failure ────────────────────────
+// Production scan a9ed0531 returned only "Customs Entry Filing" because:
+//   1. No HTS code → mfn_duty domain was gated on hts.length>=4 → silently absent
+//   2. "Non-composite construction. Steel content approximately 38% by weight":
+//      - extractSteelPct had {0,20} char limit → 23-char gap → steelPct=null
+//      - isComposite matched "non-composite" via /\bcomposite\b/ word boundary
+//      - isComposite=true AND steelPct=null → exclusion triggered (wrong)
+//   3. No HTS code → NHTSA nhtsa_fmvss domain was gated on HTS prefix → absent
+describe('Regression: June-25 brake-drum production failure', () => {
+  test('non-composite brake drum with "approx 38%" description is NOT excluded from AD scope', () => {
+    const e = entry({
+      product_name: 'Cast-iron brake drum for passenger vehicles',
+      product_description:
+        'Aftermarket brake drum for passenger motor vehicles, made in China. Cast-iron braking component. ' +
+        'Non-composite construction. Steel content approximately 38% by weight. ' +
+        'No electronics, battery, radio transmitter, chemicals or food-contact use. ' +
+        'Manufacturer and exporter are currently unknown.',
+      origin_country: 'China',
+    });
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, e);
+    // Must NOT be excluded — "non-composite" is an explicit exclusion override
+    expect(r.scope_match).not.toBe('excluded');
+    expect(r.scope_match).toBe('official_unconfirmed');
+    expect(r.matched_facts.some((f) => /non.composite/i.test(f))).toBe(true);
+  });
+
+  test('non-composite brake drum with no steel% and no HTS → NOT excluded', () => {
+    const e = entry({
+      product_name: 'Cast-iron brake drum',
+      product_description: 'Non-composite cast-iron brake drum from China.',
+      origin_country: 'China',
+    });
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, e);
+    expect(r.scope_match).not.toBe('excluded');
+    expect(r.matched_facts.some((f) => /non.composite/i.test(f))).toBe(true);
+  });
+
+  test('MFN domain present in coverage even when no HTS code submitted', () => {
+    const e = entry({
+      product_name: 'Cast-iron brake drum for passenger vehicles',
+      product_description: 'Brake drum from China.',
+      hts_code: undefined,
+      origin_country: 'China',
+    });
+    const coverage = buildCoverageMatrix(e, [], [], null, '', REG_BASELINES);
+    const mfn = coverage.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('insufficient_info');
+    expect(mfn!.missing_facts?.some((f) => /hts/i.test(f))).toBe(true);
+  });
+
+  test('NHTSA domain present for "brake drum" keyword even without HTS code', () => {
+    const e = entry({
+      product_name: 'Cast-iron brake drum for passenger vehicles',
+      product_description: 'Aftermarket brake drum from China.',
+      hts_code: undefined,
+      origin_country: 'China',
+    });
+    const coverage = buildCoverageMatrix(e, [], [], null, '', REG_BASELINES);
+    const nhtsa = coverage.find((c) => c.domain_key === 'nhtsa_fmvss');
+    expect(nhtsa).toBeDefined();
+    expect(nhtsa!.status).toBe('official_unconfirmed');
+  });
+
+  test('brake drum with HTS 8708.30.50.20 returns MFN 2.5% in coverage as verified_applicable', () => {
+    const e = entry({
+      product_name: 'Cast-Iron Brake Drum',
+      hts_code: '8708.30.5020',
+      origin_country: 'China',
+    });
+    const hts = resolveHtsRows('8708305020', [
+      { htsno: '8708.30.50', description: 'Brake drums and parts', general: '2.5%', footnotes: [] },
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '', footnotes: [] },
+    ]);
+    expect(hts.match_level).toBe('exact');
+    expect(hts.mfn_ad_valorem_pct).toBe(2.5);
+
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const mfnCat = baselines.find((c) => c.id === 'hts_duty');
+    expect(mfnCat).toBeDefined();
+    expect(mfnCat!.verification_status).toBe('verified_applicable');
+    expect(mfnCat!.verified_rate_pct).toBe(2.5);
+
+    const coverage = buildCoverageMatrix(e, baselines, [], hts, '8708305020', REG_BASELINES);
+    const mfn = coverage.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn!.status).toBe('verified_applicable');
+    expect(mfn!.finding_id).toBe('hts_duty');
+  });
+
+  test('missing producer/exporter appear in missing_facts but do not suppress AD scope match', () => {
+    // All scope criteria met (material, diameter, weight, non-composite).
+    // Missing only producer/exporter for rate confirmation → likely_match, not suppressed.
+    const e = entry({
+      product_name: 'Cast-Iron Brake Drum',
+      product_description: 'Gray cast iron brake drum from China, 15.5 inches, 65 lbs, non-composite.',
+      origin_country: 'China',
+    });
+    const r = evaluateScopeMatch(BRAKE_DRUM_AD_ORDER, e);
+    expect(r.scope_match).toBe('likely_match');
+    expect(r.missing_facts.some((f) => /producer|exporter/i.test(f))).toBe(true);
+  });
+
+  test('partial coverage (source_unavailable) produces analysis_incomplete status', () => {
+    // Verify computeOverallStatus logic: source_unavailable → incomplete.
+    // This is a backend invariant for the frontend to rely on.
+    const e = entry({
+      product_name: 'Cast-Iron Brake Drum',
+      hts_code: '8708.30.5020',
+      origin_country: 'China',
+    });
+    // Simulate HTS outage
+    const hts = resolveHtsRows('8708305020', null);
+    expect(hts.match_level).toBe('outage');
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const outageCat = baselines.find((c) => c.id === 'hts_duty');
+    expect(outageCat).toBeDefined();
+    expect(/unavailable/i.test(outageCat!.category)).toBe(true);
+    const coverage = buildCoverageMatrix(e, baselines, [], hts, '8708305020', REG_BASELINES);
+    const mfn = coverage.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn!.status).toBe('source_unavailable');
+  });
+});
+
 describe('translateScanToZh isolation', () => {
   test('returns null when ANTHROPIC_API_KEY is absent — canonical scan unmodified', async () => {
     const savedKey = process.env.ANTHROPIC_API_KEY;
@@ -756,6 +879,7 @@ describe('translateScanToZh isolation', () => {
     const e = entry({ hts_code: '6109.10.00', is_textile: true, language: 'zh' });
     const baselines = assembleBaselines(e, 25_000, hts, REG_BASELINES);
     const canonical = finalizeScan(noisyModelScan(), baselines, 'en');
+
 
     // translateScanToZh returns null when no API key — test the shape contract
     // without making a live Anthropic call. A returned non-null value must not

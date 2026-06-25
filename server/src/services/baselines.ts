@@ -345,9 +345,11 @@ const DOMAIN_REGISTRY: Array<{
     key: 'mfn_duty',
     label: 'MFN / Base Duty (USITC HTS)',
     cat: 'tariff',
-    relevant: (_e, hts) => hts.length >= 4,
+    // Always include — show insufficient_info when no HTS code so the gap is
+    // visible rather than silently absent.
+    relevant: () => true,
     resolve: (cats, _e, hts) => {
-      if (!hts) return { status: 'insufficient_info', note: 'No HTS code submitted' };
+      if (!hts) return { status: 'insufficient_info', note: 'HTS code required for MFN duty lookup', missing: ['HTS code (8-digit minimum)'] };
       const c = cats.find((x) => x.id === 'hts_duty');
       if (!c) return { status: 'source_unavailable', note: 'HTS lookup did not return a duty card' };
       if (c.verification_status === 'verified_applicable')
@@ -477,12 +479,18 @@ const DOMAIN_REGISTRY: Array<{
     key: 'nhtsa_fmvss',
     label: 'NHTSA / FMVSS (Motor Vehicle Equipment)',
     cat: 'product_regulation',
-    relevant: (_e, hts) => hts.startsWith('8708') || hts.startsWith('8711') || hts.startsWith('8714') || hts.startsWith('8701') || hts.startsWith('8702') || hts.startsWith('8703') || hts.startsWith('8704') || hts.startsWith('8705') || hts.startsWith('8706') || hts.startsWith('8707'),
+    // Trigger on HTS prefix OR on automotive keywords when no HTS code is provided,
+    // so brake drums/axles/suspension parts are never silently excluded.
+    relevant: (entry, hts) => {
+      const htsPrefixes = ['8708','8711','8714','8701','8702','8703','8704','8705','8706','8707'];
+      if (htsPrefixes.some((p) => hts.startsWith(p))) return true;
+      const text = `${entry.product_name} ${entry.product_description ?? ''}`;
+      return /\bbrake\b|\bwheel\s+hub\b|\baxle\b|\bsuspension\b|\bdriveshaft\b|\bmotor\s+vehicle\b|\bpassenger\s+vehicle\b|\bautomotive\b|\btruck\s+part\b|\bvehicle\s+part\b/i.test(text);
+    },
     resolve: (cats) => {
       const c = cats.find((x) => x.id === 'reg_nhtsa_fmvss');
       if (c) return { status: 'official_unconfirmed', note: 'Automotive parts may be subject to FMVSS — confirm with NHTSA and importer', missing: ['vehicle type and use (OEM vs. replacement)', 'whether vehicle is subject to FMVSS 121'] };
-      // NHTSA row not in DB yet → show as official_unconfirmed for automotive HTS
-      return { status: 'official_unconfirmed', note: 'Automotive part (HTS 8708.xx) — FMVSS applicability should be confirmed with NHTSA', missing: ['vehicle type', 'OEM vs. replacement equipment'] };
+      return { status: 'official_unconfirmed', note: 'Automotive part — FMVSS applicability should be confirmed with NHTSA', missing: ['vehicle type', 'OEM vs. replacement equipment'] };
     },
   },
   {
@@ -519,15 +527,25 @@ export function buildCoverageMatrix(
 ): CoverageItem[] {
   const result: CoverageItem[] = [];
 
+  // Stable domain_key → risk_category.id mapping so the frontend cost table can
+  // look up the finalized finding (rate, source, CFR citation) via finding_id.
+  const DOMAIN_FINDING_IDS: Record<string, string> = {
+    mfn_duty: 'hts_duty',
+    section_301: 'hts_section301',
+  };
+
   // Domains from the registry
   for (const d of DOMAIN_REGISTRY) {
     if (!d.relevant(entry, normalizedHts)) continue;
     const resolved = d.resolve(categories, entry, hts, regRows);
+    const linkedId = DOMAIN_FINDING_IDS[d.key];
+    const findingId = linkedId && categories.find((c) => c.id === linkedId) ? linkedId : undefined;
     result.push({
       domain: d.label,
       domain_key: d.key,
       category: d.cat,
       status: resolved.status,
+      finding_id: findingId,
       note: resolved.note,
       missing_facts: resolved.missing?.length ? resolved.missing : undefined,
     });

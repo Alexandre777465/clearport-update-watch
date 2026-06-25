@@ -14,30 +14,6 @@ function groupOf(d: DocumentChecklistItem): "supplier" | "importer_broker" | "co
   return d.required ? "supplier" : "conditional";
 }
 
-function SourceLink({ item }: { item: DocumentChecklistItem }) {
-  const lang = useLang();
-  const src = item.source;
-  if (!src) return null;
-  return (
-    <div className="mt-1.5 text-xs text-muted-foreground">
-      <span className="font-medium text-foreground/80">
-        {src.agency ? `${src.agency} · ` : ""}
-        {src.cfr_citation ?? src.title}
-      </span>
-      {src.url && (
-        <a
-          href={src.url}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-1 inline-flex items-center gap-0.5 text-primary hover:underline"
-        >
-          {t(lang, "doc_view_source")} <ExternalLink className="h-3 w-3" />
-        </a>
-      )}
-    </div>
-  );
-}
-
 function DocRow({
   doc,
   uploaded,
@@ -47,26 +23,52 @@ function DocRow({
   uploaded: boolean;
   badge: { label: string; className: string };
 }) {
+  const lang = useLang();
+  const src = doc.source;
+  const hasSource = !!(src?.agency || src?.cfr_citation || src?.title || src?.url);
+
   return (
-    <Card className={`p-3 ${uploaded ? "opacity-60" : ""}`}>
-      <div className="flex items-start gap-2">
-        {uploaded ? (
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
-        ) : (
-          <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        )}
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{doc.document}</span>
-            <Badge variant="outline" className={`text-xs ${badge.className}`}>
-              {badge.label}
-            </Badge>
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{doc.reason}</p>
-          <SourceLink item={doc} />
+    <div className={`flex items-start gap-2 py-2 ${uploaded ? "opacity-60" : ""}`}>
+      {uploaded ? (
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+      ) : (
+        <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">{doc.document}</span>
+          <Badge variant="outline" className={`text-xs ${badge.className}`}>
+            {badge.label}
+          </Badge>
         </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{doc.reason}</p>
+        {hasSource && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground select-none">
+              {t(lang, "doc_view_source")}
+            </summary>
+            <div className="mt-1 text-xs text-muted-foreground pl-2 border-l border-border">
+              {(src?.agency || src?.cfr_citation || src?.title) && (
+                <span className="font-medium text-foreground/80">
+                  {src?.agency ? `${src.agency} · ` : ""}
+                  {src?.cfr_citation ?? src?.title}
+                </span>
+              )}
+              {src?.url && (
+                <a
+                  href={src.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ml-1 inline-flex items-center gap-0.5 text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </div>
+          </details>
+        )}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -112,45 +114,45 @@ export function DocumentChecklist({
 
       {/* A. Supplier documents */}
       {supplier.length > 0 && (
-        <div>
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Card className="overflow-hidden p-0">
+          <p className="flex items-center gap-1.5 border-b px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <Factory className="h-3.5 w-3.5" /> {t(lang, "doc_group_supplier")}
           </p>
-          <div className="space-y-2">
+          <div className="divide-y px-4">
             {supplier.map((doc) => (
               <DocRow key={doc.document} doc={doc} uploaded={isUploaded(doc)} badge={requiredBadge} />
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* B. Importer / broker tasks */}
       {broker.length > 0 && (
-        <div>
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Card className="overflow-hidden p-0">
+          <p className="flex items-center gap-1.5 border-b px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <FileCheck className="h-3.5 w-3.5" /> {t(lang, "doc_group_broker")}
           </p>
-          <div className="space-y-2">
+          <div className="divide-y px-4">
             {broker.map((doc) => (
               <DocRow key={doc.document} doc={doc} uploaded={isUploaded(doc)} badge={requiredBadge} />
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* C. Applicability needs confirmation */}
       {conditional.length > 0 && (
-        <div>
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Card className="overflow-hidden p-0">
+          <p className="flex items-center gap-1.5 border-b px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <AlertCircle className="h-3.5 w-3.5" /> {t(lang, "doc_group_conditional")}
           </p>
-          <p className="mb-2 text-xs text-muted-foreground">{t(lang, "doc_group_conditional_help")}</p>
-          <div className="space-y-2">
+          <p className="border-b px-4 py-1.5 text-xs text-muted-foreground">{t(lang, "doc_group_conditional_help")}</p>
+          <div className="divide-y px-4">
             {conditional.map((doc) => (
               <DocRow key={doc.document} doc={doc} uploaded={isUploaded(doc)} badge={confirmBadge} />
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {items.length === 0 && (

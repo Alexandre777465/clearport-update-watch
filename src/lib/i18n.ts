@@ -534,7 +534,12 @@ const DICT = {
   },
 
   // ── Import check result (new top section replacing risk scoring) ─────────
+  imp_check_title: { en: "Import check", zh: "进口检查" },
   imp_check_result: { en: "Import check result", zh: "进口检查结果" },
+  imp_sentence_checks: { en: "Some checks still need confirmation.", zh: "部分事项仍需确认。" },
+  imp_sentence_incomplete: { en: "The analysis could not be completed.", zh: "分析未能完成。" },
+  imp_sentence_donot: { en: "One or more requirements must be resolved before importing.", zh: "进口前须解决一项或多项要求。" },
+  imp_sentence_ready: { en: "No unresolved import checks were found.", zh: "未发现未解决的进口检查事项。" },
   imp_product: { en: "Product", zh: "产品" },
   imp_route: { en: "Route", zh: "路线" },
   imp_hts_label: { en: "HTS code", zh: "HTS 编码" },

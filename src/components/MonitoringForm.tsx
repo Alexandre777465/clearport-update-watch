@@ -338,42 +338,7 @@ const ATTR_QUESTIONS: Array<{ key: keyof ProductAttributes; labelKey: DictKey }>
 // certainly food-contact). Inference NEVER silently overrides the user — it only
 // surfaces a confirmation step. Keep keywords tight to avoid false positives.
 
-const INFERENCE_RULES: Array<{
-  key: keyof ProductAttributes;
-  labelKey: DictKey;
-  keywords: string[];
-}> = [
-  { key: "is_food_contact", labelKey: "attr_food_contact",
-    keywords: ["water bottle", "bottle", "tumbler", "flask", "thermos", "mug", "cup",
-      "drinkware", "drinking", "food", "plate", "bowl", "cutlery", "utensil",
-      "straw", "lunchbox", "lunch box", "kettle", "sippy"] },
-  { key: "is_children", labelKey: "attr_children",
-    keywords: ["kids", "kid", "child", "children", "toddler", "baby", "infant",
-      "nursery", "toy"] },
-  { key: "has_battery", labelKey: "attr_battery",
-    keywords: ["battery", "rechargeable", "li-ion", "lithium", "power bank", "cordless"] },
-  { key: "is_electronic", labelKey: "attr_electronic",
-    keywords: ["bluetooth", "wifi", "wi-fi", "usb", "charger", "speaker", "earbud",
-      "headphone", "camera", "sensor", "electronic"] },
-  { key: "is_textile", labelKey: "attr_textile",
-    keywords: ["shirt", "apparel", "clothing", "fabric", "textile", "cotton",
-      "polyester", "garment", "sock", "hoodie", "jacket", "dress", "towel"] },
-  { key: "is_cosmetic", labelKey: "attr_cosmetic",
-    keywords: ["cosmetic", "cream", "lotion", "serum", "makeup", "lipstick",
-      "shampoo", "skincare", "beauty", "fragrance", "perfume"] },
-  { key: "is_supplement", labelKey: "attr_supplement",
-    keywords: ["supplement", "vitamin", "protein", "probiotic", "capsule", "gummies"] },
-];
-
-function inferAttributes(
-  name: string,
-  description: string,
-): Array<{ key: keyof ProductAttributes; labelKey: DictKey }> {
-  const text = `${name} ${description}`.toLowerCase();
-  return INFERENCE_RULES
-    .filter((rule) => rule.keywords.some((kw) => text.includes(kw)))
-    .map(({ key, labelKey }) => ({ key, labelKey }));
-}
+import { inferAttributes } from "@/lib/inferAttributes";
 
 // Parse the optional shipment value into a positive number, or undefined.
 function parseEstimatedValue(raw: string): number | undefined {
@@ -854,37 +819,6 @@ function computeOverallStatus(scan: ProductRiskScan): ImportStatus {
   return "ready";
 }
 
-function statusConfig(
-  status: ImportStatus,
-  lang: ReturnType<typeof useLang>,
-): { label: string; className: string; icon: React.ReactNode } {
-  switch (status) {
-    case "ready":
-      return {
-        label: t(lang, "imp_status_ready"),
-        className: "border-green-200 bg-green-50 text-green-800",
-        icon: <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />,
-      };
-    case "checks":
-      return {
-        label: t(lang, "imp_status_checks"),
-        className: "border-amber-200 bg-amber-50 text-amber-900",
-        icon: <Info className="h-5 w-5 shrink-0 text-amber-600" />,
-      };
-    case "donot":
-      return {
-        label: t(lang, "imp_status_donot"),
-        className: "border-red-200 bg-red-50 text-red-900",
-        icon: <AlertTriangle className="h-5 w-5 shrink-0 text-red-600" />,
-      };
-    case "incomplete":
-      return {
-        label: t(lang, "imp_status_incomplete"),
-        className: "border-slate-200 bg-slate-50 text-slate-700",
-        icon: <Info className="h-5 w-5 shrink-0 text-slate-500" />,
-      };
-  }
-}
 
 function coverageCostLabel(status: CoverageStatus, lang: ReturnType<typeof useLang>): string {
   switch (status) {
@@ -917,6 +851,11 @@ interface CostRow {
   coverageItem: CoverageItem;
 }
 
+const DOMAIN_FINDING_MAP: Record<string, string> = {
+  mfn_duty: "hts_duty",
+  section_301: "hts_section301",
+};
+
 function buildCostRows(
   scan: ProductRiskScan,
   lang: ReturnType<typeof useLang>,
@@ -925,9 +864,12 @@ function buildCostRows(
   const rows: CostRow[] = [];
 
   for (const c of cm) {
+    const fallbackId = DOMAIN_FINDING_MAP[c.domain_key];
     const cat = c.finding_id
       ? scan.risk_categories.find((r) => r.id === c.finding_id)
-      : undefined;
+      : fallbackId
+        ? scan.risk_categories.find((r) => r.id === fallbackId)
+        : undefined;
     const rateText =
       cat?.verified_rate_pct != null ? `${cat.verified_rate_pct}%` : null;
 
@@ -977,7 +919,6 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
   const hasLivePreview = confirmed.preview.length > 0;
 
   const overallStatus = computeOverallStatus(riskScan);
-  const sc = statusConfig(overallStatus, lang);
   const costRows = buildCostRows(riskScan, lang);
   const missingFacts = collectMissingFacts(riskScan);
   const nextActions = riskScan.next_actions.slice(0, 5);
@@ -1023,14 +964,14 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         </div>
       </Card>
 
-      {/* ── Import check result ─────────────────────────────────────────── */}
+      {/* ── Import check ─────────────────────────────────────────────────── */}
       <section>
         <h2 className="mb-4 text-xl font-semibold tracking-tight">
-          {t(lang, "imp_check_result")}
+          {t(lang, "imp_check_title")}
         </h2>
 
         {/* Product / Route / HTS summary */}
-        <Card className="mb-4 divide-y p-0 overflow-hidden">
+        <Card className="mb-3 divide-y p-0 overflow-hidden">
           <div className="flex gap-3 px-4 py-3 text-sm">
             <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_product")}</span>
             <span className="text-foreground">{confirmed.productName}</span>
@@ -1051,17 +992,10 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
           )}
         </Card>
 
-        {/* Overall status */}
-        <h3 className="mb-2 font-semibold">{t(lang, "imp_overall_status")}</h3>
-        <Card className={`border p-4 ${sc.className}`}>
-          <div className="flex items-start gap-3">
-            {sc.icon}
-            <p className="font-semibold">{sc.label}</p>
-          </div>
-          {riskScan.overall_summary && (
-            <p className="mt-2 pl-8 text-sm">{riskScan.overall_summary}</p>
-          )}
-        </Card>
+        {/* Plain status sentence */}
+        <p className="text-sm text-muted-foreground">
+          {t(lang, `imp_sentence_${overallStatus}` as DictKey)}
+        </p>
       </section>
 
       {/* ── Import costs ────────────────────────────────────────────────── */}
