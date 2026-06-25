@@ -1,13 +1,14 @@
 import type { ProductAttributes } from "./api";
+import type { DictKey } from "./i18n";
 
 export interface InferredAttribute {
   key: keyof ProductAttributes;
-  labelKey: string;
+  labelKey: DictKey;
 }
 
 const INFERENCE_RULES: Array<{
   key: keyof ProductAttributes;
-  labelKey: string;
+  labelKey: DictKey;
   keywords: string[];
 }> = [
   { key: "is_food_contact", labelKey: "attr_food_contact",

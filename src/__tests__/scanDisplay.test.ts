@@ -113,6 +113,8 @@ const CVD_CATEGORY = {
 
 /** A finalized brake-drum scan with all coverage domains populated */
 const BRAKE_DRUM_SCAN: ProductRiskScan = {
+  id: "mock-scan-f41898d2",
+  watchlist_entry_id: "mock-entry-7ad2aac3",
   overall_risk: "High",
   overall_summary: "Cast-iron brake drum from China — active AD/CVD orders apply, confirm rates with broker.",
   risk_categories: [MFN_CATEGORY, SECTION_301_CATEGORY, AD_CATEGORY, CVD_CATEGORY],
