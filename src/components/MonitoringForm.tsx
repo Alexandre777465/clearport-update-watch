@@ -24,7 +24,7 @@ import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
 import { Link } from "@tanstack/react-router";
 import { getLang, useLang, t, type DictKey } from "@/lib/i18n";
-import type { CoverageItem, CoverageStatus, ProductRiskScan } from "@/lib/api";
+import type { CoverageItem, CoverageStatus } from "@/lib/api";
 import {
   CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch, MessageSquare,
   AlertTriangle, Info,
