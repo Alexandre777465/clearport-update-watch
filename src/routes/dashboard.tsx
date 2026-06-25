@@ -9,8 +9,16 @@ import { AlertCard } from "@/components/AlertCard";
 import { alerts as mockAlerts, savedProducts as mockProducts } from "@/lib/mock";
 import { fetchAlerts, fetchProducts } from "@/lib/api";
 import { useAlertState } from "@/lib/alert-store";
-import { riskColor } from "@/components/RiskScanCard";
 import type { RiskLevel } from "@/lib/api";
+function riskColor(level: RiskLevel) {
+  switch (level) {
+    case "Critical": return "border-red-200 bg-red-50 text-red-800";
+    case "High":     return "border-orange-200 bg-orange-50 text-orange-800";
+    case "Medium":   return "border-amber-200 bg-amber-50 text-amber-800";
+    case "Low":      return "border-green-200 bg-green-50 text-green-800";
+    default:         return "border-slate-200 bg-slate-50 text-slate-500";
+  }
+}
 import {
   AlertTriangle, Package, Bell, ArrowRight, ShieldCheck,
   FileWarning, ScanSearch, CheckCircle2,

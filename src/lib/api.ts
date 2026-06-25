@@ -303,7 +303,28 @@ export type VerificationStatus =
   | "official_unconfirmed"
   | "no_verified_source";
 
+export type CoverageStatus =
+  | "verified_applicable"
+  | "likely_match"
+  | "official_unconfirmed"
+  | "no_applicable_rule"
+  | "not_applicable"
+  | "insufficient_info"
+  | "source_unavailable";
+
+export interface CoverageItem {
+  domain: string;
+  domain_key: string;
+  category: "tariff" | "trade_remedy" | "customs" | "product_regulation";
+  status: CoverageStatus;
+  finding_id?: string;
+  note?: string;
+  missing_facts?: string[];
+  official_url?: string;
+}
+
 export interface RiskCategory {
+  id?: string;
   category: string;
   level: RiskLevel;
   explanation: string;
@@ -342,6 +363,8 @@ export interface ProductRiskScan {
   next_actions: string[];
   readiness_score: number;
   confidence_level: 'Low' | 'Medium' | 'High';
+  coverage_matrix?: CoverageItem[];
+  missing_facts?: string[];
   created_at: string;
 }
 

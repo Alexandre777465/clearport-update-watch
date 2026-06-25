@@ -18,15 +18,16 @@ import {
   type DocumentChecklistItem,
   API_URL,
 } from "@/lib/api";
-import { RiskScanCard, riskColor } from "@/components/RiskScanCard";
+import { RiskScanCard } from "@/components/RiskScanCard";
 import { LATEST_ENTRY_KEY } from "@/components/FloatingAssistant";
 import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
-import { ReadinessScore } from "@/components/ReadinessScore";
 import { Link } from "@tanstack/react-router";
-import { getLang, useLang, t, tLevel, type DictKey } from "@/lib/i18n";
+import { getLang, useLang, t, type DictKey } from "@/lib/i18n";
+import type { CoverageItem, CoverageStatus, ProductRiskScan } from "@/lib/api";
 import {
   CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch, MessageSquare,
+  AlertTriangle, Info,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -826,6 +827,148 @@ function ScanningState({
   );
 }
 
+// ── Import status helpers ─────────────────────────────────────────────────────
+
+type ImportStatus = "ready" | "checks" | "donot" | "incomplete";
+
+function computeOverallStatus(scan: ProductRiskScan): ImportStatus {
+  const cm = scan.coverage_matrix;
+  if (!cm || cm.length === 0) return "incomplete";
+
+  if (cm.some((c) => c.status === "source_unavailable" || c.status === "insufficient_info")) {
+    return "incomplete";
+  }
+
+  const hasCriticalVerified = scan.risk_categories.some(
+    (c) =>
+      c.level === "Critical" &&
+      (c.verification_status === "verified_applicable" ||
+        c.verification_status === "official_unconfirmed"),
+  );
+  if (hasCriticalVerified) return "donot";
+
+  if (cm.some((c) => c.status === "likely_match" || c.status === "official_unconfirmed")) {
+    return "checks";
+  }
+
+  return "ready";
+}
+
+function statusConfig(
+  status: ImportStatus,
+  lang: ReturnType<typeof useLang>,
+): { label: string; className: string; icon: React.ReactNode } {
+  switch (status) {
+    case "ready":
+      return {
+        label: t(lang, "imp_status_ready"),
+        className: "border-green-200 bg-green-50 text-green-800",
+        icon: <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />,
+      };
+    case "checks":
+      return {
+        label: t(lang, "imp_status_checks"),
+        className: "border-amber-200 bg-amber-50 text-amber-900",
+        icon: <Info className="h-5 w-5 shrink-0 text-amber-600" />,
+      };
+    case "donot":
+      return {
+        label: t(lang, "imp_status_donot"),
+        className: "border-red-200 bg-red-50 text-red-900",
+        icon: <AlertTriangle className="h-5 w-5 shrink-0 text-red-600" />,
+      };
+    case "incomplete":
+      return {
+        label: t(lang, "imp_status_incomplete"),
+        className: "border-slate-200 bg-slate-50 text-slate-700",
+        icon: <Info className="h-5 w-5 shrink-0 text-slate-500" />,
+      };
+  }
+}
+
+function coverageCostLabel(status: CoverageStatus, lang: ReturnType<typeof useLang>): string {
+  switch (status) {
+    case "verified_applicable": return t(lang, "imp_cost_confirmed");
+    case "likely_match":        return t(lang, "imp_cost_likely");
+    case "official_unconfirmed":return t(lang, "imp_cost_may_apply");
+    case "no_applicable_rule":
+    case "not_applicable":      return t(lang, "imp_cost_not_applicable");
+    case "source_unavailable":  return t(lang, "imp_cost_unavailable");
+    default:                    return t(lang, "imp_cost_unknown");
+  }
+}
+
+function coverageCostClass(status: CoverageStatus): string {
+  switch (status) {
+    case "verified_applicable": return "text-green-700";
+    case "likely_match":
+    case "official_unconfirmed":return "text-amber-700";
+    case "no_applicable_rule":
+    case "not_applicable":      return "text-slate-400";
+    case "source_unavailable":  return "text-red-600";
+    default:                    return "text-slate-500";
+  }
+}
+
+interface CostRow {
+  label: string;
+  rateText: string | null;
+  status: CoverageStatus;
+  coverageItem: CoverageItem;
+}
+
+function buildCostRows(
+  scan: ProductRiskScan,
+  lang: ReturnType<typeof useLang>,
+): CostRow[] {
+  const cm = scan.coverage_matrix ?? [];
+  const rows: CostRow[] = [];
+
+  for (const c of cm) {
+    const cat = c.finding_id
+      ? scan.risk_categories.find((r) => r.id === c.finding_id)
+      : undefined;
+    const rateText =
+      cat?.verified_rate_pct != null ? `${cat.verified_rate_pct}%` : null;
+
+    if (c.domain_key === "mfn_duty") {
+      rows.push({ label: t(lang, "imp_costs_base"), rateText, status: c.status, coverageItem: c });
+    } else if (c.domain_key === "section_301") {
+      rows.push({ label: t(lang, "imp_costs_s301"), rateText, status: c.status, coverageItem: c });
+    } else if (c.domain_key === "section_232") {
+      rows.push({ label: t(lang, "imp_costs_s232"), rateText, status: c.status, coverageItem: c });
+    } else if (c.domain_key.startsWith("adcvd_A-")) {
+      rows.push({ label: t(lang, "imp_costs_ad"), rateText, status: c.status, coverageItem: c });
+    } else if (c.domain_key.startsWith("adcvd_C-")) {
+      rows.push({ label: t(lang, "imp_costs_cvd"), rateText, status: c.status, coverageItem: c });
+    }
+  }
+
+  return rows;
+}
+
+function collectMissingFacts(scan: ProductRiskScan): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  const add = (s: string) => {
+    const key = s.trim().toLowerCase();
+    if (!seen.has(key)) { seen.add(key); result.push(s.trim()); }
+  };
+
+  (scan.missing_facts ?? []).forEach(add);
+
+  (scan.coverage_matrix ?? [])
+    .filter((c) => c.status === "official_unconfirmed" || c.status === "likely_match" || c.status === "insufficient_info")
+    .forEach((c) => (c.missing_facts ?? []).forEach(add));
+
+  scan.risk_categories
+    .filter((c) => c.missing_info)
+    .forEach((c) => add(c.missing_info!));
+
+  return result;
+}
+
 // ── Confirmation + cockpit view ───────────────────────────────────────────────
 
 function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
@@ -833,9 +976,15 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
   const { riskScan } = confirmed;
   const hasLivePreview = confirmed.preview.length > 0;
 
+  const overallStatus = computeOverallStatus(riskScan);
+  const sc = statusConfig(overallStatus, lang);
+  const costRows = buildCostRows(riskScan, lang);
+  const missingFacts = collectMissingFacts(riskScan);
+  const nextActions = riskScan.next_actions.slice(0, 5);
+
   return (
     <div className="space-y-8">
-      {/* Confirmation banner */}
+      {/* System notification banner */}
       <Card className="border-green-200 bg-green-50/60 p-5">
         <div className="flex gap-3">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
@@ -874,14 +1023,114 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         </div>
       </Card>
 
-      {/* Current verified baseline (standing requirements) */}
+      {/* ── Import check result ─────────────────────────────────────────── */}
+      <section>
+        <h2 className="mb-4 text-xl font-semibold tracking-tight">
+          {t(lang, "imp_check_result")}
+        </h2>
+
+        {/* Product / Route / HTS summary */}
+        <Card className="mb-4 divide-y p-0 overflow-hidden">
+          <div className="flex gap-3 px-4 py-3 text-sm">
+            <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_product")}</span>
+            <span className="text-foreground">{confirmed.productName}</span>
+          </div>
+          {(confirmed.originCountry || confirmed.destination) && (
+            <div className="flex gap-3 px-4 py-3 text-sm">
+              <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_route")}</span>
+              <span className="text-foreground">
+                {confirmed.originCountry || "—"} → {confirmed.destination || "—"}
+              </span>
+            </div>
+          )}
+          {confirmed.htsCode && (
+            <div className="flex gap-3 px-4 py-3 text-sm">
+              <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_hts_label")}</span>
+              <span className="font-mono text-foreground">{confirmed.htsCode}</span>
+            </div>
+          )}
+        </Card>
+
+        {/* Overall status */}
+        <h3 className="mb-2 font-semibold">{t(lang, "imp_overall_status")}</h3>
+        <Card className={`border p-4 ${sc.className}`}>
+          <div className="flex items-start gap-3">
+            {sc.icon}
+            <p className="font-semibold">{sc.label}</p>
+          </div>
+          {riskScan.overall_summary && (
+            <p className="mt-2 pl-8 text-sm">{riskScan.overall_summary}</p>
+          )}
+        </Card>
+      </section>
+
+      {/* ── Import costs ────────────────────────────────────────────────── */}
+      {costRows.length > 0 && (
+        <section>
+          <h3 className="mb-3 font-semibold">{t(lang, "imp_costs_title")}</h3>
+          <Card className="divide-y overflow-hidden p-0">
+            {costRows.map((row, i) => (
+              <div key={i} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
+                <span className="text-foreground">{row.label}</span>
+                <div className="text-right">
+                  {row.rateText && (
+                    <span className="font-mono font-medium text-foreground">{row.rateText} </span>
+                  )}
+                  <span className={`text-xs ${coverageCostClass(row.status)}`}>
+                    {coverageCostLabel(row.status, lang)}
+                  </span>
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between gap-4 bg-slate-50/60 px-4 py-3 text-sm">
+              <span className="font-medium text-foreground">{t(lang, "imp_costs_total")}</span>
+              <span className="text-xs text-muted-foreground">{t(lang, "imp_costs_total_note")}</span>
+            </div>
+          </Card>
+        </section>
+      )}
+
+      {/* ── What we still need ──────────────────────────────────────────── */}
+      {missingFacts.length > 0 && (
+        <section>
+          <h3 className="mb-3 font-semibold">{t(lang, "imp_still_need")}</h3>
+          <Card className="p-4">
+            <ul className="space-y-1.5">
+              {missingFacts.map((fact, i) => (
+                <li key={i} className="flex gap-2 text-sm">
+                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-400" />
+                  <span className="text-foreground">{fact}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </section>
+      )}
+
+      {/* ── What to do next (max 5) ─────────────────────────────────────── */}
+      {nextActions.length > 0 && (
+        <section>
+          <h3 className="mb-3 font-semibold">{t(lang, "imp_next")}</h3>
+          <Card className="p-4">
+            <ol className="space-y-2">
+              {nextActions.map((action, i) => (
+                <li key={i} className="flex gap-2 text-sm">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                    {i + 1}
+                  </span>
+                  <span className="text-foreground">{action}</span>
+                </li>
+              ))}
+            </ol>
+          </Card>
+        </section>
+      )}
+
+      {/* ── Detailed findings ───────────────────────────────────────────── */}
       <section>
         <div className="mb-1 flex items-center gap-2">
           <ScanSearch className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold">{t(lang, "rep_baseline")}</h3>
-          <Badge variant="outline" className={`text-xs ${riskColor(riskScan.overall_risk)}`}>
-            {tLevel(lang, riskScan.overall_risk)} {t(lang, "rep_risk_suffix")}
-          </Badge>
+          <h3 className="font-semibold">{t(lang, "imp_findings")}</h3>
         </div>
         <p className="mb-4 text-xs text-muted-foreground">
           {t(lang, "rep_baseline_sub")}
@@ -889,13 +1138,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         <RiskScanCard scan={riskScan} />
       </section>
 
-      {/* Readiness score */}
-      <section>
-        <h3 className="mb-4 font-semibold">{t(lang, "rep_readiness")}</h3>
-        <ReadinessScore scan={riskScan} htsCode={confirmed.htsCode} />
-      </section>
-
-      {/* Document checklist — grouped by responsibility (supplier / importer-broker / conditional) */}
+      {/* Document checklist */}
       <section>
         <h3 className="mb-4 font-semibold">{t(lang, "docs_section_title")}</h3>
         <DocumentChecklist items={riskScan.document_checklist} />
@@ -931,8 +1174,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         />
       </section>
 
-      {/* Recent official updates — only real, HTS-relevant documents are shown.
-          No example/mock government updates in production. */}
+      {/* Recent official updates */}
       <section>
         <h3 className="mb-2 font-semibold">{t(lang, "rep_changes")}</h3>
         {hasLivePreview ? (
