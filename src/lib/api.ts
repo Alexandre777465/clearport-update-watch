@@ -432,6 +432,11 @@ export async function submitWatchlistEntry(data: {
   destination_country: string;
   alert_frequency?: string;
   estimated_value_usd?: number;
+  freight_usd?: number;
+  insurance_usd?: number;
+  transport_mode?: "ocean" | "air" | "truck" | "rail";
+  manufacturer_name?: string;
+  exporter_name?: string;
   language?: "en" | "zh";
 } & Partial<ProductAttributes>): Promise<{
   id: string;

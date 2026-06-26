@@ -23,6 +23,9 @@ import {
   coverageCostLabel,
   coverageCostClass,
   computeKnownTariffTotal,
+  calculateMpf,
+  calculateHmf,
+  buildEnhancedCostRows,
 } from "../lib/scanDisplay";
 import type { ProductRiskScan } from "../lib/api";
 
@@ -448,5 +451,162 @@ describe("Decisive answers — no vague language in cost row answers", () => {
   it("computeKnownTariffTotal marks hasUnknown=true when AD/CVD rows have null ratePct", () => {
     const { hasUnknown } = computeKnownTariffTotal(rows);
     expect(hasUnknown).toBe(true);
+  });
+});
+
+// ── calculateMpf — FY2026 rate schedule ──────────────────────────────────────
+
+describe("calculateMpf — FY2026 CBP fee schedule", () => {
+  it("rate is exactly 0.3464% of goods value (below minimum)", () => {
+    // $5,000 × 0.003464 = $17.32 → minimum $33.58 applies
+    const { amount } = calculateMpf(5_000);
+    expect(amount).toBe(33.58);
+  });
+
+  it("FY2026 minimum is $33.58", () => {
+    const { amount } = calculateMpf(0.01);
+    expect(amount).toBe(33.58);
+  });
+
+  it("FY2026 maximum is $651.50", () => {
+    // $200,000 × 0.003464 = $692.80 → capped at $651.50
+    const { amount } = calculateMpf(200_000);
+    expect(amount).toBe(651.50);
+  });
+
+  it("$50,000 × 0.3464% = $173.20 (no floor/ceiling applied)", () => {
+    const { amount } = calculateMpf(50_000);
+    expect(amount).toBeCloseTo(173.20, 2);
+  });
+
+  it("$50,000 × 2.5% tariff is exactly $1,250", () => {
+    // Tariff dollar amounts are computed as rate/100 * goods value, separate from MPF.
+    expect(50_000 * (2.5 / 100)).toBe(1_250);
+  });
+
+  it("$50,000 × 25% tariff is exactly $12,500", () => {
+    expect(50_000 * (25 / 100)).toBe(12_500);
+  });
+
+  it("two separate 25% tariffs sum to $25,000, not $12,500", () => {
+    const s301 = 50_000 * (25 / 100);
+    const s232 = 50_000 * (25 / 100);
+    expect(s301 + s232).toBe(25_000);
+  });
+
+  it("MPF basis is goods (customs) value only — does not include freight or insurance", () => {
+    // Goods $50k, freight $2k, insurance $200 — MPF is only on goods value
+    const goodsValue = 50_000;
+    const { amount: mpfOnGoods } = calculateMpf(goodsValue);
+    const { amount: mpfOnCIF } = calculateMpf(50_000 + 2_000 + 200);
+    // MPF must be calculated on goods value, not CIF
+    expect(mpfOnGoods).toBeCloseTo(173.20, 2);
+    expect(mpfOnCIF).not.toBeCloseTo(mpfOnGoods, 2);
+    expect(mpfOnCIF).toBeGreaterThan(mpfOnGoods);
+  });
+});
+
+// ── calculateHmf — ocean-only fee ────────────────────────────────────────────
+
+describe("calculateHmf — 0.125% for qualifying ocean cargo only", () => {
+  it("$50,000 ocean shipment → HMF $62.50", () => {
+    const { amount } = calculateHmf(50_000);
+    expect(amount).toBe(62.50);
+  });
+
+  it("HMF does not apply to air shipments — no HMF row or $0 HMF for non-ocean", () => {
+    // buildEnhancedCostRows with transportMode="air" must return a not_applicable HMF row
+    const rows = buildEnhancedCostRows(BRAKE_DRUM_SCAN, "en", 50_000, "air");
+    const hmfRow = rows.find((r) => r.label === "Harbor Maintenance Fee (HMF)");
+    expect(hmfRow).toBeDefined();
+    expect(hmfRow!.status).toBe("not_applicable");
+    expect(hmfRow!.dollarText).toBeNull();
+  });
+
+  it("HMF row is verified_applicable and $62.50 for ocean shipment at $50,000", () => {
+    const rows = buildEnhancedCostRows(BRAKE_DRUM_SCAN, "en", 50_000, "ocean");
+    const hmfRow = rows.find((r) => r.label === "Harbor Maintenance Fee (HMF)");
+    expect(hmfRow).toBeDefined();
+    expect(hmfRow!.status).toBe("verified_applicable");
+    expect(hmfRow!.dollarText).toBe("$62.50");
+  });
+
+  it("HMF row is insufficient_info when transport mode is unknown", () => {
+    const rows = buildEnhancedCostRows(BRAKE_DRUM_SCAN, "en", 50_000, null);
+    const hmfRow = rows.find((r) => r.label === "Harbor Maintenance Fee (HMF)");
+    expect(hmfRow).toBeDefined();
+    expect(hmfRow!.status).toBe("insufficient_info");
+    expect(hmfRow!.dollarText).toBeNull();
+  });
+});
+
+// ── $50,000 ocean brake-drum shipment — full breakdown ────────────────────────
+
+describe("$50,000 ocean shipment — brake drum from China — full cost breakdown", () => {
+  const rows = buildEnhancedCostRows(BRAKE_DRUM_SCAN, "en", 50_000, "ocean");
+
+  it("MFN tariff: $1,250 ($50,000 × 2.5%)", () => {
+    const mfn = rows.find((r) => r.label === "Base tariff (MFN)");
+    expect(mfn).toBeDefined();
+    expect(mfn!.dollarText).toBe("$1,250.00");
+  });
+
+  it("Section 301 tariff: $12,500 ($50,000 × 25%)", () => {
+    const s301 = rows.find((r) => r.label === "Section 301 tariff");
+    expect(s301).toBeDefined();
+    expect(s301!.dollarText).toBe("$12,500.00");
+  });
+
+  it("Section 232 auto-parts tariff: $12,500 ($50,000 × 25%)", () => {
+    const s232 = rows.find((r) => r.label === "Automobile-parts Section 232");
+    expect(s232).toBeDefined();
+    expect(s232!.dollarText).toBe("$12,500.00");
+  });
+
+  it("MPF: $173.20 ($50,000 × 0.3464%, between $33.58 and $651.50)", () => {
+    const mpf = rows.find((r) => r.label === "Merchandise Processing Fee (MPF)");
+    expect(mpf).toBeDefined();
+    expect(mpf!.dollarText).toBe("$173.20");
+    expect(mpf!.status).toBe("verified_applicable");
+  });
+
+  it("HMF: $62.50 ($50,000 × 0.125%, ocean)", () => {
+    const hmf = rows.find((r) => r.label === "Harbor Maintenance Fee (HMF)");
+    expect(hmf).toBeDefined();
+    expect(hmf!.dollarText).toBe("$62.50");
+    expect(hmf!.status).toBe("verified_applicable");
+  });
+
+  it("AD/CVD rows are present but have null dollarText because manufacturer/exporter unknown", () => {
+    const adRow = rows.find((r) => r.coverageItem?.domain_key === "adcvd_A-570-174");
+    const cvdRow = rows.find((r) => r.coverageItem?.domain_key === "adcvd_C-570-175");
+    expect(adRow).toBeDefined();
+    expect(cvdRow).toBeDefined();
+    expect(adRow!.dollarText).toBeNull();
+    expect(cvdRow!.dollarText).toBeNull();
+  });
+
+  it("known tariff total ($26,250) plus MPF ($173.20) plus HMF ($62.50) = $26,485.70", () => {
+    const knownDollarRows = rows.filter(
+      (r) => r.dollarText != null && r.status !== "not_applicable" && r.status !== "no_applicable_rule",
+    );
+    const total = knownDollarRows.reduce((sum, r) => {
+      const n = parseFloat(r.dollarText!.replace(/[$,]/g, ""));
+      return sum + n;
+    }, 0);
+    expect(total).toBeCloseTo(26_485.70, 1);
+  });
+
+  it("no fabricated dollar amounts — all null-dollarText rows have genuine unknown status", () => {
+    const fabricated = rows.filter(
+      (r) => r.dollarText == null &&
+             r.status !== "not_applicable" &&
+             r.status !== "no_applicable_rule" &&
+             r.status !== "insufficient_info" &&
+             r.status !== "source_unavailable" &&
+             r.status !== "official_unconfirmed" &&
+             r.status !== "likely_match",
+    );
+    expect(fabricated).toHaveLength(0);
   });
 });

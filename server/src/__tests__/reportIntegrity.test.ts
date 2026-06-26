@@ -234,7 +234,7 @@ function assertReportInvariants(
   // 4. Document checklist: traceable + grouped; required items carry a source.
   const supportedIds = new Set(supported.map((c) => c.id).filter(Boolean));
   for (const d of final.document_checklist) {
-    expect(['supplier', 'importer_broker', 'conditional']).toContain(d.responsibility);
+    expect(['supplier', 'importer_broker', 'conditional', 'carrier']).toContain(d.responsibility);
     expect(d.finding_id, `${scenario}: doc "${d.document}" must trace to a finding`).toBeDefined();
     expect(supportedIds.has(d.finding_id!), `${scenario}: doc "${d.document}" finding must be supported`).toBe(true);
     if (d.required) {

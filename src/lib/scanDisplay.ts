@@ -202,8 +202,9 @@ export function computeKnownTariffTotal(rows: CostRow[]): { knownPct: number; ha
 // ── MPF / HMF ────────────────────────────────────────────────────────────────
 
 const MPF_RATE_PCT = 0.3464;
-const MPF_MIN_USD = 31.67;
-const MPF_MAX_USD = 614.35;
+// FY2026 (Oct 1 2025 – Sep 30 2026) CBP-published MPF floor/ceiling.
+const MPF_MIN_USD = 33.58;
+const MPF_MAX_USD = 651.50;
 const HMF_RATE_PCT = 0.125;
 
 function fmtUsd(n: number): string {
@@ -239,10 +240,13 @@ export interface CostRowV2 {
   coverageItem: CoverageItem | null;
 }
 
+export type TransportMode = "ocean" | "air" | "truck" | "rail" | null;
+
 export function buildEnhancedCostRows(
   scan: ProductRiskScan,
   lang: Lang,
   customsValueUsd?: number,
+  transportMode?: TransportMode,
 ): CostRowV2[] {
   const base = buildCostRows(scan, lang);
   const result: CostRowV2[] = base.map((r) => {
@@ -292,16 +296,54 @@ export function buildEnhancedCostRows(
     });
   }
 
-  result.push({
-    label: "Harbor Maintenance Fee (HMF)",
-    rateText: `${HMF_RATE_PCT}%`,
-    ratePct: null,
-    dollarText: null,
-    calcBasis: `${HMF_RATE_PCT}% of cargo value — ocean imports only`,
-    status: "insufficient_info",
-    answer: "Cannot determine — missing: shipping method (ocean, air, or land)",
-    coverageItem: null,
-  });
+  if (transportMode === "ocean") {
+    if (customsValueUsd != null) {
+      const hmf = calculateHmf(customsValueUsd);
+      result.push({
+        label: "Harbor Maintenance Fee (HMF)",
+        rateText: `${HMF_RATE_PCT}%`,
+        ratePct: HMF_RATE_PCT,
+        dollarText: fmtUsd(hmf.amount),
+        calcBasis: hmf.basisText,
+        status: "verified_applicable",
+        answer: fmtUsd(hmf.amount),
+        coverageItem: null,
+      });
+    } else {
+      result.push({
+        label: "Harbor Maintenance Fee (HMF)",
+        rateText: `${HMF_RATE_PCT}%`,
+        ratePct: null,
+        dollarText: null,
+        calcBasis: `${HMF_RATE_PCT}% of cargo value (ocean) — provide goods value to calculate`,
+        status: "insufficient_info",
+        answer: "Cannot calculate — goods value not provided",
+        coverageItem: null,
+      });
+    }
+  } else if (transportMode === "air" || transportMode === "truck" || transportMode === "rail") {
+    result.push({
+      label: "Harbor Maintenance Fee (HMF)",
+      rateText: null,
+      ratePct: null,
+      dollarText: null,
+      calcBasis: "HMF applies to qualifying ocean imports only",
+      status: "not_applicable",
+      answer: "Not applicable — not an ocean shipment",
+      coverageItem: null,
+    });
+  } else {
+    result.push({
+      label: "Harbor Maintenance Fee (HMF)",
+      rateText: `${HMF_RATE_PCT}%`,
+      ratePct: null,
+      dollarText: null,
+      calcBasis: `${HMF_RATE_PCT}% of cargo value — ocean imports only`,
+      status: "insufficient_info",
+      answer: "Cannot determine — missing: shipping method (ocean, air, or land)",
+      coverageItem: null,
+    });
+  }
 
   return result;
 }

@@ -90,6 +90,11 @@ interface FormState {
   originCountry: string;
   destination: string;
   estimatedValue: string;
+  freightUsd: string;
+  insuranceUsd: string;
+  transportMode: "ocean" | "air" | "truck" | "rail" | "";
+  manufacturerName: string;
+  exporterName: string;
 }
 
 const DEFAULT_ATTRS: ProductAttributes = {
@@ -113,6 +118,11 @@ interface ConfirmedState {
   originCountry: string;
   destination: string;
   estimatedValue: string;
+  freightUsd: string;
+  insuranceUsd: string;
+  transportMode: "ocean" | "air" | "truck" | "rail" | "";
+  manufacturerName: string;
+  exporterName: string;
   preview: WatchlistPreviewDoc[];
   riskScan: ProductRiskScan;
   isLocal: boolean;
@@ -408,6 +418,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     originCountry: "China",
     destination: "United States",
     estimatedValue: "",
+    freightUsd: "",
+    insuranceUsd: "",
+    transportMode: "",
+    manufacturerName: "",
+    exporterName: "",
   });
   const [attrs, setAttrs] = useState<ProductAttributes>({ ...DEFAULT_ATTRS });
   const [errors, setErrors] = useState<Partial<FormState>>({});
@@ -470,6 +485,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         destination_country: form.destination.trim() || "United States",
         alert_frequency: "weekly",
         estimated_value_usd: parseEstimatedValue(form.estimatedValue),
+        freight_usd: parseEstimatedValue(form.freightUsd),
+        insurance_usd: parseEstimatedValue(form.insuranceUsd),
+        transport_mode: form.transportMode || undefined,
+        manufacturer_name: form.manufacturerName.trim() || undefined,
+        exporter_name: form.exporterName.trim() || undefined,
         language: getLang(),
         ...finalAttrs,
       });
@@ -510,6 +530,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         originCountry: form.originCountry.trim() || "China",
         destination: form.destination.trim() || "United States",
         estimatedValue: form.estimatedValue,
+        freightUsd: form.freightUsd,
+        insuranceUsd: form.insuranceUsd,
+        transportMode: form.transportMode,
+        manufacturerName: form.manufacturerName.trim(),
+        exporterName: form.exporterName.trim(),
         preview: result.preview ?? [],
         riskScan,
         isLocal: result.scan_status === "local",
@@ -773,6 +798,103 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
             </p>
           </div>
 
+          {/* Freight + insurance */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="cp-freight">
+                Freight (USD){" "}
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="cp-freight"
+                inputMode="decimal"
+                value={form.freightUsd}
+                onChange={set("freightUsd")}
+                placeholder="e.g. 2000"
+                className="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label htmlFor="cp-insurance">
+                Insurance (USD){" "}
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="cp-insurance"
+                inputMode="decimal"
+                value={form.insuranceUsd}
+                onChange={set("insuranceUsd")}
+                placeholder="e.g. 200"
+                className="mt-1.5"
+              />
+            </div>
+          </div>
+
+          {/* Transport mode */}
+          <div>
+            <Label>
+              Shipping method{" "}
+              <span className="text-xs text-muted-foreground">(optional)</span>
+            </Label>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {(["ocean", "air", "truck", "rail"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      transportMode: f.transportMode === mode ? "" : mode,
+                    }))
+                  }
+                  className={`rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                    form.transportMode === mode
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground hover:border-foreground"
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Used to determine Harbor Maintenance Fee (HMF applies to ocean only)
+            </p>
+          </div>
+
+          {/* Manufacturer + exporter */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="cp-manufacturer">
+                Manufacturer{" "}
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="cp-manufacturer"
+                value={form.manufacturerName}
+                onChange={set("manufacturerName")}
+                placeholder="Company name or Unknown"
+                className="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label htmlFor="cp-exporter">
+                Exporter{" "}
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="cp-exporter"
+                value={form.exporterName}
+                onChange={set("exporterName")}
+                placeholder="Company name or Unknown"
+                className="mt-1.5"
+              />
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Required for exact AD/CVD rates — leave blank or enter Unknown if not yet known
+          </p>
+
           {/* Route */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -991,16 +1113,22 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
   const hasLivePreview = confirmed.preview.length > 0;
 
   const customsValueUsd = parseEstimatedValue(confirmed.estimatedValue);
-  const enhancedRows = buildEnhancedCostRows(riskScan, lang, customsValueUsd);
+  const transportMode = (confirmed.transportMode || null) as import("@/lib/scanDisplay").TransportMode;
+  const enhancedRows = buildEnhancedCostRows(riskScan, lang, customsValueUsd, transportMode);
   const { knownPct, hasUnknown } = computeKnownTariffTotal(buildCostRows(riskScan, lang));
   const missingFacts = collectMissingFacts(riskScan).slice(0, 5);
   const nextSteps = riskScan.next_actions.slice(0, 3);
 
-  // Known dollar total: tariff rows + MPF
+  // Known dollar total: tariff rows + MPF + HMF (when ocean)
   const knownTariffDollar = customsValueUsd != null ? (knownPct / 100) * customsValueUsd : null;
   const mpf = customsValueUsd != null ? calculateMpf(customsValueUsd) : null;
+  const hmfAmount = transportMode === "ocean" && customsValueUsd != null
+    ? (customsValueUsd * 0.125) / 100
+    : null;
   const knownTotalDollar =
-    knownTariffDollar != null && mpf != null ? knownTariffDollar + mpf.amount : null;
+    knownTariffDollar != null && mpf != null
+      ? knownTariffDollar + mpf.amount + (hmfAmount ?? 0)
+      : null;
   const cannotTotalReason = hasUnknown
     ? "Exact AD/CVD rate requires manufacturer and exporter name"
     : !customsValueUsd
@@ -1155,13 +1283,11 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
                 <li className="flex gap-2.5 text-sm">
                   <DollarSign className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
                   <span>
-                    <span className="font-medium">Tariff and customs fee costs: </span>
+                    <span className="font-medium">Known customs charges: </span>
                     {knownTotalDollar != null
                       ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(knownTotalDollar) +
-                        " known duties and MPF" +
-                        (hasUnknown ? " + AD/CVD rate pending" : "") +
-                        " + HMF if ocean shipment"
-                      : "Rate known — provide customs value to calculate dollar amount"}
+                        (hasUnknown ? " + AD/CVD (rate pending manufacturer/exporter)" : "")
+                      : "Provide customs value to calculate"}
                   </span>
                 </li>
               )}

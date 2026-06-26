@@ -248,10 +248,17 @@ export interface RiskCategory {
 }
 
 // Who is responsible for a document (Stage 4):
-//  supplier        — your overseas supplier/factory must produce or provide it
-//  importer_broker — the U.S. importer of record / customs broker files it
-//  conditional     — only applies if a requirement's applicability is confirmed
-export type DocumentResponsibility = 'supplier' | 'importer_broker' | 'conditional';
+export type DocumentResponsibility = 'supplier' | 'importer_broker' | 'conditional' | 'carrier';
+
+export type DocItemStatus =
+  | 'required_to_clear'   // must be presented at CBP to release the goods
+  | 'required_if'         // required when a stated condition is met
+  | 'usually_requested'   // not universally mandatory; CBP frequently asks for it
+  | 'before_sale'         // not a customs-clearance requirement; needed to sell in the U.S.
+  | 'not_required'        // definitively not required for this product/route
+  | 'cannot_determine';   // missing a fact needed to assign status
+
+export type ResponsibleParty = 'supplier' | 'importer' | 'customs_broker' | 'carrier' | 'laboratory';
 
 export interface DocumentChecklistItem {
   document: string;
@@ -259,6 +266,10 @@ export interface DocumentChecklistItem {
   status?: 'required' | 'needs_confirmation';
   reason: string;
   responsibility: DocumentResponsibility;
+  doc_status?: DocItemStatus;        // explicit per-item status (takes precedence over responsibility)
+  condition?: string;                // for required_if — the triggering condition
+  missing_fact?: string;             // for cannot_determine — the missing fact
+  responsible_party?: ResponsibleParty; // more precise than responsibility
   finding_id?: string;               // originating baseline/finding id (traceable)
   source?: SourceCitation;           // official source backing this requirement
 }

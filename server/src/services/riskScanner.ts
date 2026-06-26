@@ -25,7 +25,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type {
   WatchlistEntry, ProductRiskScan, RiskCategory, RiskLevel,
-  VerificationStatus, DocumentChecklistItem,
+  VerificationStatus, DocumentChecklistItem, DocItemStatus, ResponsibleParty,
 } from '../types';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -73,6 +73,9 @@ export interface ScanDocument {
 export interface ScanOptions {
   documents?: ScanDocument[];
   estimatedValueUsd?: number;
+  transportMode?: string;
+  manufacturerName?: string;
+  exporterName?: string;
   // Deterministic, source-backed categories computed in code (Stage 3). These
   // are authoritative: they are merged in and take precedence over any model
   // category with the same name, and only THEY may be "verified_applicable".
@@ -104,6 +107,16 @@ export async function generateRiskScan(
         .join('\n\n')
     : '(none — no official documents currently match this product by HTS code)';
 
+  const manufacturerLine = opts.manufacturerName
+    ? `- Manufacturer: ${opts.manufacturerName}`
+    : `- Manufacturer: Unknown (not provided)`;
+  const exporterLine = opts.exporterName
+    ? `- Exporter: ${opts.exporterName}`
+    : `- Exporter: Unknown (not provided)`;
+  const transportLine = opts.transportMode
+    ? `- Transport mode: ${opts.transportMode}`
+    : `- Transport mode: Not provided`;
+
   const userPrompt = `Generate an import risk assessment for this product and return ONLY valid JSON.
 
 PRODUCT:
@@ -112,6 +125,9 @@ PRODUCT:
 - HTS/HS Code: ${entry.hts_code || 'Not provided'}
 - Origin: ${entry.origin_country}
 - Destination: ${entry.destination_country}
+${manufacturerLine}
+${exporterLine}
+${transportLine}
 
 PRODUCT CHARACTERISTICS:
 - For children under 12: ${entry.is_children ? 'YES' : 'No'}
@@ -302,58 +318,157 @@ function topicsOf(name: string): Set<string> {
 //   importer_broker — the U.S. importer of record / customs broker files it
 // Items from "official_unconfirmed" findings are downgraded to the conditional
 // ("applicability needs confirmation") group.
-type DocSpec = { document: string; owner: 'supplier' | 'importer_broker'; reason: string };
+type DocSpec = {
+  document: string;
+  owner: 'supplier' | 'importer_broker' | 'carrier';
+  reason: string;
+  doc_status: DocItemStatus;
+  condition?: string;
+  responsible_party: ResponsibleParty;
+};
 
 function documentsForFinding(c: RiskCategory): DocSpec[] {
   const id = c.id ?? '';
+  const verified = c.verification_status === 'verified_applicable';
 
   if (id === 'cbp_entry') {
     return [
-      { document: 'Commercial Invoice', owner: 'supplier', reason: 'Required for the CBP entry — must show price, quantity, parties, and country of origin.' },
-      { document: 'Packing List', owner: 'supplier', reason: 'Must match the commercial invoice; used for examination and entry.' },
-      { document: 'Country-of-origin marking / declaration', owner: 'importer_broker', reason: 'Imported articles must be legibly marked with country of origin (19 U.S.C. 1304); the importer is responsible.' },
-      { document: 'CBP Form 3461 (entry) & CBP Form 7501 (entry summary)', owner: 'importer_broker', reason: 'Filed by the importer of record or customs broker to enter the goods — these are importer/broker filings, not supplier documents.' },
-      { document: 'Bill of Lading / Air Waybill', owner: 'importer_broker', reason: 'Transport document presented with the entry.' },
+      {
+        document: 'Commercial Invoice',
+        owner: 'supplier', responsible_party: 'supplier',
+        reason: 'Required for the CBP entry — must show price, quantity, parties, and country of origin.',
+        doc_status: 'required_to_clear',
+      },
+      {
+        document: 'Packing List',
+        owner: 'supplier', responsible_party: 'supplier',
+        reason: 'Frequently requested at examination; must match the commercial invoice.',
+        doc_status: 'usually_requested',
+      },
+      {
+        document: 'Country-of-origin marking / declaration',
+        owner: 'importer_broker', responsible_party: 'importer',
+        reason: 'Imported articles must be legibly marked with country of origin (19 U.S.C. 1304); the importer is responsible.',
+        doc_status: 'required_to_clear',
+      },
+      {
+        document: 'CBP Form 3461 (entry) & CBP Form 7501 (entry summary)',
+        owner: 'importer_broker', responsible_party: 'customs_broker',
+        reason: 'Filed by the importer of record or customs broker to enter the goods.',
+        doc_status: 'required_to_clear',
+      },
+      {
+        document: 'Bill of Lading / Air Waybill',
+        owner: 'carrier', responsible_party: 'carrier',
+        reason: 'Transport document issued by the carrier and presented with the entry.',
+        doc_status: 'required_to_clear',
+      },
     ];
   }
   if (id === 'hts_duty') {
     if (c.verification_status === 'official_unconfirmed') {
-      return [{ document: 'Exact 10-digit HTS classification confirmation', owner: 'importer_broker', reason: 'Confirm the precise statistical line with your customs broker so the official MFN duty rate can be verified.' }];
+      return [{
+        document: 'Exact 10-digit HTS classification confirmation',
+        owner: 'importer_broker', responsible_party: 'customs_broker',
+        reason: 'Confirm the precise statistical line with your customs broker so the official MFN duty rate can be verified.',
+        doc_status: 'required_if',
+        condition: 'HTS code is not yet officially confirmed at the 10-digit level',
+      }];
     }
     return [];
   }
   if (id === 'hts_section301') {
-    return [{ document: 'Section 301 / Chapter 99 applicability & exclusion confirmation', owner: 'importer_broker', reason: 'Confirm the exact 9903.88 subheading and any exclusion with your broker before estimating landed cost.' }];
+    return [{
+      document: 'Section 301 / Chapter 99 applicability & exclusion confirmation',
+      owner: 'importer_broker', responsible_party: 'customs_broker',
+      reason: 'Confirm the exact 9903.88 subheading and any active exclusion with your broker before finalizing landed cost.',
+      doc_status: verified ? 'required_to_clear' : 'usually_requested',
+    }];
   }
 
   const topics = topicsOf(c.category);
   if (topics.has('children')) {
     return [
-      { document: 'CPSC-accredited third-party test reports (CPSIA)', owner: 'supplier', reason: 'Children’s products require testing by a CPSC-accepted laboratory; your supplier/factory arranges it.' },
-      { document: 'Children’s Product Certificate (CPC)', owner: 'importer_broker', reason: 'The U.S. importer issues the CPC based on the accredited test reports — not the supplier.' },
+      {
+        document: 'CPSC-accredited third-party test reports (CPSIA)',
+        owner: 'supplier', responsible_party: 'supplier',
+        reason: 'Children\'s products require testing by a CPSC-accepted laboratory; your supplier/factory arranges it.',
+        doc_status: verified ? 'required_to_clear' : 'required_if',
+        condition: verified ? undefined : 'product is confirmed for children under 12',
+      },
+      {
+        document: 'Children\'s Product Certificate (CPC)',
+        owner: 'importer_broker', responsible_party: 'importer',
+        reason: 'The U.S. importer issues the CPC based on the accredited test reports — not the supplier.',
+        doc_status: verified ? 'required_to_clear' : 'required_if',
+        condition: verified ? undefined : 'product is confirmed for children under 12',
+      },
     ];
   }
   if (topics.has('battery')) {
     return [
-      { document: 'UN 38.3 test summary', owner: 'supplier', reason: 'Required to ship lithium cells/batteries; obtained from the cell/battery manufacturer.' },
-      { document: 'Safety Data Sheet (SDS)', owner: 'supplier', reason: 'Required for lithium battery transport.' },
-      { document: 'Lithium battery shipping declaration / hazmat paperwork', owner: 'importer_broker', reason: 'Transport documentation handled by the importer/forwarder for the chosen mode (air/ocean).' },
+      {
+        document: 'UN 38.3 test summary',
+        owner: 'supplier', responsible_party: 'supplier',
+        reason: 'Required to ship lithium cells/batteries; obtained from the cell/battery manufacturer.',
+        doc_status: verified ? 'required_to_clear' : 'required_if',
+        condition: verified ? undefined : 'product confirmed to contain a lithium battery',
+      },
+      {
+        document: 'Safety Data Sheet (SDS)',
+        owner: 'supplier', responsible_party: 'supplier',
+        reason: 'Required for lithium battery transport.',
+        doc_status: verified ? 'required_to_clear' : 'required_if',
+        condition: verified ? undefined : 'product confirmed to contain a lithium battery',
+      },
+      {
+        document: 'Lithium battery shipping declaration / hazmat paperwork',
+        owner: 'importer_broker', responsible_party: 'customs_broker',
+        reason: 'Transport documentation handled by the importer/forwarder for the chosen mode (air/ocean).',
+        doc_status: verified ? 'required_to_clear' : 'required_if',
+        condition: verified ? undefined : 'product confirmed to contain a lithium battery',
+      },
     ];
   }
   if (topics.has('fda_food')) {
-    return [{ document: 'FDA food-contact material compliance declaration (21 CFR 174–178)', owner: 'supplier', reason: 'Supplier confirms the food-contact materials meet FDA requirements.' }];
+    return [{
+      document: 'FDA food-contact material compliance declaration (21 CFR 174–178)',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'Supplier confirms the food-contact materials meet FDA requirements.',
+      doc_status: 'usually_requested',
+    }];
   }
   if (topics.has('fda_cosmetic')) {
-    return [{ document: 'Cosmetic safety substantiation & facility/product listing info (MoCRA)', owner: 'supplier', reason: 'Supplier provides ingredient and safety information; confirm listing obligations.' }];
+    return [{
+      document: 'Cosmetic safety substantiation & facility/product listing info (MoCRA)',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'Supplier provides ingredient and safety information; confirm listing obligations.',
+      doc_status: 'before_sale',
+    }];
   }
   if (topics.has('fda_supplement')) {
-    return [{ document: 'Dietary-supplement cGMP & labeling documentation', owner: 'supplier', reason: 'Supplier provides cGMP and labeling evidence.' }];
+    return [{
+      document: 'Dietary-supplement cGMP & labeling documentation',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'Supplier provides cGMP and labeling evidence.',
+      doc_status: 'before_sale',
+    }];
   }
   if (topics.has('fcc')) {
-    return [{ document: 'FCC equipment authorization (SDoC/Grant) & Part 15 test report', owner: 'supplier', reason: 'RF/electronic devices need FCC authorization evidence from the manufacturer.' }];
+    return [{
+      document: 'FCC equipment authorization (SDoC/Grant) & Part 15 test report',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'RF/electronic devices need FCC authorization evidence from the manufacturer.',
+      doc_status: 'before_sale',
+    }];
   }
   if (topics.has('textile')) {
-    return [{ document: 'Fiber content & care-labeling information (FTC 16 CFR 303)', owner: 'supplier', reason: 'Supplier provides fiber content and care-label data for FTC textile labeling compliance.' }];
+    return [{
+      document: 'Fiber content & care-labeling information (FTC 16 CFR 303)',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'Supplier provides fiber content and care-label data for FTC textile labeling compliance.',
+      doc_status: 'before_sale',
+    }];
   }
   return [];
 }
@@ -372,7 +487,10 @@ function buildChecklist(supported: RiskCategory[]): DocumentChecklistItem[] {
         reason: d.reason,
         required: verified,
         status: verified ? 'required' : 'needs_confirmation',
-        responsibility: verified ? d.owner : 'conditional',
+        responsibility: d.owner === 'carrier' ? 'carrier' : verified ? d.owner : 'conditional',
+        doc_status: d.doc_status,
+        condition: d.condition,
+        responsible_party: d.responsible_party,
         finding_id: c.id,
         source: c.source,
       });
@@ -418,7 +536,7 @@ export function finalizeScan(
       verification_status: 'no_verified_source' as VerificationStatus,
       missing_info:
         c.applicability_conditions ||
-        'a matching official source plus your product’s exact HTS classification and attributes.',
+        'a matching official source plus your product\'s exact HTS classification and attributes.',
     } satisfies RiskCategory;
   });
 

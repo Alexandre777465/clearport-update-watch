@@ -34,9 +34,13 @@ const watchlistSchema = z.object({
   language: z.enum(['en', 'zh']).default('en'),
   // Honeypot: real users never fill this hidden field; bots often do.
   website: z.string().max(0).optional(),
-  // Optional estimated customs value of the shipment (USD). Used only to
-  // compute a dollar impact from a verified rate — never persisted.
+  // Shipment financials and logistics — used for cost calculation; persisted to DB.
   estimated_value_usd: z.number().positive().max(1_000_000_000).optional(),
+  freight_usd: z.number().nonnegative().max(1_000_000_000).optional(),
+  insurance_usd: z.number().nonnegative().max(1_000_000_000).optional(),
+  transport_mode: z.enum(['ocean', 'air', 'truck', 'rail']).optional(),
+  manufacturer_name: z.string().max(300).optional(),
+  exporter_name: z.string().max(300).optional(),
   // Product attribute flags (used for risk scan generation)
   is_children: z.boolean().default(false),
   has_battery: z.boolean().default(false),
@@ -104,6 +108,12 @@ router.post('/', async (req, res) => {
       alert_frequency: data.alert_frequency,
       scan_status: 'pending',
       language: data.language,
+      estimated_value_usd: data.estimated_value_usd ?? null,
+      freight_usd: data.freight_usd ?? null,
+      insurance_usd: data.insurance_usd ?? null,
+      transport_mode: data.transport_mode ?? null,
+      manufacturer_name: data.manufacturer_name?.trim() ?? null,
+      exporter_name: data.exporter_name?.trim() ?? null,
       is_children: data.is_children,
       has_battery: data.has_battery,
       is_electronic: data.is_electronic,
@@ -124,7 +134,11 @@ router.post('/', async (req, res) => {
   }
 
   // Kick off the scan in the background — do NOT await. Respond immediately.
-  void runScanInBackground(entry, previewDocs, data.estimated_value_usd);
+  void runScanInBackground(entry, previewDocs, data.estimated_value_usd, {
+    transport_mode: data.transport_mode,
+    manufacturer_name: data.manufacturer_name?.trim(),
+    exporter_name: data.exporter_name?.trim(),
+  });
   // Confirmation email (no-op unless Resend + ENABLE_EMAIL_ALERTS are configured).
   void sendWatchlistConfirmation(entry as any);
 
@@ -142,6 +156,11 @@ async function runScanInBackground(
   entry: any,
   previewDocs: unknown[],
   estimatedValueUsd?: number,
+  extra?: {
+    transport_mode?: string;
+    manufacturer_name?: string;
+    exporter_name?: string;
+  },
 ): Promise<void> {
   try {
     // Deterministic, source-backed baselines first (USITC HTS + curated registry + AD/CVD).
@@ -152,6 +171,9 @@ async function runScanInBackground(
     const result = await generateRiskScan(entry, {
       documents: previewDocs as any,
       estimatedValueUsd,
+      transportMode: extra?.transport_mode,
+      manufacturerName: extra?.manufacturer_name,
+      exporterName: extra?.exporter_name,
       baselineCategories: baselineResult.categories,
       coverageMatrix: baselineResult.coverage,
       missingFacts: baselineResult.missingFacts,
