@@ -9,6 +9,13 @@ import { db } from '../db/client';
 import type { WatchlistEntry, RiskCategory, RiskLevel, CoverageItem, CoverageStatus } from '../types';
 import { lookupHtsBaseline, normalizeHts, formatHts, type HtsLookupResult } from './htsBaseline';
 import { screenAdcvd, adcvdFindingsToCategories, adcvdFindingsToCoverage } from './adcvdScanner';
+import {
+  SECTION_232_AUTO,
+  SECTION_301_RATES,
+  SECTION_301_LAST_VERIFIED,
+  checkSection232Auto,
+  checkSection301Exclusion,
+} from './tariffRules';
 
 type AttrKey = keyof Pick<
   WatchlistEntry,
@@ -55,13 +62,6 @@ export interface BaselineResult {
   coverage: CoverageItem[];
   missingFacts: string[];
 }
-
-const SECTION_301_RATES: Record<string, number> = {
-  '9903.88.01': 25,  // List 1
-  '9903.88.02': 25,  // List 2
-  '9903.88.03': 25,  // List 3
-  '9903.88.04': 7.5, // List 4A
-};
 
 export async function evaluateBaselines(
   entry: WatchlistEntry,
@@ -253,56 +253,123 @@ export function assembleBaselines(
       });
     }
 
-    // ── 2. Section 301 (official HTS Ch.99 footnote, verified rate when known) ─
+    // ── 2. Section 301 (official HTS Ch.99 footnote + USTR exclusion check) ────
+    // The USITC HTS API returns the official Chapter 99 cross-reference for this
+    // HTS code (section301_ref).  We look up the enacted rate for that subheading
+    // from the Federal Register record, then check whether a USTR exclusion is
+    // active for this HTS on the import date.
     if (hts.section301_ref && entry.origin_country.toLowerCase().includes('china')) {
-      const knownRate = SECTION_301_RATES[hts.section301_ref] ?? null;
+      const rateEntry = SECTION_301_RATES[hts.section301_ref] ?? null;
+      const knownRate = rateEntry?.rate_pct ?? null;
+      const excl = hts.hts8
+        ? checkSection301Exclusion(normalizeHts(hts.hts8), today)
+        : null;
+
+      let explanation: string;
+      let action: string;
+      let status: 'verified_applicable' | 'official_unconfirmed' | 'not_applicable';
+      let finalRate: number | null = null;
+
+      if (excl?.excluded) {
+        // A KNOWN ACTIVE exclusion covers this code on the import date.
+        status = 'not_applicable';
+        finalRate = null;
+        explanation = `HTS ${formatHts(hts.hts8!)} is subject to Section 301 (${hts.section301_ref}) but is currently EXCLUDED from additional duties under USTR exclusion ${excl.exclusion!.fr_reference}, valid through ${excl.exclusion!.valid_through}. ${excl.note}`;
+        action = `No Section 301 additional duty is owed for this shipment under the active exclusion. Retain the USTR exclusion notice for customs documentation.`;
+      } else if (knownRate != null) {
+        // Rate is known from the Federal Register record for this Chapter 99 subheading.
+        const verificationNote = excl?.beyond_verification
+          ? ` ClearPort's exclusion database is verified through ${SECTION_301_LAST_VERIFIED} — confirm no new exclusion applies at ustr.gov for imports after that date.`
+          : '';
+        status = 'verified_applicable';
+        finalRate = knownRate;
+        explanation = `HTS ${formatHts(hts.hts8!)} is classified under Section 301 ${hts.section301_ref} (${rateEntry!.list}), which imposes an additional ${knownRate}% on China-origin goods per ${rateEntry!.fr_reference}. No active USTR exclusion was found for this code as of ${SECTION_301_LAST_VERIFIED}.${verificationNote}`;
+        action = `Budget +${knownRate}% Section 301 additional duty on top of the base MFN rate.`;
+      } else {
+        // Chapter 99 subheading is present in the HTS footnote but not in our
+        // rate table — this should not occur for well-known List 1–4A subheadings.
+        status = 'official_unconfirmed';
+        finalRate = null;
+        explanation = `The official HTS footnote for this code references ${hts.section301_ref} (Section 301). The exact ad valorem rate for this specific Chapter 99 provision is not in ClearPort's rate table — confirm with USTR.`;
+        action = `Confirm the exact Section 301 additional duty rate for ${hts.section301_ref} at ustr.gov.`;
+      }
+
       out.push({
         id: 'hts_section301',
         category: 'Section 301 China Tariff',
-        level: 'High',
-        explanation: knownRate != null
-          ? `HTS ${formatHts(hts.hts8!)} is subject to Section 301 duties under ${hts.section301_ref} at an additional ${knownRate}% for China-origin goods. This rate is currently in effect. No active exclusion was identified for this HTS code.`
-          : `The official HTS footnote references ${hts.section301_ref} (Section 301 China tariff). Confirm the exact rate and any active exclusion with your customs broker.`,
-        action: knownRate != null
-          ? `Budget +${knownRate}% Section 301 additional duty on top of the base MFN rate.`
-          : `Confirm the exact Section 301 rate and active exclusion status with your broker.`,
-        verification_status: knownRate != null ? 'verified_applicable' : 'official_unconfirmed',
+        level: status === 'not_applicable' ? 'N/A' : 'High',
+        explanation,
+        action,
+        verification_status: status,
         applicability_conditions: `China-origin goods classified under HTS ${formatHts(hts.hts8!)}.`,
-        verified_rate_pct: knownRate,
+        verified_rate_pct: finalRate,
         source: {
           agency: 'USTR',
           name: 'Office of the United States Trade Representative',
-          title: `Section 301 — ${hts.section301_ref}`,
-          cfr_citation: `HTSUS ${hts.section301_ref}`,
-          last_verified_at: today,
+          title: `Section 301 ${rateEntry?.list ?? hts.section301_ref} — HTSUS ${hts.section301_ref}`,
+          cfr_citation: rateEntry
+            ? `HTSUS ${hts.section301_ref}; ${rateEntry.fr_reference}`
+            : `HTSUS ${hts.section301_ref}`,
+          last_verified_at: SECTION_301_LAST_VERIFIED,
           url: 'https://ustr.gov/issue-areas/enforcement/section-301-investigations',
           why_relevant: `USITC HTS official footnote cross-references China-origin goods under this heading to ${hts.section301_ref}.`,
         },
       });
     }
 
-    // ── 2b. Section 232 automobile-parts tariff (Proclamation 10908, May 3 2025) ─
-    if (hts.requested.startsWith('8708')) {
-      out.push({
-        id: 'section_232_auto',
-        category: 'Section 232 Automobile-Parts Tariff',
-        level: 'High',
-        explanation: `Automobile parts classified under HTS 8708 are subject to an additional 25% Section 232 tariff under HTSUS 9903.94.05, implemented by Presidential Proclamation 10908 (signed April 29, 2025, effective May 3, 2025). This tariff applies to imports from all countries and is in addition to the MFN base rate and any Section 301 tariff.`,
-        action: `Include this +25% automobile-parts Section 232 tariff in your landed cost calculation. It applies on top of the MFN base rate and any Section 301 tariff.`,
-        verification_status: 'verified_applicable',
-        applicability_conditions: `Automobile parts classified under HTS 8708, imported on or after May 3, 2025.`,
-        verified_rate_pct: 25,
-        source: {
-          agency: 'CBP / Commerce',
-          name: 'U.S. Customs and Border Protection / U.S. Department of Commerce',
-          title: 'Section 232 Automobile-Parts Tariff — 9903.94.05 / Proclamation 10908',
-          cfr_citation: '9903.94.05; Presidential Proclamation 10908 (Apr. 29, 2025)',
-          effective_date: '2025-05-03',
-          last_verified_at: today,
-          url: 'https://www.federalregister.gov/documents/2025/05/01/2025-07872/adjusting-imports-of-automobiles-and-automobile-parts-into-the-united-states',
-          why_relevant: `HTS 8708 (automobile parts including brake drums) is expressly covered by Proclamation 10908.`,
-        },
-      });
+    // ── 2b. Section 232 automobile-parts tariff (Proclamation 10908) ─────────
+    // Uses checkSection232Auto() which enforces the exact Annex I HTS list,
+    // the May 3 2025 effective date, and the USMCA exemption condition.
+    // Never applies a blanket chapter-level rule.
+    {
+      const s232 = checkSection232Auto(hts.requested, entry.origin_country, today);
+
+      if (s232.applies === true) {
+        out.push({
+          id: 'section_232_auto',
+          category: 'Section 232 Automobile-Parts Tariff',
+          level: 'High',
+          explanation: `${s232.note} Rate source: ${s232.source_ref}.`,
+          action: `Include +${s232.rate_pct!}% in your landed cost calculation. This tariff stacks with the MFN base rate and any Section 301 tariff.`,
+          verification_status: 'verified_applicable',
+          applicability_conditions: `HTS ${hts.requested} (Annex I of ${SECTION_232_AUTO.proclamation}); origin not USMCA-qualifying; import on or after ${SECTION_232_AUTO.effective_date}.`,
+          verified_rate_pct: s232.rate_pct,
+          source: {
+            agency: 'CBP / Commerce',
+            name: 'U.S. Customs and Border Protection / U.S. Department of Commerce',
+            title: `${SECTION_232_AUTO.proclamation} — ${SECTION_232_AUTO.htsus_code}`,
+            cfr_citation: `${SECTION_232_AUTO.htsus_code}; ${SECTION_232_AUTO.federal_register_ref}`,
+            effective_date: SECTION_232_AUTO.effective_date,
+            last_verified_at: SECTION_232_AUTO.last_verified,
+            url: SECTION_232_AUTO.official_url,
+            why_relevant: s232.note,
+          },
+        });
+      } else if (s232.applies === 'cannot_determine') {
+        // USMCA-origin goods — cannot confirm or deny without a customs declaration
+        out.push({
+          id: 'section_232_auto',
+          category: 'Section 232 Automobile-Parts Tariff',
+          level: 'Medium',
+          explanation: s232.note,
+          action: `Provide a USMCA supplier declaration or CBP Form 434 to confirm whether this shipment qualifies for USMCA exemption from ${SECTION_232_AUTO.htsus_code}.`,
+          verification_status: 'insufficient_info',
+          applicability_conditions: `HTS ${hts.requested} is covered by Annex I; USMCA exemption depends on rules-of-origin qualification.`,
+          verified_rate_pct: null,
+          missing_info: 'USMCA supplier declaration or CBP Form 434 confirming rules-of-origin qualification',
+          source: {
+            agency: 'CBP / Commerce',
+            name: 'U.S. Customs and Border Protection / U.S. Department of Commerce',
+            title: `${SECTION_232_AUTO.proclamation} — ${SECTION_232_AUTO.htsus_code}`,
+            cfr_citation: `${SECTION_232_AUTO.htsus_code}; ${SECTION_232_AUTO.federal_register_ref}`,
+            effective_date: SECTION_232_AUTO.effective_date,
+            last_verified_at: SECTION_232_AUTO.last_verified,
+            url: SECTION_232_AUTO.official_url,
+            why_relevant: s232.note,
+          },
+        });
+      }
+      // s232.applies === false → no category pushed; the domain resolver will show 'not_applicable'
     }
   }
 
@@ -415,6 +482,8 @@ const DOMAIN_REGISTRY: Array<{
       if (!entry.origin_country.toLowerCase().includes('china'))
         return { status: 'not_applicable', note: 'Not applicable — origin is not China' };
       const c = cats.find((x) => x.id === 'hts_section301');
+      if (c && c.verification_status === 'not_applicable')
+        return { status: 'not_applicable', note: c.explanation ?? 'Active USTR exclusion — Section 301 does not apply to this shipment' };
       if (c && c.verification_status === 'verified_applicable')
         return { status: 'verified_applicable', note: `Section 301 ${hts?.section301_ref ?? ''} — ${c.verified_rate_pct != null ? `+${c.verified_rate_pct}%` : 'rate confirmed'}` };
       if (c) return { status: 'official_unconfirmed', note: `Chapter 99 cross-reference ${hts?.section301_ref ?? ''} found in official HTS footnote` };
@@ -427,14 +496,33 @@ const DOMAIN_REGISTRY: Array<{
   },
   {
     key: 'section_232_auto',
-    label: 'Section 232 Automobile-Parts Tariff (9903.94.05)',
+    label: `Section 232 Automobile-Parts Tariff (${SECTION_232_AUTO.htsus_code})`,
     cat: 'tariff',
-    relevant: (_e, hts) => hts.startsWith('8708'),
-    resolve: (cats) => {
+    // Relevant when ANY covered Annex I prefix matches — or when a USMCA-origin
+    // version was pushed as insufficient_info — so the domain always appears for
+    // the customer.  checkSection232Auto is the single source of truth for coverage.
+    relevant: (_e, hts) =>
+      SECTION_232_AUTO.covered_hts_prefixes.some((p) => hts.startsWith(p)),
+    resolve: (cats, entry, hts) => {
       const c = cats.find((x) => x.id === 'section_232_auto');
-      if (c && c.verification_status === 'verified_applicable')
-        return { status: 'verified_applicable', note: 'Applies — +25% automobile-parts Section 232 (9903.94.05, Proclamation 10908)' };
-      return { status: 'not_applicable', note: 'Not an automobile part — Proclamation 10908 does not apply' };
+      if (c?.verification_status === 'verified_applicable')
+        return {
+          status: 'verified_applicable',
+          note: `Applies — +${SECTION_232_AUTO.rate_pct}% (${SECTION_232_AUTO.htsus_code}, ${SECTION_232_AUTO.proclamation})`,
+        };
+      if (c?.verification_status === 'insufficient_info')
+        return {
+          status: 'insufficient_info',
+          note: c.missing_info ?? 'USMCA qualification status required',
+          missing: ['USMCA supplier declaration or CBP Form 434'],
+        };
+      // No category was pushed → not covered (before effective date, HTS not in Annex, etc.)
+      if (hts) {
+        const check = checkSection232Auto(hts.requested, entry.origin_country);
+        if (check.applies === false)
+          return { status: 'not_applicable', note: check.note };
+      }
+      return { status: 'not_applicable', note: `HTS not in ${SECTION_232_AUTO.proclamation} Annex I` };
     },
   },
   {

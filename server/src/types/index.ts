@@ -224,9 +224,11 @@ export interface SourceCitation {
 //                         classification are insufficient to confirm it applies.
 //  no_verified_source   — no official source backs this; do not guess.
 export type VerificationStatus =
-  | 'verified_applicable'
-  | 'official_unconfirmed'
-  | 'no_verified_source';
+  | 'verified_applicable'      // confirmed applicable from official source
+  | 'official_unconfirmed'     // official source found; exact applicability needs confirmation
+  | 'no_verified_source'       // no official source could be reached / not in database
+  | 'not_applicable'           // verified from official source that rule does NOT apply
+  | 'insufficient_info';       // cannot determine — specific fact(s) are missing
 
 export interface RiskCategory {
   id?: string;           // stable finding id — lets documents/questions trace back
