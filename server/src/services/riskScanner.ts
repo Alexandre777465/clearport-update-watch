@@ -83,6 +83,8 @@ export interface ScanOptions {
   // Coverage matrix and missing facts passed through from evaluateBaselines.
   coverageMatrix?: import('../types').CoverageItem[];
   missingFacts?: string[];
+  // Document specs from the universal regulatory module engine.
+  moduleDocSpecs?: import('./regulatoryModules/index').DocSpec[];
 }
 
 export async function generateRiskScan(
@@ -229,7 +231,7 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
 
     const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
     // Always finalize in English — translation is a separate phase handled in watchlist.ts.
-    return finalizeScan(sanitized, opts.baselineCategories ?? [], 'en', opts.coverageMatrix, opts.missingFacts);
+    return finalizeScan(sanitized, opts.baselineCategories ?? [], 'en', opts.coverageMatrix, opts.missingFacts, opts.moduleDocSpecs);
   } catch (err: any) {
     console.error(`[riskScanner] Failed to generate scan (lang=${entry.language}, hts=${entry.hts_code}): ${err.message}`);
     return null;
@@ -473,9 +475,13 @@ function documentsForFinding(c: RiskCategory): DocSpec[] {
   return [];
 }
 
-function buildChecklist(supported: RiskCategory[]): DocumentChecklistItem[] {
+function buildChecklist(
+  supported: RiskCategory[],
+  moduleDocSpecs?: import('./regulatoryModules/index').DocSpec[],
+): DocumentChecklistItem[] {
   const out: DocumentChecklistItem[] = [];
   const seen = new Set<string>();
+
   for (const c of supported) {
     const verified = c.verification_status === 'verified_applicable';
     for (const d of documentsForFinding(c)) {
@@ -496,6 +502,30 @@ function buildChecklist(supported: RiskCategory[]): DocumentChecklistItem[] {
       });
     }
   }
+
+  // Append module-engine document specs, de-duplicated against the above.
+  if (moduleDocSpecs) {
+    const findingStatus = new Map(supported.map((c) => [c.id, c.verification_status]));
+    for (const d of moduleDocSpecs) {
+      const key = d.document.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const parentStatus = findingStatus.get(d.finding_id);
+      const isVerified = parentStatus === 'verified_applicable';
+      out.push({
+        document: d.document,
+        reason: d.reason,
+        required: isVerified,
+        status: isVerified ? 'required' : 'needs_confirmation',
+        responsibility: d.owner === 'carrier' ? 'carrier' : isVerified ? d.owner : 'conditional',
+        doc_status: d.doc_status,
+        condition: d.condition,
+        responsible_party: d.responsible_party,
+        finding_id: d.finding_id,
+      });
+    }
+  }
+
   return out;
 }
 
@@ -512,6 +542,7 @@ export function finalizeScan(
   lang: 'en' | 'zh' = 'en',
   coverageMatrix?: import('../types').CoverageItem[],
   missingFacts?: string[],
+  moduleDocSpecs?: import('./regulatoryModules/index').DocSpec[],
 ): ScanResult {
   const baselineTopics = new Set<string>();
   baselines.forEach((b) => topicsOf(b.category).forEach((t) => baselineTopics.add(t)));
@@ -605,7 +636,7 @@ export function finalizeScan(
   // grouped by responsible party, each item traceable to its finding + source.
   // The model's proposed checklist is intentionally discarded so no untraceable
   // or unsupported document can ever appear.
-  const checklist = buildChecklist(supported);
+  const checklist = buildChecklist(supported, moduleDocSpecs);
 
   return {
     ...scan,

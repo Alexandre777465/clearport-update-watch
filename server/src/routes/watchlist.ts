@@ -165,7 +165,7 @@ async function runScanInBackground(
   try {
     // Deterministic, source-backed baselines first (USITC HTS + curated registry + AD/CVD).
     const baselineResult = await evaluateBaselines(entry, estimatedValueUsd).catch(
-      () => ({ categories: [] as any[], coverage: [] as any[], missingFacts: [] as string[] }),
+      () => ({ categories: [] as any[], coverage: [] as any[], missingFacts: [] as string[], moduleDocSpecs: [] as any[], moduleQuestions: [] as any[] }),
     );
 
     const result = await generateRiskScan(entry, {
@@ -177,6 +177,7 @@ async function runScanInBackground(
       baselineCategories: baselineResult.categories,
       coverageMatrix: baselineResult.coverage,
       missingFacts: baselineResult.missingFacts,
+      moduleDocSpecs: baselineResult.moduleDocSpecs,
     });
 
     if (!result) {

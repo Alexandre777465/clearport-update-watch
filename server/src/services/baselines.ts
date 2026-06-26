@@ -16,6 +16,8 @@ import {
   checkSection232Auto,
   checkSection301Exclusion,
 } from './tariffRules';
+import { evaluateAllModules } from './regulatoryModules/index';
+import type { ModuleInput, DocSpec as ModuleDocSpec, DynamicQuestion } from './regulatoryModules/index';
 
 type AttrKey = keyof Pick<
   WatchlistEntry,
@@ -61,6 +63,8 @@ export interface BaselineResult {
   categories: RiskCategory[];
   coverage: CoverageItem[];
   missingFacts: string[];
+  moduleDocSpecs: ModuleDocSpec[];
+  moduleQuestions: DynamicQuestion[];
 }
 
 export async function evaluateBaselines(
@@ -101,18 +105,58 @@ export async function evaluateBaselines(
 
   const baseCategories = assembleBaselines(entry, value, hts, regRows, today);
   const adcvdCategories = adcvdFindingsToCategories(adcvdFindings, today);
-  const categories = [...baseCategories, ...adcvdCategories];
+  const baselinePlusMfn = [...baseCategories, ...adcvdCategories];
 
   // Build coverage matrix from all checked domains
   const adcvdCoverage = adcvdFindingsToCoverage(adcvdFindings, adcvdCategories);
-  const coverage = buildCoverageMatrix(entry, categories, adcvdCoverage, hts, normalizedHts, regRows);
+  const baselineCoverage = buildCoverageMatrix(entry, baselinePlusMfn, adcvdCoverage, hts, normalizedHts, regRows);
 
   // Aggregate missing facts from AD/CVD scope analysis
-  const missingFacts = Array.from(
+  const adcvdMissingFacts = Array.from(
     new Set(adcvdFindings.flatMap((f) => f.missing_facts)),
   );
 
-  return { categories, coverage, missingFacts };
+  // Universal regulatory module engine — evaluates all 10 category modules.
+  const productText = `${entry.product_name} ${entry.product_description ?? ''}`;
+  const moduleInput: ModuleInput = {
+    htsDigits: normalizedHts,
+    productText,
+    attrs: {
+      is_children: entry.is_children,
+      has_battery: entry.has_battery,
+      is_electronic: entry.is_electronic,
+      is_textile: entry.is_textile,
+      is_cosmetic: entry.is_cosmetic,
+      is_food_contact: entry.is_food_contact,
+      is_supplement: entry.is_supplement,
+    },
+    originCountry: entry.origin_country,
+    importDate: today,
+    knownFacts: {},
+  };
+  const moduleResult = evaluateAllModules(moduleInput);
+
+  // Merge module findings — skip any whose id already appears in baseline results.
+  const existingIds = new Set(baselinePlusMfn.map((c) => c.id).filter(Boolean));
+  const newModuleFindings = moduleResult.findings.filter((f) => !f.id || !existingIds.has(f.id));
+  const categories = [...baselinePlusMfn, ...newModuleFindings];
+
+  // Merge coverage — module domains take precedence over DOMAIN_REGISTRY entries.
+  const moduleCovKeys = new Set(moduleResult.coverageDomains.map((c) => c.domain_key));
+  const filteredCoverage = baselineCoverage.filter((c) => !moduleCovKeys.has(c.domain_key));
+  const coverage = [...filteredCoverage, ...moduleResult.coverageDomains];
+
+  // Merge missing facts from all sources.
+  const moduleMissingFacts = moduleResult.coverageDomains.flatMap((c) => c.missing_facts ?? []);
+  const missingFacts = Array.from(new Set([...adcvdMissingFacts, ...moduleMissingFacts]));
+
+  return {
+    categories,
+    coverage,
+    missingFacts,
+    moduleDocSpecs: moduleResult.docSpecs,
+    moduleQuestions: moduleResult.questions,
+  };
 }
 
 /**
