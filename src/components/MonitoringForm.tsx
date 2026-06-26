@@ -69,7 +69,7 @@ function needsClarificationQuestions(form: { htsCode: string; productName: strin
 function appendClarificationFacts(originalDesc: string, facts: BrakeDrumFacts): string {
   const lines: string[] = [];
   if (facts.inside_diameter !== "unknown") lines.push(`Inside diameter: ${facts.inside_diameter} in`);
-  if (facts.weight !== "unknown") lines.push(`Weight: ${facts.weight === "over_50" ? ">50 lbs" : "≤50 lbs"}`);
+  if (facts.weight !== "unknown") lines.push(`Weight: ${facts.weight === "over_50" ? "over 50 lbs" : "50 lbs or less"}`);
   if (facts.material !== "unknown") lines.push(`Material: ${facts.material === "grey_cast_iron" ? "grey cast iron" : "other material"}`);
   if (facts.construction !== "unknown") lines.push(`Construction: ${facts.construction === "non_composite" ? "non-composite" : "composite"}`);
   if (facts.vehicle_type !== "unknown") lines.push(`Vehicle type: ${facts.vehicle_type === "passenger" ? "passenger vehicle" : "medium/heavy commercial truck"}`);

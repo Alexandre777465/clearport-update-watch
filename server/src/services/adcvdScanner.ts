@@ -66,8 +66,16 @@ function extractInches(text: string): number | null {
   return m ? parseFloat(m[1]) : null;
 }
 
-// Extract a lb/kg weight value from text
+// Extract a lb/kg weight value from text.
+// Handles threshold phrases like "over 50 lbs" or ">50 lbs": returns the
+// threshold value + 0.001 so scope checks (wt > 50) behave correctly.
 function extractPounds(text: string): number | null {
+  // Threshold forms: "over 50 lbs", ">50 lbs", "more than 50 lbs", "greater than 50 lb"
+  const mThreshold = text.match(
+    /(?:over|>|more\s+than|greater\s+than)\s*(\d+(?:\.\d+)?)\s*(?:pounds|lbs?|lb)/i,
+  );
+  if (mThreshold) return parseFloat(mThreshold[1]) + 0.001;
+
   const mLbs = text.match(/(\d+(?:\.\d+)?)\s*(?:pounds|lbs?|lb)/i);
   if (mLbs) return parseFloat(mLbs[1]);
   const mKg = text.match(/(\d+(?:\.\d+)?)\s*(?:kilograms?|kg)/i);
