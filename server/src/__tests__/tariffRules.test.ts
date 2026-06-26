@@ -25,8 +25,13 @@ import {
   SECTION_232_AUTO,
   SECTION_301_RATES,
   SECTION_301_LIST3_EXCLUSIONS,
+  SECTION_301_LAST_VERIFIED,
   type Section301Exclusion,
 } from '../services/tariffRules';
+import {
+  lookupBrakeDrumAdRate,
+  lookupBrakeDrumCvdRate,
+} from '../services/adcvdScanner';
 import { assembleBaselines } from '../services/baselines';
 import type { WatchlistEntry } from '../types';
 
@@ -80,8 +85,8 @@ describe('checkSection232Auto — included HTS', () => {
     expect(r.reason).toBe('covered');
   });
 
-  it('8708.99 (other automobile parts) from China applies', () => {
-    const r = checkSection232Auto('870899', 'China', '2025-06-01');
+  it('8708.99.53 from China applies (exact 8-digit subheading)', () => {
+    const r = checkSection232Auto('87089953', 'China', '2025-06-01');
     expect(r.applies).toBe(true);
     expect(r.reason).toBe('covered');
   });
@@ -358,8 +363,15 @@ describe('SECTION_232_AUTO Annex I completeness', () => {
     expect(SECTION_232_AUTO.covered_hts_prefixes).toContain('870830');
   });
 
-  it('covers 870899 (other parts — catch-all subheading)', () => {
-    expect(SECTION_232_AUTO.covered_hts_prefixes).toContain('870899');
+  it('covers 8708.99.53/55/58/68 at exact 8-digit level (not the generic 870899 prefix)', () => {
+    const p = SECTION_232_AUTO.covered_hts_prefixes;
+    // Exact covered subheadings must be present
+    expect(p).toContain('87089953');
+    expect(p).toContain('87089955');
+    expect(p).toContain('87089958');
+    expect(p).toContain('87089968');
+    // Generic 6-digit prefix must NOT be present (would incorrectly cover all 8708.99.xx)
+    expect(p).not.toContain('870899');
   });
 
   it('effective date is 2025-05-03', () => {
@@ -372,5 +384,185 @@ describe('SECTION_232_AUTO Annex I completeness', () => {
 
   it('rate is 25%', () => {
     expect(SECTION_232_AUTO.rate_pct).toBe(25);
+  });
+});
+
+// ── Exact HTS list boundary tests ────────────────────────────────────────────
+
+describe('checkSection232Auto — exact 8708.93 and 8708.99 HTS boundaries', () => {
+  it('8708.93.60 (87089360) from China is covered', () => {
+    const r = checkSection232Auto('87089360', 'China', '2026-01-01');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('covered');
+  });
+
+  it('8708.93.75 (87089375) from Japan is covered', () => {
+    const r = checkSection232Auto('87089375', 'Japan', '2026-01-01');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('covered');
+  });
+
+  it('8708.93.60.00 (10-digit) from China is covered via 8-digit prefix match', () => {
+    const r = checkSection232Auto('8708936000', 'China', '2026-01-01');
+    expect(r.applies).toBe(true);
+  });
+
+  it('8708.93.15 (87089315) — agricultural tractor clutch — is NOT covered', () => {
+    const r = checkSection232Auto('87089315', 'China', '2026-01-01');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('not_covered_hts');
+  });
+
+  it('8708.99.53 (87089953) from China is covered', () => {
+    const r = checkSection232Auto('87089953', 'China', '2026-01-01');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('covered');
+  });
+
+  it('8708.99.55 (87089955) from China is covered', () => {
+    const r = checkSection232Auto('87089955', 'China', '2026-01-01');
+    expect(r.applies).toBe(true);
+  });
+
+  it('8708.99.58 (87089958) from China is covered', () => {
+    const r = checkSection232Auto('87089958', 'China', '2026-01-01');
+    expect(r.applies).toBe(true);
+  });
+
+  it('8708.99.68 (87089968) from China is covered', () => {
+    const r = checkSection232Auto('87089968', 'China', '2026-01-01');
+    expect(r.applies).toBe(true);
+  });
+
+  it('8708.99.48 (87089948) — not in covered list — is NOT covered', () => {
+    const r = checkSection232Auto('87089948', 'China', '2026-01-01');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('not_covered_hts');
+  });
+
+  it('8708.93.60 from Canada returns cannot_determine (USMCA)', () => {
+    const r = checkSection232Auto('87089360', 'Canada', '2026-01-01');
+    expect(r.applies).toBe('cannot_determine');
+    expect(r.reason).toBe('usmca_cannot_determine');
+  });
+});
+
+// ── USMCA certification language (no Form 434) ───────────────────────────────
+
+describe('checkSection232Auto — USMCA certification language', () => {
+  it('USMCA note does NOT mention CBP Form 434', () => {
+    const r = checkSection232Auto(HTS_BRAKE_DRUM, 'Mexico', '2026-01-01');
+    expect(r.note).not.toContain('Form 434');
+    expect(r.note).not.toContain('CBP Form');
+  });
+
+  it('USMCA note references certification of origin with required data elements', () => {
+    const r = checkSection232Auto(HTS_BRAKE_DRUM, 'Canada', '2026-01-01');
+    expect(r.note).toContain('certification of origin');
+    expect(r.note).toContain('Article 5.2');
+  });
+
+  it('USMCA note references 9903.94.06 at 0%', () => {
+    const r = checkSection232Auto(HTS_BRAKE_DRUM, 'Mexico', '2026-01-01');
+    expect(r.note).toContain('9903.94.06');
+    expect(r.note).toContain('0%');
+  });
+
+  it('USMCA note states Cannot determine — missing: certification', () => {
+    const r = checkSection232Auto(HTS_BRAKE_DRUM, 'Mexico', '2026-01-01');
+    expect(r.note).toContain('Cannot determine');
+  });
+});
+
+// ── Section 301 active exclusion state for 2026 imports ──────────────────────
+
+describe('checkSection301Exclusion — 2026 imports, current knowledge cutoff', () => {
+  it('SECTION_301_LAST_VERIFIED is 2025-12-01 (FR Doc. 2025-21671)', () => {
+    expect(SECTION_301_LAST_VERIFIED).toBe('2025-12-01');
+  });
+
+  it('import date 2026-06-26 is beyond the verification cutoff', () => {
+    const result = checkSection301Exclusion(HTS_BRAKE_DRUM, '2026-06-26', SECTION_301_LIST3_EXCLUSIONS);
+    expect(result.beyond_verification).toBe(true);
+  });
+
+  it('no active exclusion for 8708.30.50.20 on any 2026 import date', () => {
+    for (const date of ['2026-01-01', '2026-06-01', '2026-11-01']) {
+      const result = checkSection301Exclusion(HTS_BRAKE_DRUM, date, SECTION_301_LIST3_EXCLUSIONS);
+      expect(result.excluded).toBe(false);
+      expect(result.exclusion).toBeNull();
+    }
+  });
+
+  it('import date 2025-11-01 (within cutoff) does not get beyond_verification flag', () => {
+    const result = checkSection301Exclusion(HTS_BRAKE_DRUM, '2025-11-01', SECTION_301_LIST3_EXCLUSIONS);
+    expect(result.beyond_verification).toBe(false);
+  });
+});
+
+// ── AD/CVD rate lookup — A-570-174 and C-570-175 ─────────────────────────────
+
+describe('lookupBrakeDrumAdRate — A-570-174', () => {
+  it('named separate-rate company returns 77.14%', () => {
+    const r = lookupBrakeDrumAdRate('Shandong ConMet Mechanical Co., Ltd.', null);
+    expect(r.rate_pct).toBe(77.14);
+    expect(r.rule).toContain('Separate-rate');
+    expect(r.source_ref).toContain('A-570-174');
+  });
+
+  it('lookup is case-insensitive and partial-match', () => {
+    const r = lookupBrakeDrumAdRate('LIAONING HECHUANG CV PARTS MFG', null);
+    expect(r.rate_pct).toBe(77.14);
+  });
+
+  it('Qiqihar Beimo (named respondent) returns 77.14%', () => {
+    const r = lookupBrakeDrumAdRate('Qiqihar Beimo Auto Parts Manufacturing Co., Ltd.', null);
+    expect(r.rate_pct).toBe(77.14);
+  });
+
+  it('unknown Chinese company returns China-wide rate (150.25%)', () => {
+    const r = lookupBrakeDrumAdRate('Unknown Brake Co. Ltd.', 'Beijing Exporter Co.');
+    expect(r.rate_pct).toBe(150.25);
+    expect(r.rule).toContain('China-wide');
+  });
+
+  it('no manufacturer/exporter returns China-wide rate', () => {
+    const r = lookupBrakeDrumAdRate(null, null);
+    expect(r.rate_pct).toBe(150.25);
+  });
+
+  it('exporter match (not manufacturer) also returns separate rate', () => {
+    const r = lookupBrakeDrumAdRate('Unknown Mfg', 'Shandong Longji Machinery Co., Ltd.');
+    expect(r.rate_pct).toBe(77.14);
+  });
+});
+
+describe('lookupBrakeDrumCvdRate — C-570-175', () => {
+  it('Shandong ConMet returns 11.94% (named respondent)', () => {
+    const r = lookupBrakeDrumCvdRate('Shandong ConMet Mechanical Co., Ltd.', null);
+    expect(r.rate_pct).toBe(11.94);
+    expect(r.source_ref).toContain('C-570-175');
+  });
+
+  it('CAIEC Trailer Master (AFA) returns 446.83%', () => {
+    const r = lookupBrakeDrumCvdRate('CAIEC Trailer Master Co., Ltd.', null);
+    expect(r.rate_pct).toBe(446.83);
+    expect(r.rule).toContain('AFA');
+  });
+
+  it('Zhejiang Firsd Group (AFA) returns 446.83%', () => {
+    const r = lookupBrakeDrumCvdRate('Zhejiang Firsd Group Co., Ltd.', null);
+    expect(r.rate_pct).toBe(446.83);
+  });
+
+  it('unknown company returns all-others rate (11.94%)', () => {
+    const r = lookupBrakeDrumCvdRate('Unknown Brake Co. Ltd.', null);
+    expect(r.rate_pct).toBe(11.94);
+    expect(r.rule).toContain('All-others');
+  });
+
+  it('no manufacturer/exporter returns all-others rate', () => {
+    const r = lookupBrakeDrumCvdRate(null, null);
+    expect(r.rate_pct).toBe(11.94);
   });
 });

@@ -33,15 +33,17 @@
  *   For HTS Chapter 87 (motor vehicles and parts):
  *     • 8706.00 — chassis fitted with engines (for 8701–8705 vehicles)
  *     • 8707.10, 8707.90 — bodies (including cabs) for motor vehicles
- *     • All of 8708 — parts and accessories of motor vehicles (8701–8705)
- *       Confirmed at 6-digit level: 870810, 870821, 870822, 870829, 870830,
- *       870840, 870850, 870860, 870870, 870880, 870891, 870892, 870893,
- *       870894, 870895, 870899.
- *     NOTE: 8708 covers parts of motor vehicles 8701–8705 by HTS definition.
- *     Parts used exclusively on agricultural tractors (8701.10) are within
- *     8708 by classification but are NOT within the spirit of the proclamation;
- *     however, no specific 8708 subheading exclusion for agricultural use was
- *     published in the Federal Register as of the last-verified date.
+ *     • 8708 parts — covered at MIXED precision per CBP Automobile Parts HTS List:
+ *       - Full 6-digit headings covered: 870810, 870821, 870822, 870829, 870830,
+ *         870840, 870850, 870860, 870870, 870880, 870891, 870892, 870894, 870895
+ *       - 8708.93 (clutches): ONLY specific 8-digit subheadings:
+ *           8708.93.60 (87089360) — clutches for non-agricultural motor vehicles
+ *           8708.93.75 (87089375) — other parts of clutches
+ *         (8708.93.15 for agricultural tractors is NOT covered)
+ *       - 8708.99 (other parts): ONLY specific 8-digit subheadings:
+ *           8708.99.53 (87089953), 8708.99.55 (87089955),
+ *           8708.99.58 (87089958), 8708.99.68 (87089968)
+ *         (other 8708.99.xx subheadings are NOT covered)
  *
  *   From other chapters (for motor vehicle engines/drivetrains):
  *     • 840731–840734 — spark-ignition piston engines for vehicles
@@ -58,14 +60,15 @@
  *
  * USMCA exemption:
  *   Goods that qualify for USMCA (United States-Mexico-Canada Agreement)
- *   preferential tariff treatment are EXEMPT from 9903.94.05.
- *   Qualification requires the goods to satisfy the applicable HTSUS
- *   tariff preference level (TPL) or rules of origin under the USMCA.
- *   Country of origin must be United States, Canada, or Mexico, AND the
- *   goods must meet the applicable regional value content thresholds.
- *   ClearPort cannot verify USMCA qualification without a completed CBP
- *   Form 434 or equivalent supplier's declaration — it must be flagged as
- *   "Cannot determine" for US/CA/MX-origin goods.
+ *   preferential tariff treatment are EXEMPT from 9903.94.05 and instead
+ *   classified under HTSUS 9903.94.06 (0% additional Section 232 duty).
+ *   USMCA has no prescribed certificate form — the importer, exporter, or
+ *   producer may self-certify using any format that contains the required
+ *   data elements per USMCA Article 5.2.  Qualification also requires
+ *   meeting the applicable rules of origin and regional value content.
+ *   ClearPort cannot verify USMCA qualification without the importer's
+ *   certification of origin — it must be flagged as "Cannot determine" for
+ *   US/CA/MX-origin goods until a qualifying certification is provided.
  *
  * Rate: 25% ad valorem (additional duty in addition to MFN base rate and
  *   any applicable Section 301 tariff).
@@ -104,27 +107,35 @@ export const SECTION_232_AUTO: Section232AutoCoverage = {
     'adjusting-imports-of-automobiles-and-automobile-parts-into-the-united-states',
   last_verified: '2025-08-01',
 
-  // Annex I covered HTS subheadings (6-digit normalized digits).
-  // Covers all major subheadings of Chapter 8708 plus selected engine/
-  // drivetrain subheadings from other chapters.
+  // Annex I covered HTS subheadings — mixed depth per CBP Automobile Parts
+  // HTS List (Proclamation 10908).  Most 8708.xx headings are covered at the
+  // 6-digit level; 8708.93 and 8708.99 are covered ONLY at specific 8-digit
+  // subheadings as published.  Do NOT broaden these to 6-digit prefixes.
   covered_hts_prefixes: [
     // Chapter 8708 — parts and accessories of motor vehicles (8701–8705)
+    // Full 6-digit headings (all 8-digit/10-digit subheadings covered):
     '870810',   // bumpers and parts
     '870821',   // safety seatbelts
     '870822',   // front windscreen glass (2022 HTS)
     '870829',   // other body parts and accessories
-    '870830',   // brakes, servo-brakes, and parts thereof
+    '870830',   // brakes, servo-brakes, and parts thereof (incl. brake drums 8708.30.50.20)
     '870840',   // gear boxes and parts
     '870850',   // drive axles with differential; non-drive axles; parts
-    '870860',   // non-driving axles and axle parts (pre-2022 breakout)
+    '870860',   // non-driving axles and axle parts
     '870870',   // road wheels, hub caps, wheel covers, and parts
     '870880',   // suspension shock absorbers; parts
     '870891',   // radiators and parts
     '870892',   // mufflers, exhaust pipes, and parts
-    '870893',   // clutches and parts
+    // 8708.93 — clutches: ONLY these two 8-digit subheadings (NOT 8708.93.15 for agricultural tractors)
+    '87089360', // 8708.93.60 — clutches for motor vehicles (non-agricultural)
+    '87089375', // 8708.93.75 — other parts of clutches
     '870894',   // steering wheels, columns, boxes, and parts
     '870895',   // safety airbag systems and parts
-    '870899',   // other parts and accessories
+    // 8708.99 — other parts: ONLY these four 8-digit subheadings (NOT the full 6-digit heading)
+    '87089953', // 8708.99.53
+    '87089955', // 8708.99.55
+    '87089958', // 8708.99.58
+    '87089968', // 8708.99.68
     // Chapter 8706/8707 — chassis and bodies
     '870600',   // chassis fitted with engines
     '870710',   // bodies (cabs) for tractors/trucks
@@ -230,7 +241,7 @@ export function checkSection232Auto(
       return {
         applies: 'cannot_determine',
         reason: 'usmca_cannot_determine',
-        note: `${originCountry}-origin goods may be exempt from ${prov.htsus_code} if they qualify for USMCA preferential treatment. ClearPort cannot verify USMCA rules-of-origin compliance from the submitted information — provide a supplier USMCA declaration or CBP Form 434 to confirm.`,
+        note: `${originCountry}-origin goods may be exempt from ${prov.htsus_code} if they qualify for USMCA preferential treatment. Qualifying automobile parts are classified under HTSUS 9903.94.06 (0% additional Section 232 duty). USMCA has no prescribed certificate form — the importer must hold a certification of origin with the required data elements per USMCA Article 5.2. Cannot determine — missing: USMCA certification of origin with required data elements.`,
         rate_pct: null,
         source_ref: sourceRef,
       };
@@ -267,7 +278,7 @@ export function checkSection232Auto(
  * published USTR notice.  No rate change for 9903.88.01–88.04 was published
  * between May 2019 and the last-verified date below.
  *
- * Last verified: 2025-08-01.
+ * Last verified: 2025-12-01 (FR Doc. 2025-21671).
  */
 export interface Section301RateEntry {
   readonly rate_pct: number;
@@ -320,7 +331,13 @@ export const SECTION_301_RATES: Record<string, Section301RateEntry> = {
  *
  * USTR exclusion portal: https://ustr.gov/issue-areas/enforcement/section-301-investigations/ustr-exclusion-portal
  *
- * Last verified: 2025-08-01.
+ * Last verified: 2025-12-01.
+ * USTR extended 178 Section 301 List 3 exclusions through 11:59 p.m. ET on
+ * November 9, 2026, pursuant to the November 1, 2025 U.S.-China trade deal
+ * (FR Doc. 2025-21671, Dec. 1, 2025).  The 178 extended exclusions cover
+ * critical minerals, EVs, batteries, semiconductors, and solar equipment.
+ * NONE of the 178 extended exclusions cover HTS 8708.30 or any brake-drum
+ * subheading — the full 25% List 3 rate applies to China-origin brake drums.
  */
 export interface Section301Exclusion {
   /** Digit-only HTS prefix; matched from start of submitted normalized HTS */
@@ -336,30 +353,28 @@ export interface Section301Exclusion {
 /**
  * Known exclusions for List 3 (9903.88.03) automobile-related HTS codes.
  *
- * Research note (as of 2025-08-01):
- *   No active USTR Section 301 List 3 exclusion was identified for
- *   HTS 8708.30 (brakes and servo-brakes) or its subheadings (including
- *   8708.30.50.20 — brake drums).  Prior temporary exclusions granted in
- *   2020–2022 have all expired.  The 25% List 3 rate applies in full
- *   to China-origin brake drums as of the last-verified date.
+ * Research note (verified 2025-12-01 per FR Doc. 2025-21671):
+ *   USTR extended 178 Section 301 exclusions through 11:59 p.m. ET on
+ *   November 9, 2026 following the November 1, 2025 U.S.-China trade deal.
+ *   The 178 exclusions are claimed under HTSUS 9903.88.69 and 9903.88.70
+ *   and cover critical minerals, EVs, batteries, semiconductors, and solar
+ *   equipment.  NONE cover HTS 8708.30 or any brake-drum subheading.
+ *
+ *   Conclusion: The full 25% List 3 rate (9903.88.03) applies to China-origin
+ *   brake drums (HTS 8708.30.50.20) for all import dates verified to date.
+ *   Any new exclusion grant would be published in the Federal Register and
+ *   must be added here before it can be applied.
  */
 export const SECTION_301_LIST3_EXCLUSIONS: Section301Exclusion[] = [
-  // No currently-active or historically-documented exclusions for 8708.30
-  // (brake components) are recorded.  Future USTR exclusion grants will
-  // need to be added here as they are published.
-  //
-  // Example of how to add an exclusion when one is published:
-  // {
-  //   hts_prefix: '87083050',
-  //   fr_reference: '85 FR XXXXX (Month DD, YYYY)',
-  //   valid_from: 'YYYY-MM-DD',
-  //   valid_through: 'YYYY-MM-DD',
-  //   description: 'Brake drums for motor vehicles, XXXXX',
-  // },
+  // No currently-active exclusions for 8708.30 (brake components).
+  // The 178 exclusions extended through Nov. 9, 2026 (FR Doc. 2025-21671)
+  // do not cover any 8708.30 subheading.
 ];
 
-// Shared last-verified date for all Section 301 data in this file
-export const SECTION_301_LAST_VERIFIED = '2025-08-01';
+// Shared last-verified date for all Section 301 data in this file.
+// Updated to reflect FR Doc. 2025-21671 (Dec. 1, 2025) — the most recent
+// USTR exclusion extension notice verified.
+export const SECTION_301_LAST_VERIFIED = '2025-12-01';
 
 export interface Section301ExclusionCheck {
   excluded: boolean;

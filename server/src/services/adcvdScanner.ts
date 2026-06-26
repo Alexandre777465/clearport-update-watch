@@ -30,6 +30,127 @@ export type AdcvdScopeMatch =
   | 'excluded'
   | 'no_match';
 
+// ── Official rate tables ───────────────────────────────────────────────────────
+
+export interface AdcvdRateLookupResult {
+  rate_pct: number;
+  rule: string;
+  source_ref: string;
+}
+
+/**
+ * A-570-174 Antidumping — Brake Drums from China.
+ * Final order: 90 FR 38730 (Aug. 12, 2025), effective Aug. 6, 2025.
+ * Period of investigation: Oct. 1, 2023 – Mar. 31, 2024.
+ *
+ * Separate-rate companies (individually examined): 77.14% cash deposit.
+ * China-wide entity: 150.25% (adjusted from 160.79% gross for CVD offset).
+ */
+const AD_570_174_SEPARATE_PCT = 77.14;
+const AD_570_174_CHINA_WIDE_PCT = 150.25;
+const AD_570_174_SOURCE_REF = 'A-570-174; Final AD Order, 90 FR 38730 (Aug. 12, 2025)';
+
+const AD_570_174_SEPARATE_COMPANIES: readonly string[] = [
+  'shandong conmet mechanical',
+  'liaoning hechuang cv parts',
+  'hebei oe auto spare parts',
+  'longyao county yiheng auto parts',
+  'shandong lingang nonferrous metals',
+  'qiqihar beimo auto parts manufacturing',
+  'shandong hongma engineering machinery',
+  'longyao gucheng automobile parts',
+  'shandong longji machinery',
+];
+
+/**
+ * C-570-175 Countervailing Duty — Brake Drums from China.
+ * Final order: 90 FR 38730 (Aug. 12, 2025).
+ *
+ * Named respondent (Shandong ConMet / Weifang ConMet): 11.94%.
+ * All-others: 11.94% (same as named respondent's rate).
+ * AFA companies (did not cooperate): 446.83%.
+ */
+const CVD_570_175_ALL_OTHERS_PCT = 11.94;
+const CVD_570_175_AFA_PCT = 446.83;
+const CVD_570_175_SOURCE_REF = 'C-570-175; Final CVD Order, 90 FR 38730 (Aug. 12, 2025)';
+
+const CVD_570_175_NAMED_RESPONDENTS: readonly string[] = [
+  'shandong conmet mechanical',
+  'weifang conmet mechanical products',
+];
+
+const CVD_570_175_AFA_COMPANIES: readonly string[] = [
+  'caiec trailer master',
+  'guangzhou joyhand',
+  'hebei iruijin auto parts',
+  'henan broad top metal work',
+  'henan valiant braking system',
+  'hts tianjin supply chain',
+  'panasia cvs',
+  'raw king brake parts',
+  'tianjin textile group import and export',
+  'xiamen tinmy industrial',
+  'xingtai xunchiyoute auto parts',
+  'yancheng terbon auto parts',
+  'yantai hongtian autoparts',
+  'zhejiang firsd group',
+];
+
+function nameMatches(input: string, candidates: readonly string[]): boolean {
+  const lc = input.toLowerCase();
+  return candidates.some((c) => lc.includes(c) || c.includes(lc));
+}
+
+export function lookupBrakeDrumAdRate(
+  manufacturer: string | null,
+  exporter: string | null,
+): AdcvdRateLookupResult {
+  const names = [manufacturer, exporter].filter(Boolean) as string[];
+  const isSeparateRate = names.some((n) => nameMatches(n, AD_570_174_SEPARATE_COMPANIES));
+  if (isSeparateRate) {
+    return {
+      rate_pct: AD_570_174_SEPARATE_PCT,
+      rule: 'Separate-rate company (individually examined mandatory respondent)',
+      source_ref: AD_570_174_SOURCE_REF,
+    };
+  }
+  if (names.length > 0) {
+    return {
+      rate_pct: AD_570_174_CHINA_WIDE_PCT,
+      rule: 'China-wide entity rate (AFA) — company not on separate-rate list; verify with Commerce',
+      source_ref: AD_570_174_SOURCE_REF,
+    };
+  }
+  return {
+    rate_pct: AD_570_174_CHINA_WIDE_PCT,
+    rule: 'China-wide entity rate applied — manufacturer and exporter required to determine separate rate',
+    source_ref: AD_570_174_SOURCE_REF,
+  };
+}
+
+export function lookupBrakeDrumCvdRate(
+  manufacturer: string | null,
+  exporter: string | null,
+): AdcvdRateLookupResult {
+  const names = [manufacturer, exporter].filter(Boolean) as string[];
+  const isAfa = names.some((n) => nameMatches(n, CVD_570_175_AFA_COMPANIES));
+  if (isAfa) {
+    return {
+      rate_pct: CVD_570_175_AFA_PCT,
+      rule: 'AFA rate (company did not cooperate in CVD investigation)',
+      source_ref: CVD_570_175_SOURCE_REF,
+    };
+  }
+  // Named respondent gets its specific rate; all other cooperating companies get all-others
+  return {
+    rate_pct: CVD_570_175_ALL_OTHERS_PCT,
+    rule: names.length > 0
+      ? 'All-others CVD rate (company not an AFA recipient)'
+      : 'All-others CVD rate applied — manufacturer and exporter required to confirm',
+    source_ref: CVD_570_175_SOURCE_REF,
+  };
+}
+
 export interface AdcvdOrderRow {
   id: string;                    // e.g. "A-570-174"
   case_type: 'AD' | 'CVD';
@@ -54,6 +175,8 @@ export interface AdcvdFinding {
   matched_facts: string[];          // facts that confirm scope coverage
   missing_facts: string[];          // facts needed for rate or final confirmation
   excluded_by?: string;             // which exclusion applies (when excluded)
+  manufacturer?: string | null;     // extracted from product description
+  exporter?: string | null;         // extracted from product description
 }
 
 // ── Pure scope analysis (no I/O) ──────────────────────────────────────────────
@@ -105,7 +228,7 @@ function extractSteelPct(text: string): number | null {
 export function evaluateScopeMatch(
   order: AdcvdOrderRow,
   entry: WatchlistEntry,
-): Pick<AdcvdFinding, 'scope_match' | 'matched_facts' | 'missing_facts' | 'excluded_by'> {
+): Pick<AdcvdFinding, 'scope_match' | 'matched_facts' | 'missing_facts' | 'excluded_by' | 'manufacturer' | 'exporter'> {
   const text = lc(`${entry.product_name} ${entry.product_description ?? ''}`);
   const matched: string[] = [];
   const missing: string[] = [];
@@ -115,7 +238,7 @@ export function evaluateScopeMatch(
     // Primary inclusion: must contain "brake drum"
     const isBrakeDrum = /\bbrake\s*drum/i.test(text);
     if (!isBrakeDrum) {
-      return { scope_match: 'no_match', matched_facts: [], missing_facts: [], excluded_by: undefined };
+      return { scope_match: 'no_match', matched_facts: [], missing_facts: [], excluded_by: undefined, manufacturer: null, exporter: null };
     }
     matched.push('Product identified as a brake drum');
 
@@ -136,6 +259,8 @@ export function evaluateScopeMatch(
         matched_facts: matched,
         missing_facts: [],
         excluded_by: 'Composite brake drums (more than 38% steel by weight) are excluded from the order scope.',
+        manufacturer: null,
+        exporter: null,
       };
     }
     if (isNonComposite) {
@@ -169,6 +294,8 @@ export function evaluateScopeMatch(
           matched_facts: matched,
           missing_facts: [],
           excluded_by: `Inside diameter ${dia}" is outside the scope range of 14.75–16.60 inches.`,
+          manufacturer: null,
+          exporter: null,
         };
       }
     } else {
@@ -186,33 +313,43 @@ export function evaluateScopeMatch(
           matched_facts: matched,
           missing_facts: [],
           excluded_by: `Weight ${Math.round(wt)} lbs does not meet the scope threshold of more than 50 lbs.`,
+          manufacturer: null,
+          exporter: null,
         };
       }
     } else {
       missing.push('weight (scope threshold: more than 50 lbs)');
     }
 
+    // Extract manufacturer/exporter names from clarification facts (e.g. "Manufacturer: Shandong ConMet")
+    const mfgM = text.match(/(?:manufacturer|producer)[:\s]+([^\n;,]+)/i);
+    const expM = text.match(/exporter[:\s]+([^\n;,]+)/i);
+    const manufacturer = mfgM ? mfgM[1].trim() : null;
+    const exporter = expM ? expM[1].trim() : null;
+
     // Producer / exporter needed for specific rate (not for scope determination)
-    if (!/manufacturer|producer|brand|maker/i.test(text)) {
+    if (!manufacturer) {
       missing.push('producer/manufacturer name (required for producer-specific AD/CVD rate)');
     }
-    missing.push('exporter name (required for exporter-specific AD/CVD rate)');
+    if (!exporter) {
+      missing.push('exporter name (required for exporter-specific AD/CVD rate)');
+    }
 
     // Scope match level
     const criticalMissing = missing.filter((f) => !f.includes('producer') && !f.includes('exporter'));
     const scopeMatch: AdcvdScopeMatch =
       criticalMissing.length === 0 ? 'likely_match' : 'official_unconfirmed';
 
-    return { scope_match: scopeMatch, matched_facts: matched, missing_facts: missing };
+    return { scope_match: scopeMatch, matched_facts: matched, missing_facts: missing, manufacturer, exporter };
   }
 
   // ── Generic fallback for other orders ────────────────────────────────────────
-  // For orders without a specific evaluator: match on HTS only (already done
-  // by the HTS filter upstream); report 'official_unconfirmed' with scope text.
   return {
     scope_match: 'official_unconfirmed',
     matched_facts: ['HTS code falls within the order\'s screened HTS codes'],
     missing_facts: ['written-scope comparison against detailed product facts'],
+    manufacturer: null,
+    exporter: null,
   };
 }
 
@@ -277,7 +414,7 @@ export async function screenAdcvd(
 
 export function adcvdFindingsToCategories(findings: AdcvdFinding[], today: string): RiskCategory[] {
   return findings.map((f) => {
-    const { order, scope_match, matched_facts, missing_facts, excluded_by } = f;
+    const { order, scope_match, matched_facts, missing_facts, excluded_by, manufacturer, exporter } = f;
     const isAd = order.case_type === 'AD';
     const label = isAd
       ? `Antidumping Duty — ${order.product_description} (${order.id})`
@@ -291,6 +428,7 @@ export function adcvdFindingsToCategories(findings: AdcvdFinding[], today: strin
     let explanation: string;
     let action: string;
     let level: 'High' | 'Medium' | 'N/A';
+    let resolvedRate: number | null = null;
 
     if (scope_match === 'excluded') {
       level = 'N/A';
@@ -306,20 +444,35 @@ export function adcvdFindingsToCategories(findings: AdcvdFinding[], today: strin
         : missing_facts.some(m => /producer|manufacturer|exporter/i.test(m))
           ? ` To calculate the exact duty rate, the producer name and exporter name are required.`
           : '';
+
+      // Rate lookup for orders with known rate tables
+      let rateNote = '';
+      if (scope_match === 'likely_match') {
+        if (order.id === 'A-570-174') {
+          const r = lookupBrakeDrumAdRate(manufacturer ?? null, exporter ?? null);
+          resolvedRate = r.rate_pct;
+          rateNote = ` Cash-deposit rate: ${r.rate_pct}% (${r.rule}). ${r.source_ref}.`;
+        } else if (order.id === 'C-570-175') {
+          const r = lookupBrakeDrumCvdRate(manufacturer ?? null, exporter ?? null);
+          resolvedRate = r.rate_pct;
+          rateNote = ` Cash-deposit rate: ${r.rate_pct}% (${r.rule}). ${r.source_ref}.`;
+        } else if (order.china_wide_rate_pct != null) {
+          rateNote = ` All-others/China-wide cash-deposit rate: ${order.china_wide_rate_pct}%. Company-specific rate requires manufacturer and exporter name.`;
+        } else {
+          rateNote = ` Exact rate requires manufacturer and exporter name — provide these to determine the applicable cash-deposit rate.`;
+        }
+      } else if (order.china_wide_rate_pct != null) {
+        rateNote = ` Reference rate: ${order.china_wide_rate_pct}%.`;
+      }
+
       explanation = scope_match === 'likely_match'
-        ? `Order ${order.id} applies to this product. ${matchSummary}${missSummary}`
+        ? `Order ${order.id} applies to this product. ${matchSummary}${missSummary}${rateNote}`
         : `Order ${order.id} (${isAd ? 'antidumping' : 'countervailing duty'} on ${order.product_description} from ${order.origin_country}). ${matchSummary}${missSummary}`;
 
-      const rateNote = order.china_wide_rate_pct != null
-        ? scope_match === 'likely_match'
-          ? ` All-others/China-wide cash-deposit rate: ${order.china_wide_rate_pct}%. Company-specific rate requires manufacturer and exporter name.`
-          : ` Reference rate: ${order.china_wide_rate_pct}%.`
-        : scope_match === 'likely_match'
-          ? ` Exact rate requires manufacturer and exporter name — provide these to determine the applicable cash-deposit rate.`
-          : '';
-
       action = scope_match === 'likely_match'
-        ? `Provide your manufacturer and exporter's legal names to determine the exact AD/CVD cash-deposit rate applicable to this shipment.${rateNote}`
+        ? manufacturer || exporter
+          ? `Rate confirmed for the provided manufacturer/exporter. Retain the AD/CVD cash-deposit rate for entry filing.`
+          : `Provide your manufacturer and exporter's legal names to determine the exact AD/CVD cash-deposit rate applicable to this shipment.`
         : `Provide additional product facts to confirm scope, then provide manufacturer and exporter names to determine the rate.`;
     }
 
@@ -332,7 +485,7 @@ export function adcvdFindingsToCategories(findings: AdcvdFinding[], today: strin
       verification_status: verificationStatus,
       applicability_conditions: `Origin: ${order.origin_country}; scope: ${order.product_description}`,
       missing_info: missing_facts.length ? missing_facts.join('; ') : undefined,
-      verified_rate_pct: null,
+      verified_rate_pct: resolvedRate,
       source: {
         agency: 'Commerce/ITA',
         name: 'U.S. Department of Commerce — International Trade Administration',

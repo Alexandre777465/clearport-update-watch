@@ -352,11 +352,11 @@ export function assembleBaselines(
           category: 'Section 232 Automobile-Parts Tariff',
           level: 'Medium',
           explanation: s232.note,
-          action: `Provide a USMCA supplier declaration or CBP Form 434 to confirm whether this shipment qualifies for USMCA exemption from ${SECTION_232_AUTO.htsus_code}.`,
+          action: `Provide a USMCA certification of origin with the required data elements (USMCA Article 5.2) to confirm whether this shipment qualifies for USMCA exemption from ${SECTION_232_AUTO.htsus_code}. Qualifying automobile parts are classified under HTSUS 9903.94.06 (0% additional Section 232 duty).`,
           verification_status: 'insufficient_info',
-          applicability_conditions: `HTS ${hts.requested} is covered by Annex I; USMCA exemption depends on rules-of-origin qualification.`,
+          applicability_conditions: `HTS ${hts.requested} is covered by Annex I; USMCA exemption depends on rules-of-origin qualification and a valid certification of origin.`,
           verified_rate_pct: null,
-          missing_info: 'USMCA supplier declaration or CBP Form 434 confirming rules-of-origin qualification',
+          missing_info: 'USMCA certification of origin with required data elements (USMCA Article 5.2) confirming rules-of-origin qualification',
           source: {
             agency: 'CBP / Commerce',
             name: 'U.S. Customs and Border Protection / U.S. Department of Commerce',
@@ -514,7 +514,7 @@ const DOMAIN_REGISTRY: Array<{
         return {
           status: 'insufficient_info',
           note: c.missing_info ?? 'USMCA qualification status required',
-          missing: ['USMCA supplier declaration or CBP Form 434'],
+          missing: ['USMCA certification of origin with required data elements (USMCA Article 5.2)'],
         };
       // No category was pushed → not covered (before effective date, HTS not in Annex, etc.)
       if (hts) {
