@@ -60,10 +60,17 @@ export interface AdcvdFinding {
 
 function lc(s: string): string { return s.toLowerCase(); }
 
-// Extract a numeric inch value from text like "15.5 inches", '15.5"', "15 inch"
+// Extract a numeric inch value from text like "15.5 inches", '15.5"', "15 inch", "15 in"
+// The "in" short form requires a trailing word boundary to avoid matching inside words
+// like "inside" or "origin".
 function extractInches(text: string): number | null {
-  const m = text.match(/(\d+(?:\.\d+)?)\s*(?:inches|inch|"|″)/i);
-  return m ? parseFloat(m[1]) : null;
+  // Long forms first (greedy, no word-boundary issue)
+  const mLong = text.match(/(\d+(?:\.\d+)?)\s*(?:inches?|"|″)/i);
+  if (mLong) return parseFloat(mLong[1]);
+  // Short form: "15 in" — require at least one space before "in" and word boundary after
+  const mShort = text.match(/(\d+(?:\.\d+)?)\s+in\b/i);
+  if (mShort) return parseFloat(mShort[1]);
+  return null;
 }
 
 // Extract a lb/kg weight value from text.
