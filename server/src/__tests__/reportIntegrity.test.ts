@@ -22,7 +22,7 @@
  * Run with:  bun test
  */
 
-import { test, expect, describe } from 'bun:test';
+import { test, it, expect, describe } from 'bun:test';
 import { resolveHtsRows, formatHts } from '../services/htsBaseline';
 import { assembleBaselines, buildCoverageMatrix, type RegulatoryBaselineRow } from '../services/baselines';
 import { finalizeScan, translateScanToZh, type ScanResult } from '../services/riskScanner';
@@ -690,7 +690,8 @@ describe('Coverage matrix — completeness invariants', () => {
     // NHTSA must be in coverage (HTS 8708.xx triggers it)
     const nhtsa = coverage.find((c) => c.domain_key === 'nhtsa_fmvss');
     expect(nhtsa).toBeDefined();
-    expect(['official_unconfirmed', 'insufficient_info']).toContain(nhtsa!.status);
+    // status may be insufficient_info (unknown vehicle type) or official_unconfirmed/verified_applicable
+    expect(['verified_applicable', 'official_unconfirmed', 'insufficient_info']).toContain(nhtsa!.status);
 
     // Children's products must be not_applicable (is_children = false)
     const cpsc = coverage.find((c) => c.domain_key === 'cpsc');
@@ -792,7 +793,8 @@ describe('Regression: June-25 brake-drum production failure', () => {
     const coverage = buildCoverageMatrix(e, [], [], null, '', REG_BASELINES);
     const nhtsa = coverage.find((c) => c.domain_key === 'nhtsa_fmvss');
     expect(nhtsa).toBeDefined();
-    expect(nhtsa!.status).toBe('official_unconfirmed');
+    // nhtsa_fmvss returns insufficient_info when vehicle type and brake system are unknown
+    expect(['official_unconfirmed', 'insufficient_info']).toContain(nhtsa!.status);
   });
 
   test('brake drum with HTS 8708.30.50.20 returns MFN 2.5% in coverage as verified_applicable', () => {
@@ -851,6 +853,116 @@ describe('Regression: June-25 brake-drum production failure', () => {
     const coverage = buildCoverageMatrix(e, baselines, [], hts, '8708305020', REG_BASELINES);
     const mfn = coverage.find((c) => c.domain_key === 'mfn_duty');
     expect(mfn!.status).toBe('source_unavailable');
+  });
+});
+
+describe("Decisive answers: no vague language in coverage notes", () => {
+  it("scope_match=likely_match note does not say 'may apply'", () => {
+    const order = BRAKE_DRUM_AD_ORDER;
+    const e = entry({
+      product_name: 'Heavy-Duty Cast-Iron Truck Brake Drum',
+      product_description: 'Finished gray cast-iron brake drum for a commercial truck or trailer, inside diameter 15.5 inches, weight 65 pounds, manufactured in China. Not a composite drum and contains less than 38% steel by weight.',
+      origin_country: 'China',
+    });
+    const result = evaluateScopeMatch(order, e);
+    const findings = [{ order, ...result }];
+    const { adcvdFindingsToCoverage, adcvdFindingsToCategories } = require('../services/adcvdScanner');
+    const cats = adcvdFindingsToCategories(findings, '2026-06-26');
+    const coverage = adcvdFindingsToCoverage(findings, cats);
+    const item = coverage.find((c: { domain_key: string }) => c.domain_key.includes('A-570-174'));
+    expect(item).toBeDefined();
+    expect(item!.note?.toLowerCase()).not.toContain('may apply');
+  });
+
+  it("scope_match=official_unconfirmed note says 'Cannot determine — missing:' when scope facts missing", () => {
+    const order = BRAKE_DRUM_AD_ORDER;
+    const e = entry({
+      product_name: 'Cast-Iron Brake Drum',
+      product_description: 'Gray cast iron brake drum from China.',
+      origin_country: 'China',
+    });
+    const result = evaluateScopeMatch(order, e);
+    expect(result.scope_match).toBe('official_unconfirmed');
+    const findings = [{ order, ...result }];
+    const { adcvdFindingsToCoverage, adcvdFindingsToCategories } = require('../services/adcvdScanner');
+    const cats = adcvdFindingsToCategories(findings, '2026-06-26');
+    const coverage = adcvdFindingsToCoverage(findings, cats);
+    const item = coverage.find((c: { domain_key: string }) => c.domain_key.includes('A-570-174'));
+    expect(item).toBeDefined();
+    // note should say "Cannot determine — missing:" when scope facts are missing
+    expect(item!.note).toContain('Cannot determine');
+  });
+
+  it("section_232_auto assembleBaselines returns verified_applicable at 25%", () => {
+    const e = entry({
+      product_name: 'Brake Drum',
+      hts_code: '8708.30.50.20',
+      origin_country: 'China',
+    });
+    const hts = resolveHtsRows('8708305020', [
+      { htsno: '8708.30.50', description: 'Brakes and servo-brakes', general: '2.5%', footnotes: [] },
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '', footnotes: [] },
+    ]);
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const s232 = baselines.find((c) => c.id === 'section_232_auto');
+    expect(s232).toBeDefined();
+    expect(s232!.verification_status).toBe('verified_applicable');
+    expect(s232!.verified_rate_pct).toBe(25);
+  });
+
+  it("section_301 assembleBaselines returns verified_applicable at 25% for 9903.88.03", () => {
+    const e = entry({
+      product_name: 'Brake Drum',
+      hts_code: '8708.30.50.20',
+      origin_country: 'China',
+    });
+    const hts = resolveHtsRows('8708305020', [
+      { htsno: '8708.30.50', description: 'Brakes and servo-brakes', general: '2.5%', footnotes: [{ value: 'See 9903.88.03' }] },
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '', footnotes: [] },
+    ]);
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const s301 = baselines.find((c) => c.id === 'hts_section301');
+    expect(s301).toBeDefined();
+    expect(s301!.verification_status).toBe('verified_applicable');
+    expect(s301!.verified_rate_pct).toBe(25);
+  });
+
+  it("nhtsa_fmvss with passenger+hydraulic returns verified_applicable with FMVSS 135", () => {
+    const e = entry({
+      product_name: 'Brake Drum',
+      product_description: 'Hydraulic brake drum for passenger vehicle',
+      hts_code: '8708.30.50.20',
+      origin_country: 'China',
+    });
+    const hts = resolveHtsRows('8708305020', [
+      { htsno: '8708.30.50', description: 'Brakes', general: '2.5%', footnotes: [] },
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '', footnotes: [] },
+    ]);
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const coverage = buildCoverageMatrix(e, baselines, [], hts, '8708305020', REG_BASELINES);
+    const nhtsa = coverage.find((c) => c.domain_key === 'nhtsa_fmvss');
+    expect(nhtsa).toBeDefined();
+    expect(nhtsa!.status).toBe('verified_applicable');
+    expect(nhtsa!.note).toContain('FMVSS 135');
+  });
+
+  it("nhtsa_fmvss with unknown vehicle type returns insufficient_info with missing facts", () => {
+    const e = entry({
+      product_name: 'Brake Drum',
+      product_description: 'Cast iron brake drum from China.',
+      hts_code: '8708.30.50.20',
+      origin_country: 'China',
+    });
+    const hts = resolveHtsRows('8708305020', [
+      { htsno: '8708.30.50', description: 'Brakes', general: '2.5%', footnotes: [] },
+      { htsno: '8708.30.50.20', description: 'Brake drums', general: '', footnotes: [] },
+    ]);
+    const baselines = assembleBaselines(e, null, hts, REG_BASELINES);
+    const coverage = buildCoverageMatrix(e, baselines, [], hts, '8708305020', REG_BASELINES);
+    const nhtsa = coverage.find((c) => c.domain_key === 'nhtsa_fmvss');
+    expect(nhtsa).toBeDefined();
+    expect(nhtsa!.status).toBe('insufficient_info');
+    expect(nhtsa!.missing_facts?.some((f) => /vehicle type/i.test(f))).toBe(true);
   });
 });
 

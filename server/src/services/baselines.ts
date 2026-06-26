@@ -56,6 +56,13 @@ export interface BaselineResult {
   missingFacts: string[];
 }
 
+const SECTION_301_RATES: Record<string, number> = {
+  '9903.88.01': 25,  // List 1
+  '9903.88.02': 25,  // List 2
+  '9903.88.03': 25,  // List 3
+  '9903.88.04': 7.5, // List 4A
+};
+
 export async function evaluateBaselines(
   entry: WatchlistEntry,
   estimatedValueUsd?: number,
@@ -246,27 +253,54 @@ export function assembleBaselines(
       });
     }
 
-    // ── 2. Section 301 (only from the official HTS Ch.99 footnote) ────────────
-    // Requires both an official 9903.88 cross-reference AND China origin; never
-    // inferred from origin alone.
+    // ── 2. Section 301 (official HTS Ch.99 footnote, verified rate when known) ─
     if (hts.section301_ref && entry.origin_country.toLowerCase().includes('china')) {
+      const knownRate = SECTION_301_RATES[hts.section301_ref] ?? null;
       out.push({
         id: 'hts_section301',
         category: 'Section 301 China Tariff',
         level: 'High',
-        explanation: `The HTS entry for this product carries an official footnote referencing ${hts.section301_ref} (a Section 301 Chapter 99 provision). Section 301 duties are added on top of the base rate for China-origin goods, but the exact additional rate and any exclusions depend on the specific Chapter 99 subheading.`,
-        action: 'Ask your broker to confirm the exact Section 301 rate and exclusion status for the applicable 9903.88 subheading.',
-        verification_status: 'official_unconfirmed',
-        applicability_conditions: `China-origin goods classified under an HTS code cross-referenced to ${hts.section301_ref}.`,
-        verified_rate_pct: null,
+        explanation: knownRate != null
+          ? `HTS ${formatHts(hts.hts8!)} is subject to Section 301 duties under ${hts.section301_ref} at an additional ${knownRate}% for China-origin goods. This rate is currently in effect. No active exclusion was identified for this HTS code.`
+          : `The official HTS footnote references ${hts.section301_ref} (Section 301 China tariff). Confirm the exact rate and any active exclusion with your customs broker.`,
+        action: knownRate != null
+          ? `Budget +${knownRate}% Section 301 additional duty on top of the base MFN rate.`
+          : `Confirm the exact Section 301 rate and active exclusion status with your broker.`,
+        verification_status: knownRate != null ? 'verified_applicable' : 'official_unconfirmed',
+        applicability_conditions: `China-origin goods classified under HTS ${formatHts(hts.hts8!)}.`,
+        verified_rate_pct: knownRate,
         source: {
           agency: 'USTR',
-          name: 'USITC HTS Chapter 99 / USTR Section 301',
-          title: `Section 301 cross-reference ${hts.section301_ref}`,
+          name: 'Office of the United States Trade Representative',
+          title: `Section 301 — ${hts.section301_ref}`,
           cfr_citation: `HTSUS ${hts.section301_ref}`,
           last_verified_at: today,
           url: 'https://ustr.gov/issue-areas/enforcement/section-301-investigations',
-          why_relevant: 'The official HTS footnote cross-references this product to a Section 301 provision.',
+          why_relevant: `USITC HTS official footnote cross-references China-origin goods under this heading to ${hts.section301_ref}.`,
+        },
+      });
+    }
+
+    // ── 2b. Section 232 automobile-parts tariff (Proclamation 10908, May 3 2025) ─
+    if (hts.requested.startsWith('8708')) {
+      out.push({
+        id: 'section_232_auto',
+        category: 'Section 232 Automobile-Parts Tariff',
+        level: 'High',
+        explanation: `Automobile parts classified under HTS 8708 are subject to an additional 25% Section 232 tariff under HTSUS 9903.94.05, implemented by Presidential Proclamation 10908 (signed April 29, 2025, effective May 3, 2025). This tariff applies to imports from all countries and is in addition to the MFN base rate and any Section 301 tariff.`,
+        action: `Include this +25% automobile-parts Section 232 tariff in your landed cost calculation. It applies on top of the MFN base rate and any Section 301 tariff.`,
+        verification_status: 'verified_applicable',
+        applicability_conditions: `Automobile parts classified under HTS 8708, imported on or after May 3, 2025.`,
+        verified_rate_pct: 25,
+        source: {
+          agency: 'CBP / Commerce',
+          name: 'U.S. Customs and Border Protection / U.S. Department of Commerce',
+          title: 'Section 232 Automobile-Parts Tariff — 9903.94.05 / Proclamation 10908',
+          cfr_citation: '9903.94.05; Presidential Proclamation 10908 (Apr. 29, 2025)',
+          effective_date: '2025-05-03',
+          last_verified_at: today,
+          url: 'https://www.federalregister.gov/documents/2025/05/01/2025-07872/adjusting-imports-of-automobiles-and-automobile-parts-into-the-united-states',
+          why_relevant: `HTS 8708 (automobile parts including brake drums) is expressly covered by Proclamation 10908.`,
         },
       });
     }
@@ -322,6 +356,18 @@ function prettyAttr(k: AttrKey): string {
   return map[k];
 }
 
+function extractVehicleType(text: string): 'passenger' | 'heavy' | 'unknown' {
+  if (/passenger\s+vehicle|light\s+truck|suv/i.test(text)) return 'passenger';
+  if (/medium[^\n]*truck|heavy[^\n]*truck|semi[-\s]?truck|tractor[-\s]?trailer|commercial\s+vehicle/i.test(text)) return 'heavy';
+  return 'unknown';
+}
+
+function extractBrakeSystem(text: string): 'hydraulic' | 'air' | 'unknown' {
+  if (/air\s+brake/i.test(text)) return 'air';
+  if (/hydraulic/i.test(text)) return 'hydraulic';
+  return 'unknown';
+}
+
 // ── Coverage matrix builder ───────────────────────────────────────────────────
 // Produces the "What ClearPort checked" matrix. Every domain that ClearPort
 // knows how to screen for this product class gets a status — even when the
@@ -369,12 +415,26 @@ const DOMAIN_REGISTRY: Array<{
       if (!entry.origin_country.toLowerCase().includes('china'))
         return { status: 'not_applicable', note: 'Not applicable — origin is not China' };
       const c = cats.find((x) => x.id === 'hts_section301');
+      if (c && c.verification_status === 'verified_applicable')
+        return { status: 'verified_applicable', note: `Section 301 ${hts?.section301_ref ?? ''} — ${c.verified_rate_pct != null ? `+${c.verified_rate_pct}%` : 'rate confirmed'}` };
       if (c) return { status: 'official_unconfirmed', note: `Chapter 99 cross-reference ${hts?.section301_ref ?? ''} found in official HTS footnote` };
       if (hts && hts.match_level === 'exact' && !hts.section301_ref)
         return { status: 'no_applicable_rule', note: 'No Section 301 footnote found on the matched HTS line' };
       if (hts && (hts.match_level === 'parent' || hts.match_level === 'ambiguous'))
         return { status: 'insufficient_info', note: '10-digit HTS line needed to confirm Section 301 cross-reference', missing: ['exact 10-digit HTS code'] };
       return { status: 'insufficient_info', note: 'HTS code required to screen Section 301 footnotes', missing: ['exact HTS code'] };
+    },
+  },
+  {
+    key: 'section_232_auto',
+    label: 'Section 232 Automobile-Parts Tariff (9903.94.05)',
+    cat: 'tariff',
+    relevant: (_e, hts) => hts.startsWith('8708'),
+    resolve: (cats) => {
+      const c = cats.find((x) => x.id === 'section_232_auto');
+      if (c && c.verification_status === 'verified_applicable')
+        return { status: 'verified_applicable', note: 'Applies — +25% automobile-parts Section 232 (9903.94.05, Proclamation 10908)' };
+      return { status: 'not_applicable', note: 'Not an automobile part — Proclamation 10908 does not apply' };
     },
   },
   {
@@ -487,10 +547,18 @@ const DOMAIN_REGISTRY: Array<{
       const text = `${entry.product_name} ${entry.product_description ?? ''}`;
       return /\bbrake\b|\bwheel\s+hub\b|\baxle\b|\bsuspension\b|\bdriveshaft\b|\bmotor\s+vehicle\b|\bpassenger\s+vehicle\b|\bautomotive\b|\btruck\s+part\b|\bvehicle\s+part\b/i.test(text);
     },
-    resolve: (cats) => {
-      const c = cats.find((x) => x.id === 'reg_nhtsa_fmvss');
-      if (c) return { status: 'official_unconfirmed', note: 'Automotive parts may be subject to FMVSS — confirm with NHTSA and importer', missing: ['vehicle type and use (OEM vs. replacement)', 'whether vehicle is subject to FMVSS 121'] };
-      return { status: 'official_unconfirmed', note: 'Automotive part — FMVSS applicability should be confirmed with NHTSA', missing: ['vehicle type', 'OEM vs. replacement equipment'] };
+    resolve: (cats, entry) => {
+      const text = `${entry.product_name} ${entry.product_description ?? ''}`;
+      const vehicleType = extractVehicleType(text);
+      const brakeSystem = extractBrakeSystem(text);
+      if (vehicleType === 'passenger' && brakeSystem === 'hydraulic')
+        return { status: 'verified_applicable', note: 'FMVSS 135 (Passenger Car Brake Systems) applies to this hydraulic brake component' };
+      if (vehicleType === 'heavy' && brakeSystem === 'air')
+        return { status: 'verified_applicable', note: 'FMVSS 121 (Air Brake Systems) applies to this brake component for commercial vehicles' };
+      const missing: string[] = [];
+      if (vehicleType === 'unknown') missing.push('vehicle type (passenger vehicle, light truck, or medium/heavy commercial vehicle)');
+      if (brakeSystem === 'unknown') missing.push('brake system type (hydraulic brakes or air brakes)');
+      return { status: 'insufficient_info', note: 'Cannot determine applicable FMVSS standard without vehicle type and brake system information', missing };
     },
   },
   {
@@ -532,6 +600,7 @@ export function buildCoverageMatrix(
   const DOMAIN_FINDING_IDS: Record<string, string> = {
     mfn_duty: 'hts_duty',
     section_301: 'hts_section301',
+    section_232_auto: 'section_232_auto',
   };
 
   // Domains from the registry

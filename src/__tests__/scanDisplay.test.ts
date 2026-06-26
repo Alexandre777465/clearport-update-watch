@@ -22,6 +22,7 @@ import {
   collectMissingFacts,
   coverageCostLabel,
   coverageCostClass,
+  computeKnownTariffTotal,
 } from "../lib/scanDisplay";
 import type { ProductRiskScan } from "../lib/api";
 
@@ -65,6 +66,26 @@ const SECTION_301_CATEGORY = {
     last_verified_at: "2026-06-25",
     url: "https://ustr.gov/",
     why_relevant: "China-origin goods under heading 8708 covered by List 3.",
+  },
+};
+
+const S232_AUTO_CATEGORY = {
+  id: "section_232_auto",
+  category: "Section 232 Automobile-Parts Tariff",
+  level: "High" as const,
+  explanation: "Automobile parts classified under HTS 8708 are subject to an additional 25% Section 232 tariff under HTSUS 9903.94.05.",
+  action: "Include this +25% automobile-parts Section 232 tariff in your landed cost calculation.",
+  verification_status: "verified_applicable" as const,
+  applicability_conditions: "HTS 8708.x automobile parts",
+  verified_rate_pct: 25,
+  source: {
+    agency: "CBP / Commerce",
+    name: "U.S. Customs and Border Protection / U.S. Department of Commerce",
+    title: "Section 232 Automobile-Parts Tariff — 9903.94.05 / Proclamation 10908",
+    cfr_citation: "9903.94.05",
+    last_verified_at: "2026-06-25",
+    url: "https://www.federalregister.gov/documents/2025/05/01/2025-07872/adjusting-imports-of-automobiles-and-automobile-parts-into-the-united-states",
+    why_relevant: "HTS 8708 (automobile parts including brake drums) is expressly covered by Proclamation 10908.",
   },
 };
 
@@ -117,7 +138,7 @@ const BRAKE_DRUM_SCAN: ProductRiskScan = {
   watchlist_entry_id: "mock-entry-7ad2aac3",
   overall_risk: "High",
   overall_summary: "Cast-iron brake drum from China — active AD/CVD orders apply, confirm rates with broker.",
-  risk_categories: [MFN_CATEGORY, SECTION_301_CATEGORY, AD_CATEGORY, CVD_CATEGORY],
+  risk_categories: [MFN_CATEGORY, SECTION_301_CATEGORY, S232_AUTO_CATEGORY, AD_CATEGORY, CVD_CATEGORY],
   document_checklist: [],
   broker_questions: [],
   supplier_questions: [],
@@ -139,6 +160,13 @@ const BRAKE_DRUM_SCAN: ProductRiskScan = {
       category: "tariff",
       status: "verified_applicable",
       finding_id: "hts_section301",
+    },
+    {
+      domain: "Section 232 Automobile-Parts Tariff (9903.94.05)",
+      domain_key: "section_232_auto",
+      category: "tariff",
+      status: "verified_applicable",
+      finding_id: "section_232_auto",
     },
     {
       domain: "AD Order A-570-174 — Brake Drums from China",
@@ -345,8 +373,8 @@ describe("collectMissingFacts — brake drum", () => {
 });
 
 describe("coverageCostLabel and coverageCostClass", () => {
-  it("verified_applicable → 'Confirmed' and green class", () => {
-    expect(coverageCostLabel("verified_applicable", "en")).toBe("Confirmed");
+  it("verified_applicable → 'Applies' and green class", () => {
+    expect(coverageCostLabel("verified_applicable", "en")).toBe("Applies");
     expect(coverageCostClass("verified_applicable")).toContain("green");
   });
 
@@ -371,5 +399,54 @@ describe("NHTSA/FMVSS coverage item is present in brake drum scan", () => {
     const nhtsa = BRAKE_DRUM_SCAN.coverage_matrix?.find((c) => c.domain_key === "nhtsa_fmvss");
     expect(nhtsa).toBeDefined();
     expect(nhtsa?.status).toBe("official_unconfirmed");
+  });
+});
+
+describe("Decisive answers — no vague language in cost row answers", () => {
+  const rows = buildCostRows(BRAKE_DRUM_SCAN, "en");
+
+  it("no customer-visible cost row answer contains 'may apply'", () => {
+    for (const row of rows) {
+      expect(row.answer.toLowerCase()).not.toContain("may apply");
+    }
+  });
+
+  it("no customer-visible cost row answer contains 'applicability needs confirmation'", () => {
+    for (const row of rows) {
+      expect(row.answer.toLowerCase()).not.toContain("applicability needs confirmation");
+    }
+  });
+
+  it("Section 301 answer includes exact rate and chapter 99 reference", () => {
+    const s301 = rows.find((r) => r.coverageItem.domain_key === "section_301");
+    expect(s301).toBeDefined();
+    expect(s301?.answer).toContain("+25%");
+    expect(s301?.answer).toContain("9903.88");
+  });
+
+  it("Section 232 auto answer includes '+25%' and '9903.94.05'", () => {
+    const s232 = rows.find((r) => r.coverageItem.domain_key === "section_232_auto");
+    expect(s232).toBeDefined();
+    expect(s232?.answer).toContain("+25%");
+    expect(s232?.answer).toContain("9903.94.05");
+  });
+
+  it("AD answer says 'within scope' not 'may apply'", () => {
+    const ad = rows.find((r) => r.coverageItem.domain_key === "adcvd_A-570-174");
+    expect(ad).toBeDefined();
+    expect(ad?.answer.toLowerCase()).toContain("within scope");
+    expect(ad?.answer.toLowerCase()).not.toContain("may apply");
+  });
+
+  it("computeKnownTariffTotal returns correct sum for MFN+S301+S232 when AD/CVD rates unknown", () => {
+    const { knownPct, hasUnknown } = computeKnownTariffTotal(rows);
+    // MFN 2.5% + Section 301 25% + Section 232 25% = 52.5%
+    expect(knownPct).toBe(52.5);
+    expect(hasUnknown).toBe(true);
+  });
+
+  it("computeKnownTariffTotal marks hasUnknown=true when AD/CVD rows have null ratePct", () => {
+    const { hasUnknown } = computeKnownTariffTotal(rows);
+    expect(hasUnknown).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   submitWatchlistEntry,
   pollScanResult,
@@ -31,6 +32,54 @@ import {
   AlertTriangle, Info,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+
+// ── Clarification facts (collected before scan for decisive scope analysis) ───
+
+interface BrakeDrumFacts {
+  inside_diameter: string;   // "14.75"|"15"|"15.5"|"16"|"16.5"|"other"|"unknown"
+  weight: string;            // "over_50"|"50_or_under"|"unknown"
+  material: string;          // "grey_cast_iron"|"other"|"unknown"
+  construction: string;      // "non_composite"|"composite"|"unknown"
+  vehicle_type: string;      // "passenger"|"heavy_truck"|"unknown"
+  brake_system: string;      // "hydraulic"|"air"|"unknown"
+  oe_or_aftermarket: string; // "oe"|"aftermarket"|"unknown"
+  manufacturer_name: string;
+  exporter_name: string;
+}
+
+const DEFAULT_BRAKE_FACTS: BrakeDrumFacts = {
+  inside_diameter: "unknown",
+  weight: "unknown",
+  material: "unknown",
+  construction: "unknown",
+  vehicle_type: "unknown",
+  brake_system: "unknown",
+  oe_or_aftermarket: "unknown",
+  manufacturer_name: "",
+  exporter_name: "",
+};
+
+function needsClarificationQuestions(form: { htsCode: string; productName: string; description: string }): boolean {
+  const hts = form.htsCode.replace(/[^0-9]/g, "");
+  if (hts.startsWith("8708")) return true;
+  const text = `${form.productName} ${form.description}`.toLowerCase();
+  return /brake\s*drum/.test(text);
+}
+
+function appendClarificationFacts(originalDesc: string, facts: BrakeDrumFacts): string {
+  const lines: string[] = [];
+  if (facts.inside_diameter !== "unknown") lines.push(`Inside diameter: ${facts.inside_diameter} in`);
+  if (facts.weight !== "unknown") lines.push(`Weight: ${facts.weight === "over_50" ? ">50 lbs" : "≤50 lbs"}`);
+  if (facts.material !== "unknown") lines.push(`Material: ${facts.material === "grey_cast_iron" ? "grey cast iron" : "other material"}`);
+  if (facts.construction !== "unknown") lines.push(`Construction: ${facts.construction === "non_composite" ? "non-composite" : "composite"}`);
+  if (facts.vehicle_type !== "unknown") lines.push(`Vehicle type: ${facts.vehicle_type === "passenger" ? "passenger vehicle" : "medium/heavy commercial truck"}`);
+  if (facts.brake_system !== "unknown") lines.push(`Brake system: ${facts.brake_system === "hydraulic" ? "hydraulic" : "air brakes"}`);
+  if (facts.oe_or_aftermarket !== "unknown") lines.push(`OEM/aftermarket: ${facts.oe_or_aftermarket}`);
+  if (facts.manufacturer_name.trim()) lines.push(`Manufacturer: ${facts.manufacturer_name.trim()}`);
+  if (facts.exporter_name.trim()) lines.push(`Exporter: ${facts.exporter_name.trim()}`);
+  if (lines.length === 0) return originalDesc;
+  return `${originalDesc}\n\n--- Product specifications ---\n${lines.join("\n")}`;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -369,6 +418,10 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     Array<{ key: keyof ProductAttributes; labelKey: DictKey }> | null
   >(null);
   const [inferredAccept, setInferredAccept] = useState<Record<string, boolean>>({});
+  const [brakeFacts, setBrakeFacts] = useState<BrakeDrumFacts>(DEFAULT_BRAKE_FACTS);
+  const [showClarification, setShowClarification] = useState(false);
+  // Attrs to use when clarification is complete
+  const [pendingAttrs, setPendingAttrs] = useState<ProductAttributes | null>(null);
   // Async-scan failure state + the attributes to retry with.
   const [scanError, setScanError] = useState<string | null>(null);
   const [retryAttrs, setRetryAttrs] = useState<ProductAttributes | null>(null);
@@ -394,18 +447,24 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   };
 
   // Runs the save (fast) then polls for the async scan result.
-  const runScan = async (finalAttrs: ProductAttributes) => {
+  const runScan = async (finalAttrs: ProductAttributes, clarificationFacts?: BrakeDrumFacts) => {
     setAttrs(finalAttrs);
     setRetryAttrs(finalAttrs);
     setPendingInferred(null);
+    setShowClarification(false);
+    setPendingAttrs(null);
     setScanError(null);
     setLoadingStage("saving");
+
+    const enrichedDesc = clarificationFacts
+      ? appendClarificationFacts(form.description.trim(), clarificationFacts)
+      : form.description.trim();
 
     try {
       const result = await submitWatchlistEntry({
         email: form.email.trim(),
         product_name: form.productName.trim(),
-        product_description: form.description.trim() || undefined,
+        product_description: enrichedDesc || undefined,
         hts_code: form.htsCode.trim() || undefined,
         origin_country: form.originCountry.trim() || "China",
         destination_country: form.destination.trim() || "United States",
@@ -478,6 +537,12 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
       return;
     }
 
+    if (needsClarificationQuestions(form)) {
+      setPendingAttrs(attrs);
+      setShowClarification(true);
+      return;
+    }
+
     await runScan(attrs);
   };
 
@@ -511,11 +576,30 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     );
   }
 
+  if (showClarification && pendingAttrs) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <ClarificationStep
+          facts={brakeFacts}
+          onChange={setBrakeFacts}
+          onContinue={() => void runScan(pendingAttrs, brakeFacts)}
+          onSkip={() => void runScan(pendingAttrs)}
+        />
+      </div>
+    );
+  }
+
   if (pendingInferred) {
     const proceed = () => {
       const merged = { ...attrs };
       for (const item of pendingInferred) {
         if (inferredAccept[item.key]) merged[item.key] = true;
+      }
+      if (needsClarificationQuestions(form)) {
+        setPendingAttrs(merged);
+        setShowClarification(true);
+        setPendingInferred(null);
+        return;
       }
       void runScan(merged);
     };
@@ -801,6 +885,7 @@ import {
   collectMissingFacts,
   coverageCostLabel,
   coverageCostClass,
+  computeKnownTariffTotal,
   type ImportStatus,
   type CostRow,
 } from "@/lib/scanDisplay";
@@ -815,6 +900,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
 
   const overallStatus = computeOverallStatus(riskScan);
   const costRows = buildCostRows(riskScan, lang);
+  const { knownPct, hasUnknown } = computeKnownTariffTotal(costRows);
   const missingFacts = collectMissingFacts(riskScan);
   const nextActions = riskScan.next_actions.slice(0, 5);
 
@@ -897,24 +983,32 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       {costRows.length > 0 && (
         <section>
           <h3 className="mb-3 font-semibold">{t(lang, "imp_costs_title")}</h3>
-          <Card className="divide-y overflow-hidden p-0">
-            {costRows.map((row, i) => (
-              <div key={i} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
-                <span className="text-foreground">{row.label}</span>
-                <div className="text-right">
-                  {row.rateText && (
-                    <span className="font-mono font-medium text-foreground">{row.rateText} </span>
-                  )}
-                  <span className={`text-xs ${coverageCostClass(row.status)}`}>
-                    {coverageCostLabel(row.status, lang)}
-                  </span>
-                </div>
-              </div>
-            ))}
-            <div className="flex items-center justify-between gap-4 bg-slate-50/60 px-4 py-3 text-sm">
-              <span className="font-medium text-foreground">{t(lang, "imp_costs_total")}</span>
-              <span className="text-xs text-muted-foreground">{t(lang, "imp_costs_total_note")}</span>
-            </div>
+          <Card className="overflow-hidden p-0">
+            <table className="w-full text-sm">
+              <tbody className="divide-y">
+                {costRows.map((row, i) => (
+                  <tr key={i}>
+                    <td className="px-4 py-3 text-muted-foreground w-48 align-top">{row.label}</td>
+                    <td className="px-4 py-3 font-medium">{row.answer}</td>
+                  </tr>
+                ))}
+                {/* Known total */}
+                <tr className="bg-slate-50/60">
+                  <td className="px-4 py-3 font-medium">Known tariff total</td>
+                  <td className="px-4 py-3 font-medium font-mono">
+                    {knownPct.toFixed(1)}%{hasUnknown ? " (AD/CVD rate pending)" : ""}
+                  </td>
+                </tr>
+                {hasUnknown && (
+                  <tr className="bg-slate-50/40">
+                    <td className="px-4 py-3 text-muted-foreground">Potential final total</td>
+                    <td className="px-4 py-3 text-muted-foreground text-sm">
+                      Cannot calculate until manufacturer and exporter are provided
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </Card>
         </section>
       )}
@@ -1045,6 +1139,151 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         <ShieldCheck className="mr-1 inline h-3 w-3" />
         {t(lang, "disclaimer_long")}
       </p>
+    </div>
+  );
+}
+
+// ── Clarification step ────────────────────────────────────────────────────────
+
+function ClarificationStep({
+  facts,
+  onChange,
+  onContinue,
+  onSkip,
+}: {
+  facts: BrakeDrumFacts;
+  onChange: (f: BrakeDrumFacts) => void;
+  onContinue: () => void;
+  onSkip: () => void;
+}) {
+  const set = (k: keyof BrakeDrumFacts, v: string) => onChange({ ...facts, [k]: v });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold">A few more details</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Answer these to get a definitive scope determination for the AD/CVD orders and FMVSS requirements. Select "I don't know" to skip — ClearPort will state exactly what it cannot determine and why.
+        </p>
+      </div>
+
+      <Card className="divide-y overflow-hidden p-0">
+        {/* Inside diameter */}
+        <ClarificationRow label="Inside diameter (inches)">
+          <RadioGroup value={facts.inside_diameter} onValueChange={(v) => set("inside_diameter", v)} className="flex flex-wrap gap-2">
+            {["14.75", "15", "15.5", "16", "16.5", "other"].map((v) => (
+              <label key={v} className="flex items-center gap-1.5 cursor-pointer text-sm">
+                <RadioGroupItem value={v} /> {v}&quot;
+              </label>
+            ))}
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground">
+              <RadioGroupItem value="unknown" /> I don&apos;t know
+            </label>
+          </RadioGroup>
+        </ClarificationRow>
+
+        {/* Weight */}
+        <ClarificationRow label="Total weight">
+          <RadioGroup value={facts.weight} onValueChange={(v) => set("weight", v)} className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="over_50" /> More than 50 lbs</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="50_or_under" /> 50 lbs or less</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
+          </RadioGroup>
+        </ClarificationRow>
+
+        {/* Material */}
+        <ClarificationRow label="Material">
+          <RadioGroup value={facts.material} onValueChange={(v) => set("material", v)} className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="grey_cast_iron" /> Grey cast iron</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="other" /> Other material</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
+          </RadioGroup>
+        </ClarificationRow>
+
+        {/* Construction */}
+        <ClarificationRow label="Construction">
+          <RadioGroup value={facts.construction} onValueChange={(v) => set("construction", v)} className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="non_composite" /> Non-composite</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="composite" /> Composite (&gt;38% steel by weight)</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
+          </RadioGroup>
+        </ClarificationRow>
+
+        {/* Vehicle type */}
+        <ClarificationRow label="Vehicle type">
+          <RadioGroup value={facts.vehicle_type} onValueChange={(v) => set("vehicle_type", v)} className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="passenger" /> Passenger vehicle / light truck / SUV</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="heavy_truck" /> Medium/heavy commercial truck or trailer</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
+          </RadioGroup>
+        </ClarificationRow>
+
+        {/* Brake system */}
+        <ClarificationRow label="Brake system">
+          <RadioGroup value={facts.brake_system} onValueChange={(v) => set("brake_system", v)} className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="hydraulic" /> Hydraulic brakes</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="air" /> Air brakes</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
+          </RadioGroup>
+        </ClarificationRow>
+
+        {/* OEM/aftermarket */}
+        <ClarificationRow label="OEM or aftermarket">
+          <RadioGroup value={facts.oe_or_aftermarket} onValueChange={(v) => set("oe_or_aftermarket", v)} className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="oe" /> OEM (original equipment)</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="aftermarket" /> Aftermarket replacement</label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
+          </RadioGroup>
+        </ClarificationRow>
+
+        {/* Manufacturer */}
+        <ClarificationRow label="Manufacturer legal name">
+          <div className="space-y-1">
+            <Input
+              placeholder="e.g. Longhua Brake Parts Co., Ltd."
+              value={facts.manufacturer_name}
+              onChange={(e) => set("manufacturer_name", e.target.value)}
+              className="h-8 text-sm"
+            />
+            <p className="text-xs text-muted-foreground">Required to calculate the exact antidumping and countervailing duty rate.</p>
+          </div>
+        </ClarificationRow>
+
+        {/* Exporter */}
+        <ClarificationRow label="Exporter legal name">
+          <div className="space-y-1">
+            <Input
+              placeholder="e.g. Longhua Brake Parts Co., Ltd."
+              value={facts.exporter_name}
+              onChange={(e) => set("exporter_name", e.target.value)}
+              className="h-8 text-sm"
+            />
+            <p className="text-xs text-muted-foreground">Required to calculate the exact antidumping and countervailing duty rate.</p>
+          </div>
+        </ClarificationRow>
+      </Card>
+
+      <div className="flex gap-3">
+        <Button onClick={onContinue} className="flex-1">
+          Continue →
+        </Button>
+        <Button variant="outline" onClick={onSkip}>
+          Skip all
+        </Button>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        When "I don't know" is selected, ClearPort will state exactly what it cannot determine and why — it will not substitute vague language.
+      </p>
+    </div>
+  );
+}
+
+function ClarificationRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-4 py-3 space-y-2">
+      <p className="text-sm font-medium">{label}</p>
+      {children}
     </div>
   );
 }

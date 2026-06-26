@@ -1,6 +1,13 @@
 /**
  * Pure display-layer functions for the Import Check result page.
  * Extracted so they can be regression-tested without a DOM environment.
+ *
+ * Status vocabulary (customer-facing):
+ *   Applies                  — verified_applicable
+ *   Does not apply           — not_applicable / no_applicable_rule
+ *   Within scope             — likely_match (AD/CVD orders)
+ *   Cannot determine — missing: [exact fact]  — insufficient_info / official_unconfirmed with missing facts
+ *   Official lookup failed   — source_unavailable
  */
 
 import type { ProductRiskScan, CoverageStatus, CoverageItem } from "./api";
@@ -11,7 +18,12 @@ export type ImportStatus = "ready" | "checks" | "donot" | "incomplete";
 
 export interface CostRow {
   label: string;
+  /** Decisive answer text shown directly to the customer */
+  answer: string;
+  /** Numeric rate string (e.g. "2.5%") when available — used for display and total calc */
   rateText: string | null;
+  /** Numeric rate value for known-total calculation; null when rate is unknown */
+  ratePct: number | null;
   status: CoverageStatus;
   coverageItem: CoverageItem;
 }
@@ -20,15 +32,11 @@ export interface CostRow {
 export const DOMAIN_FINDING_MAP: Record<string, string> = {
   mfn_duty: "hts_duty",
   section_301: "hts_section301",
+  section_232_auto: "section_232_auto",
 };
 
 /**
  * Derive the single plain-sentence import status from the finalized scan.
- *
- *  incomplete — any source_unavailable or insufficient_info domain present
- *  donot      — any Critical + verified finding
- *  checks     — any likely_match or official_unconfirmed domain
- *  ready      — nothing pending
  */
 export function computeOverallStatus(scan: ProductRiskScan): ImportStatus {
   const cm = scan.coverage_matrix;
@@ -56,8 +64,8 @@ export function computeOverallStatus(scan: ProductRiskScan): ImportStatus {
 export function coverageCostLabel(status: CoverageStatus, lang: Lang): string {
   switch (status) {
     case "verified_applicable": return t(lang, "imp_cost_confirmed");
-    case "likely_match":        return t(lang, "imp_cost_likely");
-    case "official_unconfirmed": return t(lang, "imp_cost_may_apply");
+    case "likely_match":        return t(lang, "imp_cost_within_scope");
+    case "official_unconfirmed": return t(lang, "imp_cost_cannot_determine");
     case "no_applicable_rule":
     case "not_applicable":      return t(lang, "imp_cost_not_applicable");
     case "source_unavailable":  return t(lang, "imp_cost_unavailable");
@@ -88,22 +96,107 @@ export function buildCostRows(scan: ProductRiskScan, lang: Lang): CostRow[] {
       : fallbackId
         ? scan.risk_categories.find((r) => r.id === fallbackId)
         : undefined;
-    const rateText = cat?.verified_rate_pct != null ? `${cat.verified_rate_pct}%` : null;
+    const ratePct = cat?.verified_rate_pct ?? null;
+    const rateText = ratePct != null ? `${ratePct}%` : null;
 
     if (c.domain_key === "mfn_duty") {
-      rows.push({ label: t(lang, "imp_costs_base"), rateText, status: c.status, coverageItem: c });
+      const answer = ratePct != null
+        ? `${ratePct}%`
+        : c.status === "insufficient_info"
+          ? "Cannot determine — HTS code required"
+          : "Official lookup failed";
+      rows.push({ label: t(lang, "imp_costs_base"), answer, rateText, ratePct, status: c.status, coverageItem: c });
+
     } else if (c.domain_key === "section_301") {
-      rows.push({ label: t(lang, "imp_costs_s301"), rateText, status: c.status, coverageItem: c });
+      if (c.status === "not_applicable" || c.status === "no_applicable_rule") {
+        rows.push({ label: t(lang, "imp_costs_s301"), answer: "Does not apply", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else if (c.status === "verified_applicable" && ratePct != null) {
+        const ref = cat?.source?.cfr_citation ?? "9903.88.03";
+        rows.push({ label: t(lang, "imp_costs_s301"), answer: `Applies — +${ratePct}% — ${ref}`, rateText, ratePct, status: c.status, coverageItem: c });
+      } else if (c.status === "insufficient_info") {
+        const missing = c.missing_facts?.join(", ") ?? "exact HTS code";
+        rows.push({ label: t(lang, "imp_costs_s301"), answer: `Cannot determine — missing: ${missing}`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else {
+        // official_unconfirmed — rate may still be known from the category
+        if (ratePct != null) {
+          const ref = cat?.source?.cfr_citation ?? "";
+          rows.push({ label: t(lang, "imp_costs_s301"), answer: `Applies — +${ratePct}%${ref ? ` — ${ref}` : ""}`, rateText, ratePct, status: c.status, coverageItem: c });
+        } else {
+          rows.push({ label: t(lang, "imp_costs_s301"), answer: "Cannot determine — exact HTS code required", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+        }
+      }
+
+    } else if (c.domain_key === "section_232_auto") {
+      if (c.status === "not_applicable") {
+        rows.push({ label: t(lang, "imp_costs_s232_auto"), answer: "Does not apply", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else {
+        // verified_applicable for HTS 8708.x
+        const rate = ratePct ?? 25;
+        rows.push({ label: t(lang, "imp_costs_s232_auto"), answer: `Applies — +${rate}% — 9903.94.05`, rateText: `${rate}%`, ratePct: rate, status: c.status, coverageItem: c });
+      }
+
     } else if (c.domain_key === "section_232") {
-      rows.push({ label: t(lang, "imp_costs_s232"), rateText, status: c.status, coverageItem: c });
+      if (c.status === "not_applicable" || c.status === "no_applicable_rule") {
+        rows.push({ label: t(lang, "imp_costs_s232"), answer: "Does not apply", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else {
+        rows.push({ label: t(lang, "imp_costs_s232"), answer: rateText ? `Applies — +${rateText}` : "Confirm with customs broker", rateText, ratePct, status: c.status, coverageItem: c });
+      }
+
     } else if (c.domain_key.startsWith("adcvd_A-")) {
-      rows.push({ label: t(lang, "imp_costs_ad"), rateText, status: c.status, coverageItem: c });
+      const caseId = c.domain_key.replace("adcvd_", "");
+      if (c.status === "not_applicable") {
+        rows.push({ label: t(lang, "imp_costs_ad"), answer: `Does not apply — outside order scope`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else if (c.status === "likely_match") {
+        const scopeMissing = (c.missing_facts ?? []).filter((f) => !/producer|manufacturer|exporter/i.test(f));
+        const needsParty = (c.missing_facts ?? []).some((f) => /producer|manufacturer|exporter/i.test(f));
+        if (scopeMissing.length === 0 && needsParty) {
+          rows.push({ label: t(lang, "imp_costs_ad"), answer: `Order ${caseId} — within scope — exact rate requires manufacturer and exporter name`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+        } else if (scopeMissing.length > 0) {
+          rows.push({ label: t(lang, "imp_costs_ad"), answer: `Cannot determine scope — missing: ${scopeMissing.join("; ")}`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+        } else {
+          rows.push({ label: t(lang, "imp_costs_ad"), answer: `Order ${caseId} — within scope`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+        }
+      } else {
+        const scopeMissing = (c.missing_facts ?? []).filter((f) => !/producer|manufacturer|exporter/i.test(f));
+        rows.push({ label: t(lang, "imp_costs_ad"), answer: scopeMissing.length ? `Cannot determine scope — missing: ${scopeMissing.join("; ")}` : `Order ${caseId} — scope check in progress`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      }
+
     } else if (c.domain_key.startsWith("adcvd_C-")) {
-      rows.push({ label: t(lang, "imp_costs_cvd"), rateText, status: c.status, coverageItem: c });
+      const caseId = c.domain_key.replace("adcvd_", "");
+      if (c.status === "not_applicable") {
+        rows.push({ label: t(lang, "imp_costs_cvd"), answer: `Does not apply — outside order scope`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else if (c.status === "likely_match") {
+        const scopeMissing = (c.missing_facts ?? []).filter((f) => !/producer|manufacturer|exporter/i.test(f));
+        const needsParty = (c.missing_facts ?? []).some((f) => /producer|manufacturer|exporter/i.test(f));
+        if (scopeMissing.length === 0 && needsParty) {
+          rows.push({ label: t(lang, "imp_costs_cvd"), answer: `Order ${caseId} — within scope — exact rate requires manufacturer and exporter name`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+        } else if (scopeMissing.length > 0) {
+          rows.push({ label: t(lang, "imp_costs_cvd"), answer: `Cannot determine scope — missing: ${scopeMissing.join("; ")}`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+        } else {
+          rows.push({ label: t(lang, "imp_costs_cvd"), answer: `Order ${caseId} — within scope`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+        }
+      } else {
+        const scopeMissing = (c.missing_facts ?? []).filter((f) => !/producer|manufacturer|exporter/i.test(f));
+        rows.push({ label: t(lang, "imp_costs_cvd"), answer: scopeMissing.length ? `Cannot determine scope — missing: ${scopeMissing.join("; ")}` : `Order ${caseId} — scope check in progress`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      }
     }
   }
 
   return rows;
+}
+
+/** Sum the known-rate tariff rows and indicate whether the total is complete. */
+export function computeKnownTariffTotal(rows: CostRow[]): { knownPct: number; hasUnknown: boolean } {
+  let knownPct = 0;
+  let hasUnknown = false;
+  for (const row of rows) {
+    if (row.ratePct != null) {
+      knownPct += row.ratePct;
+    } else if (row.status !== "not_applicable" && row.status !== "no_applicable_rule") {
+      hasUnknown = true;
+    }
+  }
+  return { knownPct, hasUnknown };
 }
 
 export function collectMissingFacts(scan: ProductRiskScan): string[] {

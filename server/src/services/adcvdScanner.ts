@@ -284,19 +284,28 @@ export function adcvdFindingsToCategories(findings: AdcvdFinding[], today: strin
     } else {
       level = 'High';
       const matchSummary = matched_facts.length
-        ? `Matched scope criteria: ${matched_facts.join('; ')}.`
+        ? `Scope criteria confirmed: ${matched_facts.join('; ')}.`
         : 'HTS code falls within the order scope.';
-      const missSummary = missing_facts.length
-        ? ` Missing for rate confirmation: ${missing_facts.join('; ')}.`
-        : '';
-      explanation =
-        `${order.id} is an active ${isAd ? 'antidumping' : 'countervailing duty'} order on ${order.product_description} from ${order.origin_country}. ${matchSummary}${missSummary} Written scope controls — HTS code is a screening signal only. Confirm with CBP/customs broker before importing.`;
+      const missSummary = missing_facts.filter(m => !/producer|manufacturer|exporter/i.test(m)).length
+        ? ` Missing for scope determination: ${missing_facts.filter(m => !/producer|manufacturer|exporter/i.test(m)).join('; ')}.`
+        : missing_facts.some(m => /producer|manufacturer|exporter/i.test(m))
+          ? ` To calculate the exact duty rate, the producer name and exporter name are required.`
+          : '';
+      explanation = scope_match === 'likely_match'
+        ? `Order ${order.id} applies to this product. ${matchSummary}${missSummary}`
+        : `Order ${order.id} (${isAd ? 'antidumping' : 'countervailing duty'} on ${order.product_description} from ${order.origin_country}). ${matchSummary}${missSummary}`;
 
       const rateNote = order.china_wide_rate_pct != null
-        ? ` China-wide/all-others rate: ${order.china_wide_rate_pct}%. Confirm current rate with your broker.`
-        : ' Confirm current rate with your customs broker — rates vary by producer/exporter.';
+        ? scope_match === 'likely_match'
+          ? ` All-others/China-wide cash-deposit rate: ${order.china_wide_rate_pct}%. Company-specific rate requires manufacturer and exporter name.`
+          : ` Reference rate: ${order.china_wide_rate_pct}%.`
+        : scope_match === 'likely_match'
+          ? ` Exact rate requires manufacturer and exporter name — provide these to determine the applicable cash-deposit rate.`
+          : '';
 
-      action = `Contact your customs broker to verify whether this product falls within the ${order.id} scope and confirm the applicable ${isAd ? 'AD' : 'CVD'} rate.${rateNote}`;
+      action = scope_match === 'likely_match'
+        ? `Provide your manufacturer and exporter's legal names to determine the exact AD/CVD cash-deposit rate applicable to this shipment.${rateNote}`
+        : `Provide additional product facts to confirm scope, then provide manufacturer and exporter names to determine the rate.`;
     }
 
     return {
@@ -339,10 +348,15 @@ export function adcvdFindingsToCoverage(findings: AdcvdFinding[], categories: Ri
       status,
       finding_id: linkedCat?.id,
       note: f.scope_match === 'excluded'
-        ? `Excluded: ${f.excluded_by}`
+        ? `Outside scope: ${f.excluded_by}`
         : f.scope_match === 'likely_match'
-          ? `Scope criteria met — producer/exporter confirmation required for exact rate`
-          : `Order screened — applicability needs confirmation`,
+          ? `Product is within scope — exact rate requires manufacturer and exporter`
+          : (() => {
+              const scopeMissing = f.missing_facts.filter(m => !/producer|manufacturer|exporter/i.test(m));
+              return scopeMissing.length > 0
+                ? `Cannot determine scope — missing: ${scopeMissing.join('; ')}`
+                : `Product appears within scope — confirm with customs broker`;
+            })(),
       missing_facts: f.missing_facts.length ? f.missing_facts : undefined,
       official_url: f.order.official_url,
     } satisfies CoverageItem;
