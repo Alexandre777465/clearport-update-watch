@@ -338,7 +338,17 @@ export interface RiskCategory {
   source?: SourceCitation;
 }
 
-export type DocumentResponsibility = "supplier" | "importer_broker" | "conditional";
+export type DocumentResponsibility = "supplier" | "importer_broker" | "conditional" | "carrier";
+
+export type DocItemStatus =
+  | "required_to_clear"
+  | "required_if"
+  | "usually_requested"
+  | "before_sale"
+  | "not_required"
+  | "cannot_determine";
+
+export type ResponsibleParty = "supplier" | "importer" | "customs_broker" | "carrier" | "laboratory";
 
 export interface DocumentChecklistItem {
   document: string;
@@ -346,6 +356,10 @@ export interface DocumentChecklistItem {
   status?: "required" | "needs_confirmation";
   reason: string;
   responsibility?: DocumentResponsibility;
+  doc_status?: DocItemStatus;
+  condition?: string;
+  missing_fact?: string;
+  responsible_party?: ResponsibleParty;
   finding_id?: string;
   source?: SourceCitation;
   uploaded?: boolean;  // client-side state only

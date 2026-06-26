@@ -17,8 +17,7 @@ import {
   type ProductRiskScan,
   type ProductAttributes,
   type DocumentChecklistItem,
-  type CoverageItem,
-  type CoverageStatus,
+  type RiskCategory,
   API_URL,
 } from "@/lib/api";
 import { RiskScanCard } from "@/components/RiskScanCard";
@@ -26,10 +25,10 @@ import { LATEST_ENTRY_KEY } from "@/components/FloatingAssistant";
 import { DocumentChecklist } from "@/components/DocumentChecklist";
 import { BrokerPack } from "@/components/BrokerPack";
 import { Link } from "@tanstack/react-router";
-import { getLang, useLang, t, type DictKey } from "@/lib/i18n";
+import { getLang, useLang, t, type DictKey, type Lang } from "@/lib/i18n";
 import {
   CheckCircle2, Loader2, ExternalLink, ShieldCheck, ScanSearch, MessageSquare,
-  AlertTriangle, Info,
+  AlertTriangle, DollarSign, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -113,6 +112,7 @@ interface ConfirmedState {
   htsCode: string;
   originCountry: string;
   destination: string;
+  estimatedValue: string;
   preview: WatchlistPreviewDoc[];
   riskScan: ProductRiskScan;
   isLocal: boolean;
@@ -509,6 +509,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         htsCode: form.htsCode.trim(),
         originCountry: form.originCountry.trim() || "China",
         destination: form.destination.trim() || "United States",
+        estimatedValue: form.estimatedValue,
         preview: result.preview ?? [],
         riskScan,
         isLocal: result.scan_status === "local",
@@ -880,33 +881,150 @@ function ScanningState({
 // ── Import status helpers ─────────────────────────────────────────────────────
 
 import {
-  computeOverallStatus,
   buildCostRows,
   collectMissingFacts,
-  coverageCostLabel,
-  coverageCostClass,
   computeKnownTariffTotal,
-  type ImportStatus,
-  type CostRow,
+  buildEnhancedCostRows,
+  calculateMpf,
+  type CostRowV2,
 } from "@/lib/scanDisplay";
 
+
+// ── Cost table row ────────────────────────────────────────────────────────────
+
+function CostTableRow({ row, showAmount }: { row: CostRowV2; showAmount: boolean }) {
+  const isNA = row.status === "not_applicable" || row.status === "no_applicable_rule";
+  const isUnknown = row.status === "insufficient_info" || row.status === "source_unavailable";
+
+  return (
+    <tr className={isNA ? "opacity-45" : ""}>
+      <td className="px-4 py-3 align-top">
+        <span className={`text-sm ${isNA ? "text-muted-foreground" : "font-medium text-foreground"}`}>
+          {row.label}
+        </span>
+        {row.calcBasis && !isNA && (
+          <p className="mt-0.5 text-xs text-muted-foreground">{row.calcBasis}</p>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right align-top whitespace-nowrap">
+        {row.rateText ? (
+          <span className={`text-sm ${isNA ? "text-muted-foreground" : "font-medium"}`}>
+            {row.rateText}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </td>
+      {showAmount && (
+        <td className="px-4 py-3 text-right align-top">
+          {row.dollarText ? (
+            <span className={`font-mono text-sm ${isNA ? "text-muted-foreground" : "font-medium"}`}>
+              {row.dollarText}
+            </span>
+          ) : isUnknown && !isNA ? (
+            <span className="text-xs text-amber-700 max-w-[160px] text-right leading-tight block">
+              {row.answer}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}
+
+// ── Regulatory category row (Section 3) ───────────────────────────────────────
+
+function RegulatoryCategoryRow({ cat, lang }: { cat: RiskCategory; lang: Lang }) {
+  const isVerified = cat.verification_status === "verified_applicable";
+  const isUnconfirmed = cat.verification_status === "official_unconfirmed";
+
+  const statusKey: DictKey = isVerified
+    ? "law_status_required"
+    : isUnconfirmed
+      ? "law_status_cannot_determine"
+      : "law_status_not_supported";
+
+  const statusClass = isVerified
+    ? "border-red-200 bg-red-50 text-red-700"
+    : isUnconfirmed
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : "border-slate-200 bg-slate-50 text-slate-500";
+
+  const preSaleKeywords = ["fcc", "cpsia", "cpsc", "marketplace", "amazon", "tiktok", "eu ", "ftc", "labeling"];
+  const isPreSale = preSaleKeywords.some((kw) => cat.category.toLowerCase().includes(kw));
+
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">{cat.category}</span>
+        <Badge variant="outline" className={`text-xs ${statusClass}`}>
+          {t(lang, statusKey)}
+        </Badge>
+        {isPreSale && (
+          <Badge variant="outline" className="border-purple-200 bg-purple-50 text-purple-700 text-xs">
+            {t(lang, "sec3_before_sale")}
+          </Badge>
+        )}
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">{cat.explanation}</p>
+      {cat.applicability_conditions && (
+        <p className="mt-1.5 text-xs">
+          <span className="font-semibold text-foreground">{t(lang, "sec3_conditional")} </span>
+          <span className="text-muted-foreground">{cat.applicability_conditions}</span>
+        </p>
+      )}
+      {cat.action && (
+        <p className="mt-1.5 text-xs text-muted-foreground">{cat.action}</p>
+      )}
+    </Card>
+  );
+}
 
 // ── Confirmation + cockpit view ───────────────────────────────────────────────
 
 function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
   const lang = useLang();
   const { riskScan } = confirmed;
+  const [officialOpen, setOfficialOpen] = useState(false);
   const hasLivePreview = confirmed.preview.length > 0;
 
-  const overallStatus = computeOverallStatus(riskScan);
-  const costRows = buildCostRows(riskScan, lang);
-  const { knownPct, hasUnknown } = computeKnownTariffTotal(costRows);
-  const missingFacts = collectMissingFacts(riskScan);
-  const nextActions = riskScan.next_actions.slice(0, 5);
+  const customsValueUsd = parseEstimatedValue(confirmed.estimatedValue);
+  const enhancedRows = buildEnhancedCostRows(riskScan, lang, customsValueUsd);
+  const { knownPct, hasUnknown } = computeKnownTariffTotal(buildCostRows(riskScan, lang));
+  const missingFacts = collectMissingFacts(riskScan).slice(0, 5);
+  const nextSteps = riskScan.next_actions.slice(0, 3);
+
+  // Known dollar total: tariff rows + MPF
+  const knownTariffDollar = customsValueUsd != null ? (knownPct / 100) * customsValueUsd : null;
+  const mpf = customsValueUsd != null ? calculateMpf(customsValueUsd) : null;
+  const knownTotalDollar =
+    knownTariffDollar != null && mpf != null ? knownTariffDollar + mpf.amount : null;
+  const cannotTotalReason = hasUnknown
+    ? "Exact AD/CVD rate requires manufacturer and exporter name"
+    : !customsValueUsd
+      ? "Customs value not provided"
+      : null;
+
+  // Section 3: non-tariff regulatory findings
+  const tariffCatIds = new Set(["hts_duty", "hts_section301", "section_232_auto", "section_232"]);
+  const tariffCatNames = new Set([
+    "Tariff Risk", "HTS Classification Risk", "Section 301 China Tariff", "AD/CVD Risk",
+  ]);
+  const regulatoryCategories = riskScan.risk_categories.filter((c) => {
+    if (c.level === "N/A") return false;
+    if (c.id && (tariffCatIds.has(c.id) || c.id.startsWith("adcvd_"))) return false;
+    if (tariffCatNames.has(c.category)) return false;
+    return true;
+  });
+
+  // Section 4: margin impact items
+  const marginItems = riskScan.risk_categories.filter((c) => c.financial_impact);
 
   return (
     <div className="space-y-8">
-      {/* System notification banner */}
+      {/* Status banner */}
       <Card className="border-green-200 bg-green-50/60 p-5">
         <div className="flex gap-3">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
@@ -945,83 +1063,131 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         </div>
       </Card>
 
-      {/* ── Import check ─────────────────────────────────────────────────── */}
-      <section>
-        <h2 className="mb-4 text-xl font-semibold tracking-tight">
-          {t(lang, "imp_check_title")}
-        </h2>
-
-        {/* Product / Route / HTS summary */}
-        <Card className="mb-3 divide-y p-0 overflow-hidden">
+      {/* Product / Route summary */}
+      <Card className="divide-y overflow-hidden p-0">
+        <div className="flex gap-3 px-4 py-3 text-sm">
+          <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_product")}</span>
+          <span className="text-foreground">{confirmed.productName}</span>
+        </div>
+        {(confirmed.originCountry || confirmed.destination) && (
           <div className="flex gap-3 px-4 py-3 text-sm">
-            <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_product")}</span>
-            <span className="text-foreground">{confirmed.productName}</span>
+            <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_route")}</span>
+            <span className="text-foreground">
+              {confirmed.originCountry || "—"} → {confirmed.destination || "—"}
+            </span>
           </div>
-          {(confirmed.originCountry || confirmed.destination) && (
-            <div className="flex gap-3 px-4 py-3 text-sm">
-              <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_route")}</span>
-              <span className="text-foreground">
-                {confirmed.originCountry || "—"} → {confirmed.destination || "—"}
-              </span>
-            </div>
-          )}
-          {confirmed.htsCode && (
-            <div className="flex gap-3 px-4 py-3 text-sm">
-              <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_hts_label")}</span>
-              <span className="font-mono text-foreground">{confirmed.htsCode}</span>
+        )}
+        {confirmed.htsCode && (
+          <div className="flex gap-3 px-4 py-3 text-sm">
+            <span className="w-24 shrink-0 font-medium text-muted-foreground">{t(lang, "imp_hts_label")}</span>
+            <span className="font-mono text-foreground">{confirmed.htsCode}</span>
+          </div>
+        )}
+      </Card>
+
+      {/* ── Section 1: What you will pay ─────────────────────────────────── */}
+      <section>
+        <h2 className="mb-4 text-xl font-semibold tracking-tight">{t(lang, "sec1_title")}</h2>
+        <Card className="overflow-hidden p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-slate-50/80 text-xs text-muted-foreground">
+                <th className="px-4 py-2 text-left font-medium">{t(lang, "sec1_charge")}</th>
+                <th className="px-4 py-2 text-right font-medium">{t(lang, "sec1_rate")}</th>
+                {customsValueUsd && (
+                  <th className="px-4 py-2 text-right font-medium">{t(lang, "sec1_amount")}</th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {enhancedRows.map((row, i) => (
+                <CostTableRow key={i} row={row} showAmount={customsValueUsd != null} />
+              ))}
+            </tbody>
+          </table>
+          {/* Known total / cannot-calculate notice */}
+          {(knownTotalDollar != null || cannotTotalReason) && (
+            <div className="border-t bg-slate-50/40 px-4 py-3">
+              {knownTotalDollar != null && (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm font-semibold">{t(lang, "sec1_known_total")}</span>
+                  <span className="font-mono text-sm font-semibold">
+                    {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(knownTotalDollar)}
+                    {(hasUnknown) && <span className="ml-1 text-xs font-normal text-amber-700">+ AD/CVD</span>}
+                  </span>
+                </div>
+              )}
+              {cannotTotalReason && (
+                <p className="mt-1 text-xs text-amber-700">
+                  {t(lang, "sec1_cannot_total")}: {cannotTotalReason}
+                </p>
+              )}
             </div>
           )}
         </Card>
-
-        {/* Plain status sentence */}
-        <p className="text-sm text-muted-foreground">
-          {t(lang, `imp_sentence_${overallStatus}` as DictKey)}
-        </p>
       </section>
 
-      {/* ── Import costs ────────────────────────────────────────────────── */}
-      {costRows.length > 0 && (
+      {/* ── Section 2: What you need to clear customs ─────────────────────── */}
+      <section>
+        <h2 className="mb-4 text-xl font-semibold tracking-tight">{t(lang, "sec2_title")}</h2>
+        <DocumentChecklist items={riskScan.document_checklist} />
+      </section>
+
+      {/* ── Section 3: Laws and product requirements ──────────────────────── */}
+      {regulatoryCategories.length > 0 && (
         <section>
-          <h3 className="mb-3 font-semibold">{t(lang, "imp_costs_title")}</h3>
-          <Card className="overflow-hidden p-0">
-            <table className="w-full text-sm">
-              <tbody className="divide-y">
-                {costRows.map((row, i) => (
-                  <tr key={i}>
-                    <td className="px-4 py-3 text-muted-foreground w-48 align-top">{row.label}</td>
-                    <td className="px-4 py-3 font-medium">{row.answer}</td>
-                  </tr>
-                ))}
-                {/* Known total */}
-                <tr className="bg-slate-50/60">
-                  <td className="px-4 py-3 font-medium">Known tariff total</td>
-                  <td className="px-4 py-3 font-medium font-mono">
-                    {knownPct.toFixed(1)}%{hasUnknown ? " (AD/CVD rate pending)" : ""}
-                  </td>
-                </tr>
-                {hasUnknown && (
-                  <tr className="bg-slate-50/40">
-                    <td className="px-4 py-3 text-muted-foreground">Potential final total</td>
-                    <td className="px-4 py-3 text-muted-foreground text-sm">
-                      Cannot calculate until manufacturer and exporter are provided
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <h2 className="mb-4 text-xl font-semibold tracking-tight">{t(lang, "sec3_title")}</h2>
+          <div className="space-y-2">
+            {regulatoryCategories.map((cat, i) => (
+              <RegulatoryCategoryRow key={cat.id ?? i} cat={cat} lang={lang} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Section 4: What could affect your margin ──────────────────────── */}
+      {(marginItems.length > 0 || customsValueUsd != null) && (
+        <section>
+          <h2 className="mb-4 text-xl font-semibold tracking-tight">{t(lang, "sec4_title")}</h2>
+          <Card className="p-4">
+            <ul className="space-y-2.5">
+              {customsValueUsd != null && (
+                <li className="flex gap-2.5 text-sm">
+                  <DollarSign className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+                  <span>
+                    <span className="font-medium">Tariff and customs fee costs: </span>
+                    {knownTotalDollar != null
+                      ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(knownTotalDollar) +
+                        " known duties and MPF" +
+                        (hasUnknown ? " + AD/CVD rate pending" : "") +
+                        " + HMF if ocean shipment"
+                      : "Rate known — provide customs value to calculate dollar amount"}
+                  </span>
+                </li>
+              )}
+              {marginItems.map((cat, i) => (
+                <li key={cat.id ?? i} className="flex gap-2.5 text-sm">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <span>
+                    <span className="font-medium">{cat.category}: </span>
+                    {cat.financial_impact}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </Card>
         </section>
       )}
 
-      {/* ── What we still need ──────────────────────────────────────────── */}
+      {/* ── Information still missing ─────────────────────────────────────── */}
       {missingFacts.length > 0 && (
         <section>
-          <h3 className="mb-3 font-semibold">{t(lang, "imp_still_need")}</h3>
+          <h3 className="mb-3 font-semibold">{t(lang, "info_missing_title")}</h3>
           <Card className="p-4">
             <ul className="space-y-1.5">
               {missingFacts.map((fact, i) => (
                 <li key={i} className="flex gap-2 text-sm">
-                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-400" />
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
                   <span className="text-foreground">{fact}</span>
                 </li>
               ))}
@@ -1030,18 +1196,18 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         </section>
       )}
 
-      {/* ── What to do next (max 5) ─────────────────────────────────────── */}
-      {nextActions.length > 0 && (
+      {/* ── Next steps (max 3) ────────────────────────────────────────────── */}
+      {nextSteps.length > 0 && (
         <section>
-          <h3 className="mb-3 font-semibold">{t(lang, "imp_next")}</h3>
+          <h3 className="mb-3 font-semibold">{t(lang, "next_steps_title")}</h3>
           <Card className="p-4">
             <ol className="space-y-2">
-              {nextActions.map((action, i) => (
+              {nextSteps.map((step, i) => (
                 <li key={i} className="flex gap-2 text-sm">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                     {i + 1}
                   </span>
-                  <span className="text-foreground">{action}</span>
+                  <span className="text-foreground">{step}</span>
                 </li>
               ))}
             </ol>
@@ -1049,90 +1215,102 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
         </section>
       )}
 
-      {/* ── Detailed findings ───────────────────────────────────────────── */}
+      {/* ── Official details and sources (collapsed by default) ───────────── */}
       <section>
-        <div className="mb-1 flex items-center gap-2">
-          <ScanSearch className="h-4 w-4 text-primary" />
-          <h3 className="font-semibold">{t(lang, "imp_findings")}</h3>
-        </div>
-        <p className="mb-4 text-xs text-muted-foreground">
-          {t(lang, "rep_baseline_sub")}
-        </p>
-        <RiskScanCard scan={riskScan} />
-      </section>
+        <button
+          type="button"
+          onClick={() => setOfficialOpen((o) => !o)}
+          className="flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left text-sm font-semibold hover:bg-muted/40 transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <ScanSearch className="h-4 w-4 text-primary" />
+            {t(lang, "official_details_title")}
+          </span>
+          {officialOpen ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
 
-      {/* Document checklist */}
-      <section>
-        <h3 className="mb-4 font-semibold">{t(lang, "docs_section_title")}</h3>
-        <DocumentChecklist items={riskScan.document_checklist} />
-      </section>
-
-      {/* Broker questions */}
-      {riskScan.broker_questions.length > 0 && (
-        <section>
-          <h3 className="mb-3 font-semibold">{t(lang, "rep_broker_q")}</h3>
-          <Card className="p-5">
-            <ul className="space-y-2">
-              {riskScan.broker_questions.map((q, i) => (
-                <li key={i} className="flex gap-2 text-sm">
-                  <span className="text-muted-foreground">{i + 1}.</span>
-                  <span>{q}</span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </section>
-      )}
-
-      {/* Broker pack */}
-      <section>
-        <h3 className="mb-4 font-semibold">{t(lang, "rep_broker_pack")}</h3>
-        <BrokerPack
-          productName={confirmed.productName}
-          description={confirmed.description}
-          htsCode={confirmed.htsCode}
-          originCountry={confirmed.originCountry}
-          destination={confirmed.destination}
-          scan={riskScan}
-        />
-      </section>
-
-      {/* Recent official updates */}
-      <section>
-        <h3 className="mb-2 font-semibold">{t(lang, "rep_changes")}</h3>
-        {hasLivePreview ? (
-          <>
-            <p className="mb-4 text-sm text-muted-foreground">
-              {t(lang, "rep_changes_sub")}
-            </p>
-            <div className="space-y-4">
-              {confirmed.preview.map((doc) => (
-                <LivePreviewCard key={doc.id} doc={doc} />
-              ))}
+        {officialOpen && (
+          <div className="mt-4 space-y-8">
+            {/* Detailed findings */}
+            <div>
+              <div className="mb-1 flex items-center gap-2">
+                <h3 className="font-semibold">{t(lang, "imp_findings")}</h3>
+              </div>
+              <p className="mb-4 text-xs text-muted-foreground">{t(lang, "rep_baseline_sub")}</p>
+              <RiskScanCard scan={riskScan} />
             </div>
-          </>
-        ) : (
-          <Card className="p-5 text-sm text-muted-foreground">
-            {t(lang, "rep_no_change")}
-          </Card>
-        )}
-      </section>
 
-      {/* Ask ClearPort about this product */}
-      <section>
-        <Card className="flex flex-col items-start gap-3 border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className="font-semibold">{t(lang, "ask_q_title")}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t(lang, "ask_q_body")}
-            </p>
+            {/* Document checklist with sources */}
+            <div>
+              <h3 className="mb-4 font-semibold">{t(lang, "docs_section_title")}</h3>
+              <DocumentChecklist items={riskScan.document_checklist} />
+            </div>
+
+            {/* Broker questions */}
+            {riskScan.broker_questions.length > 0 && (
+              <div>
+                <h3 className="mb-3 font-semibold">{t(lang, "rep_broker_q")}</h3>
+                <Card className="p-5">
+                  <ul className="space-y-2">
+                    {riskScan.broker_questions.map((q, i) => (
+                      <li key={i} className="flex gap-2 text-sm">
+                        <span className="text-muted-foreground">{i + 1}.</span>
+                        <span>{q}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              </div>
+            )}
+
+            {/* Broker pack */}
+            <div>
+              <h3 className="mb-4 font-semibold">{t(lang, "rep_broker_pack")}</h3>
+              <BrokerPack
+                productName={confirmed.productName}
+                description={confirmed.description}
+                htsCode={confirmed.htsCode}
+                originCountry={confirmed.originCountry}
+                destination={confirmed.destination}
+                scan={riskScan}
+              />
+            </div>
+
+            {/* Recent official updates */}
+            <div>
+              <h3 className="mb-2 font-semibold">{t(lang, "rep_changes")}</h3>
+              {hasLivePreview ? (
+                <>
+                  <p className="mb-4 text-sm text-muted-foreground">{t(lang, "rep_changes_sub")}</p>
+                  <div className="space-y-4">
+                    {confirmed.preview.map((doc) => (
+                      <LivePreviewCard key={doc.id} doc={doc} />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <Card className="p-5 text-sm text-muted-foreground">{t(lang, "rep_no_change")}</Card>
+              )}
+            </div>
+
+            {/* Ask ClearPort */}
+            <Card className="flex flex-col items-start gap-3 border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="font-semibold">{t(lang, "ask_q_title")}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{t(lang, "ask_q_body")}</p>
+              </div>
+              <Link to="/ask" search={{ entryId: confirmed.entryId }}>
+                <Button className="shrink-0">
+                  <MessageSquare className="mr-2 h-4 w-4" /> {t(lang, "ask_clearport")}
+                </Button>
+              </Link>
+            </Card>
           </div>
-          <Link to="/ask" search={{ entryId: confirmed.entryId }}>
-            <Button className="shrink-0">
-              <MessageSquare className="mr-2 h-4 w-4" /> {t(lang, "ask_clearport")}
-            </Button>
-          </Link>
-        </Card>
+        )}
       </section>
 
       <p className="text-xs text-muted-foreground">

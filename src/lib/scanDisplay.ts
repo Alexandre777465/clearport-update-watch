@@ -199,6 +199,113 @@ export function computeKnownTariffTotal(rows: CostRow[]): { knownPct: number; ha
   return { knownPct, hasUnknown };
 }
 
+// ── MPF / HMF ────────────────────────────────────────────────────────────────
+
+const MPF_RATE_PCT = 0.3464;
+const MPF_MIN_USD = 31.67;
+const MPF_MAX_USD = 614.35;
+const HMF_RATE_PCT = 0.125;
+
+function fmtUsd(n: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency", currency: "USD",
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).format(n);
+}
+
+export function calculateMpf(customsValueUsd: number): { amount: number; basisText: string } {
+  const raw = (customsValueUsd * MPF_RATE_PCT) / 100;
+  const amount = Math.min(Math.max(raw, MPF_MIN_USD), MPF_MAX_USD);
+  const capped =
+    raw < MPF_MIN_USD ? " (minimum applied)" : raw > MPF_MAX_USD ? " (maximum applied)" : "";
+  return { amount, basisText: `${fmtUsd(customsValueUsd)} × ${MPF_RATE_PCT}% = ${fmtUsd(raw)}${capped}` };
+}
+
+export function calculateHmf(customsValueUsd: number): { amount: number; basisText: string } {
+  const amount = (customsValueUsd * HMF_RATE_PCT) / 100;
+  return { amount, basisText: `${fmtUsd(customsValueUsd)} × ${HMF_RATE_PCT}%` };
+}
+
+// ── Enhanced cost rows (dollar amounts + MPF/HMF) ────────────────────────────
+
+export interface CostRowV2 {
+  label: string;
+  rateText: string | null;
+  ratePct: number | null;
+  dollarText: string | null;
+  calcBasis: string;
+  status: CoverageStatus;
+  answer: string;
+  coverageItem: CoverageItem | null;
+}
+
+export function buildEnhancedCostRows(
+  scan: ProductRiskScan,
+  lang: Lang,
+  customsValueUsd?: number,
+): CostRowV2[] {
+  const base = buildCostRows(scan, lang);
+  const result: CostRowV2[] = base.map((r) => {
+    const dollarAmount =
+      r.ratePct != null && customsValueUsd != null
+        ? (r.ratePct / 100) * customsValueUsd
+        : null;
+    return {
+      label: r.label,
+      rateText: r.rateText,
+      ratePct: r.ratePct,
+      dollarText: dollarAmount != null ? fmtUsd(dollarAmount) : null,
+      calcBasis:
+        r.ratePct != null && customsValueUsd != null
+          ? `${fmtUsd(customsValueUsd)} × ${r.ratePct}%`
+          : r.ratePct != null
+            ? `${r.ratePct}% of customs value`
+            : "",
+      status: r.status,
+      answer: r.answer,
+      coverageItem: r.coverageItem,
+    };
+  });
+
+  if (customsValueUsd != null) {
+    const mpf = calculateMpf(customsValueUsd);
+    result.push({
+      label: "Merchandise Processing Fee (MPF)",
+      rateText: `${MPF_RATE_PCT}%`,
+      ratePct: MPF_RATE_PCT,
+      dollarText: fmtUsd(mpf.amount),
+      calcBasis: mpf.basisText,
+      status: "verified_applicable",
+      answer: fmtUsd(mpf.amount),
+      coverageItem: null,
+    });
+  } else {
+    result.push({
+      label: "Merchandise Processing Fee (MPF)",
+      rateText: `${MPF_RATE_PCT}%`,
+      ratePct: null,
+      dollarText: null,
+      calcBasis: `${MPF_RATE_PCT}% of customs value, min $${MPF_MIN_USD}, max $${MPF_MAX_USD}`,
+      status: "insufficient_info",
+      answer: "Cannot calculate — customs value not provided",
+      coverageItem: null,
+    });
+  }
+
+  result.push({
+    label: "Harbor Maintenance Fee (HMF)",
+    rateText: `${HMF_RATE_PCT}%`,
+    ratePct: null,
+    dollarText: null,
+    calcBasis: `${HMF_RATE_PCT}% of cargo value — ocean imports only`,
+    status: "insufficient_info",
+    answer: "Cannot determine — missing: shipping method (ocean, air, or land)",
+    coverageItem: null,
+  });
+
+  return result;
+}
+
 export function collectMissingFacts(scan: ProductRiskScan): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
