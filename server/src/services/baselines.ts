@@ -70,6 +70,7 @@ export interface BaselineResult {
 export async function evaluateBaselines(
   entry: WatchlistEntry,
   estimatedValueUsd?: number,
+  knownFacts: Record<string, string> = {},
 ): Promise<BaselineResult> {
   const normalizedHts = normalizeHts(entry.hts_code ?? '');
 
@@ -132,7 +133,7 @@ export async function evaluateBaselines(
     },
     originCountry: entry.origin_country,
     importDate: today,
-    knownFacts: {},
+    knownFacts,
   };
   const moduleResult = evaluateAllModules(moduleInput);
 

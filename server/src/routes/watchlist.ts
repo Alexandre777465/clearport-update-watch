@@ -52,6 +52,8 @@ const watchlistSchema = z.object({
   sold_on_amazon: z.boolean().default(false),
   sold_on_tiktok: z.boolean().default(false),
   sold_in_eu: z.boolean().default(false),
+  // User answers from the dynamic clarification step (module-specific questions).
+  known_facts: z.record(z.string(), z.string()).optional(),
 });
 
 // POST /api/public/watchlist
@@ -138,6 +140,7 @@ router.post('/', async (req, res) => {
     transport_mode: data.transport_mode,
     manufacturer_name: data.manufacturer_name?.trim(),
     exporter_name: data.exporter_name?.trim(),
+    known_facts: data.known_facts,
   });
   // Confirmation email (no-op unless Resend + ENABLE_EMAIL_ALERTS are configured).
   void sendWatchlistConfirmation(entry as any);
@@ -160,11 +163,12 @@ async function runScanInBackground(
     transport_mode?: string;
     manufacturer_name?: string;
     exporter_name?: string;
+    known_facts?: Record<string, string>;
   },
 ): Promise<void> {
   try {
     // Deterministic, source-backed baselines first (USITC HTS + curated registry + AD/CVD).
-    const baselineResult = await evaluateBaselines(entry, estimatedValueUsd).catch(
+    const baselineResult = await evaluateBaselines(entry, estimatedValueUsd, extra?.known_facts ?? {}).catch(
       () => ({ categories: [] as any[], coverage: [] as any[], missingFacts: [] as string[], moduleDocSpecs: [] as any[], moduleQuestions: [] as any[] }),
     );
 

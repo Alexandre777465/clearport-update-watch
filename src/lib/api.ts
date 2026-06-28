@@ -438,6 +438,7 @@ export async function submitWatchlistEntry(data: {
   manufacturer_name?: string;
   exporter_name?: string;
   language?: "en" | "zh";
+  known_facts?: Record<string, string>;
 } & Partial<ProductAttributes>): Promise<{
   id: string;
   preview: WatchlistPreviewDoc[];

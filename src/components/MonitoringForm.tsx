@@ -3,7 +3,7 @@
  * Used on the homepage (index.tsx) and /onboarding.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,54 +31,13 @@ import {
   AlertTriangle, DollarSign, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  getQuestionsForProduct,
+  answersToAttrs,
+  type ProductQuestion,
+} from "@/lib/productQuestions";
 
-// ── Clarification facts (collected before scan for decisive scope analysis) ───
-
-interface BrakeDrumFacts {
-  inside_diameter: string;   // "14.75"|"15"|"15.5"|"16"|"16.5"|"other"|"unknown"
-  weight: string;            // "over_50"|"50_or_under"|"unknown"
-  material: string;          // "grey_cast_iron"|"other"|"unknown"
-  construction: string;      // "non_composite"|"composite"|"unknown"
-  vehicle_type: string;      // "passenger"|"heavy_truck"|"unknown"
-  brake_system: string;      // "hydraulic"|"air"|"unknown"
-  oe_or_aftermarket: string; // "oe"|"aftermarket"|"unknown"
-  manufacturer_name: string;
-  exporter_name: string;
-}
-
-const DEFAULT_BRAKE_FACTS: BrakeDrumFacts = {
-  inside_diameter: "unknown",
-  weight: "unknown",
-  material: "unknown",
-  construction: "unknown",
-  vehicle_type: "unknown",
-  brake_system: "unknown",
-  oe_or_aftermarket: "unknown",
-  manufacturer_name: "",
-  exporter_name: "",
-};
-
-function needsClarificationQuestions(form: { htsCode: string; productName: string; description: string }): boolean {
-  const hts = form.htsCode.replace(/[^0-9]/g, "");
-  if (hts.startsWith("8708")) return true;
-  const text = `${form.productName} ${form.description}`.toLowerCase();
-  return /brake\s*drum/.test(text);
-}
-
-function appendClarificationFacts(originalDesc: string, facts: BrakeDrumFacts): string {
-  const lines: string[] = [];
-  if (facts.inside_diameter !== "unknown") lines.push(`Inside diameter: ${facts.inside_diameter} in`);
-  if (facts.weight !== "unknown") lines.push(`Weight: ${facts.weight === "over_50" ? "over 50 lbs" : "50 lbs or less"}`);
-  if (facts.material !== "unknown") lines.push(`Material: ${facts.material === "grey_cast_iron" ? "grey cast iron" : "other material"}`);
-  if (facts.construction !== "unknown") lines.push(`Construction: ${facts.construction === "non_composite" ? "non-composite" : "composite"}`);
-  if (facts.vehicle_type !== "unknown") lines.push(`Vehicle type: ${facts.vehicle_type === "passenger" ? "passenger vehicle" : "medium/heavy commercial truck"}`);
-  if (facts.brake_system !== "unknown") lines.push(`Brake system: ${facts.brake_system === "hydraulic" ? "hydraulic" : "air brakes"}`);
-  if (facts.oe_or_aftermarket !== "unknown") lines.push(`OEM/aftermarket: ${facts.oe_or_aftermarket}`);
-  if (facts.manufacturer_name.trim()) lines.push(`Manufacturer: ${facts.manufacturer_name.trim()}`);
-  if (facts.exporter_name.trim()) lines.push(`Exporter: ${facts.exporter_name.trim()}`);
-  if (lines.length === 0) return originalDesc;
-  return `${originalDesc}\n\n--- Product specifications ---\n${lines.join("\n")}`;
-}
+// No static clarification facts — questions are driven by detectModules().
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -377,20 +336,8 @@ function generateMockRiskScan(
   };
 }
 
-// ── Attribute toggle ──────────────────────────────────────────────────────────
-
-const ATTR_QUESTIONS: Array<{ key: keyof ProductAttributes; labelKey: DictKey }> = [
-  { key: "is_children",    labelKey: "attr_children" },
-  { key: "has_battery",    labelKey: "attr_battery" },
-  { key: "is_electronic",  labelKey: "attr_electronic" },
-  { key: "is_textile",     labelKey: "attr_textile" },
-  { key: "is_cosmetic",    labelKey: "attr_cosmetic" },
-  { key: "is_food_contact",labelKey: "attr_food_contact" },
-  { key: "is_supplement",  labelKey: "attr_supplement" },
-  { key: "sold_on_amazon", labelKey: "attr_amazon" },
-  { key: "sold_on_tiktok", labelKey: "attr_tiktok" },
-  { key: "sold_in_eu",     labelKey: "attr_eu" },
-];
+// Static attr questions removed — product attributes are inferred from
+// dynamic module questions and the inferAttributes() keyword matcher.
 
 // ── Attribute inference ───────────────────────────────────────────────────────
 // Conservative keyword map: infers obvious product attributes from the name and
@@ -433,21 +380,29 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     Array<{ key: keyof ProductAttributes; labelKey: DictKey }> | null
   >(null);
   const [inferredAccept, setInferredAccept] = useState<Record<string, boolean>>({});
-  const [brakeFacts, setBrakeFacts] = useState<BrakeDrumFacts>(DEFAULT_BRAKE_FACTS);
+  // Dynamic question state
   const [showClarification, setShowClarification] = useState(false);
-  // Attrs to use when clarification is complete
-  const [pendingAttrs, setPendingAttrs] = useState<ProductAttributes | null>(null);
-  // Async-scan failure state + the attributes to retry with.
+  const [knownFacts, setKnownFacts] = useState<Record<string, string>>({});
+  // Async-scan failure state + the knownFacts to retry with.
   const [scanError, setScanError] = useState<string | null>(null);
-  const [retryAttrs, setRetryAttrs] = useState<ProductAttributes | null>(null);
+  const [retryKnownFacts, setRetryKnownFacts] = useState<Record<string, string> | null>(null);
+
+  // Detect which regulatory modules apply as the user types — drives question list.
+  const dynamicQuestions = useMemo(
+    () =>
+      getQuestionsForProduct(
+        form.htsCode.replace(/[^0-9]/g, ""),
+        `${form.productName} ${form.description}`,
+      ),
+    [form.htsCode, form.productName, form.description],
+  );
 
   const set =
     (field: keyof FormState) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((f) => ({ ...f, [field]: e.target.value }));
 
-  const toggleAttr = (key: keyof ProductAttributes) =>
-    setAttrs((a) => ({ ...a, [key]: !a[key] }));
+  // toggleAttr kept for potential future use but not exposed in UI.
 
   const validate = (): boolean => {
     const errs: Partial<FormState> = {};
@@ -462,24 +417,19 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   };
 
   // Runs the save (fast) then polls for the async scan result.
-  const runScan = async (finalAttrs: ProductAttributes, clarificationFacts?: BrakeDrumFacts) => {
+  const runScan = async (finalAttrs: ProductAttributes, facts: Record<string, string> = {}) => {
     setAttrs(finalAttrs);
-    setRetryAttrs(finalAttrs);
+    setRetryKnownFacts(facts);
     setPendingInferred(null);
     setShowClarification(false);
-    setPendingAttrs(null);
     setScanError(null);
     setLoadingStage("saving");
-
-    const enrichedDesc = clarificationFacts
-      ? appendClarificationFacts(form.description.trim(), clarificationFacts)
-      : form.description.trim();
 
     try {
       const result = await submitWatchlistEntry({
         email: form.email.trim(),
         product_name: form.productName.trim(),
-        product_description: enrichedDesc || undefined,
+        product_description: form.description.trim() || undefined,
         hts_code: form.htsCode.trim() || undefined,
         origin_country: form.originCountry.trim() || "China",
         destination_country: form.destination.trim() || "United States",
@@ -491,6 +441,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         manufacturer_name: form.manufacturerName.trim() || undefined,
         exporter_name: form.exporterName.trim() || undefined,
         language: getLang(),
+        known_facts: Object.keys(facts).length > 0 ? facts : undefined,
         ...finalAttrs,
       });
 
@@ -552,8 +503,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     e.preventDefault();
     if (!validate()) return;
 
-    // Infer obvious attributes the user did not select. If any conflict with an
-    // unchecked box, pause and ask the user to confirm before scanning.
+    // Infer obvious attributes the user did not select.
     const missed = inferAttributes(form.productName, form.description).filter(
       (r) => !attrs[r.key],
     );
@@ -563,8 +513,9 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
       return;
     }
 
-    if (needsClarificationQuestions(form)) {
-      setPendingAttrs(attrs);
+    // Show dynamic clarification questions if any modules are detected.
+    if (dynamicQuestions.length > 0) {
+      setKnownFacts({});
       setShowClarification(true);
       return;
     }
@@ -588,8 +539,8 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           <p className="mt-2 text-sm text-muted-foreground">{scanError}</p>
           <div className="mt-5 flex justify-center gap-2">
             <Button
-              onClick={() => retryAttrs && void runScan(retryAttrs)}
-              disabled={!retryAttrs}
+              onClick={() => void runScan(attrs, retryKnownFacts ?? {})}
+              disabled={!retryKnownFacts}
             >
               {t(lang, "btn_try_again")}
             </Button>
@@ -602,14 +553,16 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     );
   }
 
-  if (showClarification && pendingAttrs) {
+  if (showClarification) {
+    const mergedAttrs = { ...attrs, ...answersToAttrs(knownFacts) };
     return (
       <div className="mx-auto max-w-xl">
-        <ClarificationStep
-          facts={brakeFacts}
-          onChange={setBrakeFacts}
-          onContinue={() => void runScan(pendingAttrs, brakeFacts)}
-          onSkip={() => void runScan(pendingAttrs)}
+        <DynamicClarificationStep
+          questions={dynamicQuestions}
+          answers={knownFacts}
+          onChange={setKnownFacts}
+          onContinue={() => void runScan(mergedAttrs, knownFacts)}
+          onSkip={() => void runScan(attrs)}
         />
       </div>
     );
@@ -621,10 +574,17 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
       for (const item of pendingInferred) {
         if (inferredAccept[item.key]) merged[item.key] = true;
       }
-      if (needsClarificationQuestions(form)) {
-        setPendingAttrs(merged);
+      setPendingInferred(null);
+      setAttrs(merged);
+      // If dynamic questions apply, show them; otherwise run the scan immediately.
+      const qs = getQuestionsForProduct(
+        form.htsCode.replace(/[^0-9]/g, ""),
+        `${form.productName} ${form.description}`,
+        merged,
+      );
+      if (qs.length > 0) {
+        setKnownFacts({});
         setShowClarification(true);
-        setPendingInferred(null);
         return;
       }
       void runScan(merged);
@@ -694,7 +654,6 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   }
 
   const Heading = headingAs;
-  const activeAttrs = Object.values(attrs).filter(Boolean).length;
 
   return (
     <div>
@@ -917,44 +876,20 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
             </div>
           </div>
 
-          {/* Product attribute questions */}
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <Label className="text-sm">
-                {t(lang, "form_details")}{" "}
-                <span className="text-xs font-normal text-muted-foreground">
-                  — {t(lang, "form_check_all")}
-                </span>
-              </Label>
-              {activeAttrs > 0 && (
-                <Badge variant="outline" className="text-xs">
-                  {activeAttrs} {t(lang, "form_selected")}
-                </Badge>
-              )}
+          {/* Detected regulatory modules hint */}
+          {dynamicQuestions.length > 0 && (
+            <div className="rounded-md border border-primary/20 bg-primary/5 px-4 py-3">
+              <p className="text-xs font-medium text-foreground">
+                <ScanSearch className="mr-1.5 inline h-3.5 w-3.5 text-primary" />
+                ClearPort detected regulatory requirements — you'll answer a few specific questions on the next screen.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {Array.from(new Set(dynamicQuestions.map((q) => q.module)))
+                  .map((m) => MODULE_LABELS[m])
+                  .join(" · ")}
+              </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {ATTR_QUESTIONS.map(({ key, labelKey }) => {
-                const checked = attrs[key];
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => toggleAttr(key)}
-                    className={`rounded-md border px-3 py-2 text-left text-xs transition-colors ${
-                      checked
-                        ? "border-primary bg-primary/5 text-primary font-medium"
-                        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                    }`}
-                  >
-                    {checked ? "✓ " : ""}{t(lang, labelKey)}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {t(lang, "form_details_help")}
-            </p>
-          </div>
+          )}
 
           <Button type="submit" size="lg" className="w-full">
             <ScanSearch className="mr-2 h-4 w-4" />
@@ -1447,147 +1382,112 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
   );
 }
 
-// ── Clarification step ────────────────────────────────────────────────────────
+// ── Module display labels ─────────────────────────────────────────────────────
 
-function ClarificationStep({
-  facts,
+const MODULE_LABELS: Record<string, string> = {
+  automotive: "Automotive / NHTSA",
+  electronics: "Electronics / FCC",
+  batteries: "Batteries / DOT-PHMSA",
+  childrens: "Children's Products / CPSC",
+  textiles: "Textiles / FTC",
+  cosmetics: "Cosmetics / FDA",
+  food: "Food / FDA-FSIS",
+  medical_devices: "Medical Devices / FDA",
+  chemicals: "Chemicals / EPA",
+  furniture: "Furniture / EPA TSCA",
+};
+
+// ── Dynamic clarification step ────────────────────────────────────────────────
+
+function DynamicClarificationStep({
+  questions,
+  answers,
   onChange,
   onContinue,
   onSkip,
 }: {
-  facts: BrakeDrumFacts;
-  onChange: (f: BrakeDrumFacts) => void;
+  questions: ProductQuestion[];
+  answers: Record<string, string>;
+  onChange: (a: Record<string, string>) => void;
   onContinue: () => void;
   onSkip: () => void;
 }) {
-  const set = (k: keyof BrakeDrumFacts, v: string) => onChange({ ...facts, [k]: v });
+  const setAnswer = (key: string, value: string) =>
+    onChange({ ...answers, [key]: value });
+
+  // Visible questions: include all questions, but hide conditional ones if the
+  // prerequisite answer is not set to one of the triggering values.
+  const visibleQuestions = questions.filter((q) => {
+    if (!q.showIf) return true;
+    const parentAnswer = answers[q.showIf.key];
+    return !!parentAnswer && q.showIf.values.includes(parentAnswer);
+  });
+
+  // Group visible questions by module for display.
+  const moduleGroups: Record<string, ProductQuestion[]> = {};
+  for (const q of visibleQuestions) {
+    if (!moduleGroups[q.module]) moduleGroups[q.module] = [];
+    moduleGroups[q.module].push(q);
+  }
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">A few more details</h2>
+        <h2 className="text-lg font-semibold">Product details for compliance screening</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Answer these to get a definitive scope determination for the AD/CVD orders and FMVSS requirements. Select "I don't know" to skip — ClearPort will state exactly what it cannot determine and why.
+          These questions let ClearPort determine exactly which regulations apply and what documentation you will need. Select "I don't know" to skip — ClearPort will state exactly what it cannot determine and why.
         </p>
       </div>
 
-      <Card className="divide-y overflow-hidden p-0">
-        {/* Inside diameter */}
-        <ClarificationRow label="Inside diameter (inches)">
-          <RadioGroup value={facts.inside_diameter} onValueChange={(v) => set("inside_diameter", v)} className="flex flex-wrap gap-2">
-            {["14.75", "15", "15.5", "16", "16.5", "other"].map((v) => (
-              <label key={v} className="flex items-center gap-1.5 cursor-pointer text-sm">
-                <RadioGroupItem value={v} /> {v}&quot;
-              </label>
+      {Object.entries(moduleGroups).map(([module, qs]) => (
+        <div key={module}>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {MODULE_LABELS[module] ?? module}
+          </p>
+          <Card className="divide-y overflow-hidden p-0">
+            {qs.map((q) => (
+              <div key={q.key} className="px-4 py-4 space-y-2">
+                <p className="text-sm font-medium text-foreground">{q.question}</p>
+                {q.helpText && (
+                  <p className="text-xs text-muted-foreground">{q.helpText}</p>
+                )}
+                <RadioGroup
+                  value={answers[q.key] ?? ""}
+                  onValueChange={(v) => setAnswer(q.key, v)}
+                  className="flex flex-col gap-1.5 pt-1"
+                >
+                  {q.options.map((opt) => (
+                    <label
+                      key={opt.value}
+                      className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
+                        answers[q.key] === opt.value
+                          ? "border-primary bg-primary/5 text-foreground"
+                          : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                      } ${opt.value === "unknown" ? "opacity-70" : ""}`}
+                    >
+                      <RadioGroupItem value={opt.value} className="shrink-0" />
+                      {opt.label}
+                    </label>
+                  ))}
+                </RadioGroup>
+              </div>
             ))}
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground">
-              <RadioGroupItem value="unknown" /> I don&apos;t know
-            </label>
-          </RadioGroup>
-        </ClarificationRow>
-
-        {/* Weight */}
-        <ClarificationRow label="Total weight">
-          <RadioGroup value={facts.weight} onValueChange={(v) => set("weight", v)} className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="over_50" /> More than 50 lbs</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="50_or_under" /> 50 lbs or less</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
-          </RadioGroup>
-        </ClarificationRow>
-
-        {/* Material */}
-        <ClarificationRow label="Material">
-          <RadioGroup value={facts.material} onValueChange={(v) => set("material", v)} className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="grey_cast_iron" /> Grey cast iron</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="other" /> Other material</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
-          </RadioGroup>
-        </ClarificationRow>
-
-        {/* Construction */}
-        <ClarificationRow label="Construction">
-          <RadioGroup value={facts.construction} onValueChange={(v) => set("construction", v)} className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="non_composite" /> Non-composite</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="composite" /> Composite (&gt;38% steel by weight)</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
-          </RadioGroup>
-        </ClarificationRow>
-
-        {/* Vehicle type */}
-        <ClarificationRow label="Vehicle type">
-          <RadioGroup value={facts.vehicle_type} onValueChange={(v) => set("vehicle_type", v)} className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="passenger" /> Passenger vehicle / light truck / SUV</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="heavy_truck" /> Medium/heavy commercial truck or trailer</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
-          </RadioGroup>
-        </ClarificationRow>
-
-        {/* Brake system */}
-        <ClarificationRow label="Brake system">
-          <RadioGroup value={facts.brake_system} onValueChange={(v) => set("brake_system", v)} className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="hydraulic" /> Hydraulic brakes</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="air" /> Air brakes</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
-          </RadioGroup>
-        </ClarificationRow>
-
-        {/* OEM/aftermarket */}
-        <ClarificationRow label="OEM or aftermarket">
-          <RadioGroup value={facts.oe_or_aftermarket} onValueChange={(v) => set("oe_or_aftermarket", v)} className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="oe" /> OEM (original equipment)</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm"><RadioGroupItem value="aftermarket" /> Aftermarket replacement</label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground"><RadioGroupItem value="unknown" /> I don&apos;t know</label>
-          </RadioGroup>
-        </ClarificationRow>
-
-        {/* Manufacturer */}
-        <ClarificationRow label="Manufacturer legal name">
-          <div className="space-y-1">
-            <Input
-              placeholder="e.g. Longhua Brake Parts Co., Ltd."
-              value={facts.manufacturer_name}
-              onChange={(e) => set("manufacturer_name", e.target.value)}
-              className="h-8 text-sm"
-            />
-            <p className="text-xs text-muted-foreground">Required to calculate the exact antidumping and countervailing duty rate.</p>
-          </div>
-        </ClarificationRow>
-
-        {/* Exporter */}
-        <ClarificationRow label="Exporter legal name">
-          <div className="space-y-1">
-            <Input
-              placeholder="e.g. Longhua Brake Parts Co., Ltd."
-              value={facts.exporter_name}
-              onChange={(e) => set("exporter_name", e.target.value)}
-              className="h-8 text-sm"
-            />
-            <p className="text-xs text-muted-foreground">Required to calculate the exact antidumping and countervailing duty rate.</p>
-          </div>
-        </ClarificationRow>
-      </Card>
+          </Card>
+        </div>
+      ))}
 
       <div className="flex gap-3">
         <Button onClick={onContinue} className="flex-1">
-          Continue →
+          Run compliance scan →
         </Button>
-        <Button variant="outline" onClick={onSkip}>
-          Skip all
+        <Button variant="outline" onClick={onSkip} className="shrink-0">
+          Skip
         </Button>
       </div>
 
       <p className="text-xs text-muted-foreground">
-        When "I don't know" is selected, ClearPort will state exactly what it cannot determine and why — it will not substitute vague language.
+        When "I don't know" is selected, ClearPort will state exactly what it cannot determine and why — it will never substitute vague language.
       </p>
-    </div>
-  );
-}
-
-function ClarificationRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="px-4 py-3 space-y-2">
-      <p className="text-sm font-medium">{label}</p>
-      {children}
     </div>
   );
 }
