@@ -95,6 +95,12 @@ export async function generateRiskScan(
 
   const isChina = entry.origin_country.toLowerCase().includes('china');
   const documents = opts.documents ?? [];
+  // Only prompt for AD/CVD if a specific active order was already found by the
+  // deterministic screener. Generic "China might have AD/CVD" language is never
+  // appropriate — it must be backed by a specific order in our database.
+  const hasSpecificAdcvdOrder = (opts.baselineCategories ?? []).some(
+    (c) => c.id?.startsWith('adcvd_') && c.level !== 'N/A',
+  );
 
   const documentBlock = documents.length
     ? documents
@@ -184,7 +190,7 @@ RISK CATEGORIES to include (only include what is relevant — skip truly inappli
 1. Tariff Risk — always include
 2. HTS Classification Risk — always include
 3. Section 301 China Tariff — ${isChina ? 'MUST include' : 'skip (not China origin)'}
-4. AD/CVD Risk — include if product type commonly faces antidumping orders
+4. AD/CVD Risk — ${hasSpecificAdcvdOrder ? 'MUST include — the baseline engine found a specific active AD/CVD order for this product' : 'DO NOT INCLUDE — no specific active AD/CVD order was identified for this product. Never add a generic AD/CVD warning for Chinese goods without a specific order. If no order was found, do not mention antidumping or countervailing duty at all.'}
 5. Customs Documentation — always include
 6. Product Safety / CPSC — include for consumer products
 7. FDA Requirements — ${entry.is_food_contact || entry.is_cosmetic || entry.is_supplement ? 'MUST include' : 'include only if clearly relevant'}
@@ -193,6 +199,12 @@ RISK CATEGORIES to include (only include what is relevant — skip truly inappli
 10. Textile / FTC Labeling — ${entry.is_textile ? 'MUST include' : 'skip'}
 11. Marketplace Requirements — ${entry.sold_on_amazon || entry.sold_on_tiktok ? 'MUST include' : 'skip'}
 12. EU Requirements — ${entry.sold_in_eu ? 'MUST include' : 'skip'}
+
+TRANSPORT MODE RULES (critical — violations produce incorrect checklists):
+- Selected transport mode: ${opts.transportMode ?? 'not specified'}
+- IATA air rules (state of charge, Section II limits) apply ONLY when transport mode is 'air'. Do NOT include IATA requirements when mode is ocean, truck, or rail.
+- IMDG Code requirements apply to ocean shipments. Do not apply IATA rules to ocean shipments.
+- If mode is 'ocean', note ocean/IMDG requirements for hazmat; return 'Not applicable — ocean shipment' for any air-only rule.
 
 DOCUMENT CHECKLIST must always include: Commercial Invoice, Packing List, Country of Origin Declaration.
 Add specific docs based on product type: UN 38.3 for battery, CPSIA/CPC for children, food-contact declaration for food-contact, FCC for electronics, fiber content cert for textiles.

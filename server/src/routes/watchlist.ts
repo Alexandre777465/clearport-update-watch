@@ -168,7 +168,12 @@ async function runScanInBackground(
 ): Promise<void> {
   try {
     // Deterministic, source-backed baselines first (USITC HTS + curated registry + AD/CVD).
-    const baselineResult = await evaluateBaselines(entry, estimatedValueUsd, extra?.known_facts ?? {}).catch(
+    const baselineResult = await evaluateBaselines(
+      entry,
+      estimatedValueUsd,
+      extra?.known_facts ?? {},
+      extra?.transport_mode as 'ocean' | 'air' | 'truck' | 'rail' | undefined,
+    ).catch(
       () => ({ categories: [] as any[], coverage: [] as any[], missingFacts: [] as string[], moduleDocSpecs: [] as any[], moduleQuestions: [] as any[] }),
     );
 

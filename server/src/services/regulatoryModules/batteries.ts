@@ -115,6 +115,10 @@ export const batteriesModule: RegulatoryModule = {
 
     const batteryType = knownFacts['battery_type'] as BatteryType;
     const batteryConfig = knownFacts['battery_configuration'] as BatteryConfig;
+    const transportMode = input.transportMode;
+    // Air-only rules (IATA DGR) must not appear when the user has selected a
+    // non-air transport mode. If mode is unknown, we show the rule conservatively.
+    const isAirMode = !transportMode || transportMode === 'air';
 
     // ── UN 38.3 Testing ───────────────────────────────────────────────────────
 
@@ -134,8 +138,8 @@ export const batteriesModule: RegulatoryModule = {
         document: 'UN 38.3 test summary',
         owner: 'supplier',
         responsible_party: 'supplier',
-        reason: 'Lithium cells and batteries must have passed UN 38.3 testing; the test summary must accompany the shipment and be available for inspection by authorities and carriers.',
-        doc_status: 'required_to_clear',
+        reason: 'UN 38.3 test summary must be available throughout the supply chain and provided upon request to carriers and competent authorities. It is not a CBP customs-clearance document but is required by PHMSA and IMDG/IATA during transport.',
+        doc_status: 'usually_requested',
         finding_id: 'phmsa_un383',
       });
 
@@ -309,64 +313,72 @@ export const batteriesModule: RegulatoryModule = {
       official_url: 'https://www.phmsa.dot.gov/hazmat/lithium-batteries',
     });
 
-    // Emit DOT doc specs for lithium batteries only
+    // Emit DOT doc specs for lithium batteries only.
+    // SDS is required by carriers but is not a CBP customs clearance document.
+    // Shipping papers (hazmat declaration) ARE required for hazmat transport.
     if (isLithium(batteryType)) {
       docSpecs.push({
         document: 'Safety Data Sheet (SDS)',
         owner: 'supplier',
         responsible_party: 'supplier',
-        reason: 'An SDS is required for lithium batteries transported as Class 9 hazardous materials under 49 CFR 173.185.',
-        doc_status: 'required_to_clear',
+        reason: 'SDS is required by hazmat carriers under 49 CFR 172.604 and must accompany lithium battery shipments. It is a transport requirement, not a CBP customs-clearance document.',
+        doc_status: 'usually_requested',
         finding_id: 'phmsa_dot_class',
       });
 
+      // Shipping papers are required for hazmat transport but only if the
+      // shipment doesn't qualify for the small quantity exception.
       docSpecs.push({
-        document: 'Lithium battery shipping declaration / hazmat shipping paper (49 CFR 173.185)',
+        document: 'Hazmat shipping paper / lithium battery mark (49 CFR 173.185)',
         owner: 'importer_broker',
         responsible_party: 'customs_broker',
-        reason: 'Hazmat shipping papers identifying the UN number, proper shipping name, hazard class, and packing group are required for all lithium battery shipments under 49 CFR 173.185.',
+        reason: 'Hazmat shipping papers identifying the UN number, proper shipping name, Class 9, and packing group are required for lithium battery transport under 49 CFR 173.185, unless the small-quantity exception applies. The lithium battery mark is required on the outer packaging.',
         doc_status: 'required_to_clear',
         finding_id: 'phmsa_dot_class',
       });
     }
 
-    // ── IATA State of Charge (air transport) ──────────────────────────────────
+    // ── IATA State of Charge — air transport only ─────────────────────────────
+    // This requirement is air-only (IATA DGR). Never show for ocean/truck/rail.
 
-    if (isLithium(batteryType)) {
-      findings.push({
-        id: 'phmsa_soc_air',
-        category: 'IATA DGR — State of Charge for Air Transport',
-        level: 'Medium',
-        explanation: 'IATA Dangerous Goods Regulations require lithium-ion batteries to be shipped at a state of charge not exceeding 30% when transported as loose cells or batteries by air. This requirement aims to reduce the risk of thermal runaway events during air cargo operations.',
-        action: 'Verify current IATA DGR requirements with your freight forwarder. If shipping loose lithium batteries by air, ensure the state of charge does not exceed 30% unless an applicable IATA DGR exception applies (e.g., prototype or low-production batteries under Special Provision A88).',
-        verification_status: 'official_unconfirmed',
-        applicability_conditions: 'Lithium battery (ion or metal) shipped by air; state-of-charge limit applies primarily to loose cells and batteries.',
-        source: IATA_SOURCE,
-      });
-
-    } else if (batteryType === 'lead_acid' || batteryType === 'other_chemistry') {
-      findings.push({
-        id: 'phmsa_soc_air',
-        category: 'IATA DGR — State of Charge for Air Transport',
-        level: 'N/A',
-        explanation: 'The IATA state-of-charge requirement applies only to lithium batteries. Non-lithium battery chemistries are not subject to this restriction.',
-        action: 'No state-of-charge action required for non-lithium batteries.',
-        verification_status: 'not_applicable',
-        source: IATA_SOURCE,
-      });
-
+    if (isAirMode) {
+      if (isLithium(batteryType)) {
+        findings.push({
+          id: 'phmsa_soc_air',
+          category: 'IATA DGR — State of Charge (Air Transport Only)',
+          level: 'Medium',
+          explanation: 'IATA Dangerous Goods Regulations require lithium-ion batteries to be shipped at a state of charge not exceeding 30% when transported as loose cells or batteries by air. This is an air-transport-only rule; it does not apply to ocean, truck, or rail shipments.',
+          action: 'If shipping by air: verify state-of-charge compliance with your freight forwarder. The 30% limit applies to loose lithium cells and batteries. Batteries installed in equipment have separate requirements under Section II exceptions.',
+          verification_status: 'official_unconfirmed',
+          applicability_conditions: 'Lithium battery (ion or metal) shipped by air.',
+          source: IATA_SOURCE,
+        });
+      } else if (!batteryType || batteryType === 'unknown') {
+        findings.push({
+          id: 'phmsa_soc_air',
+          category: 'IATA DGR — State of Charge (Air Transport Only)',
+          level: 'Low',
+          explanation: 'The IATA 30% state-of-charge requirement applies to lithium batteries shipped by air. Battery chemistry has not been confirmed. If the battery is lithium, verify this requirement applies before air shipment.',
+          action: 'Confirm battery chemistry. If lithium and shipping by air, verify state-of-charge compliance with your freight forwarder.',
+          verification_status: 'insufficient_info',
+          missing_info: 'Battery chemistry confirmation required to determine whether IATA state-of-charge rules apply.',
+          source: IATA_SOURCE,
+        });
+      }
+      // Non-lithium or non-air → no IATA finding needed
     } else {
-      // unknown chemistry
-      findings.push({
-        id: 'phmsa_soc_air',
-        category: 'IATA DGR — State of Charge for Air Transport',
-        level: 'Low',
-        explanation: 'The IATA 30% state-of-charge requirement applies to lithium batteries transported by air. Battery chemistry has not been confirmed, so applicability cannot be determined.',
-        action: 'Confirm battery chemistry. If lithium, verify state-of-charge compliance with your freight forwarder before air shipment.',
-        verification_status: 'insufficient_info',
-        missing_info: 'Battery chemistry confirmation required to determine whether IATA state-of-charge rules apply.',
-        source: IATA_SOURCE,
-      });
+      // Non-air mode confirmed — show as not applicable
+      if (isLithium(batteryType)) {
+        findings.push({
+          id: 'phmsa_soc_air',
+          category: 'IATA DGR — State of Charge (Air Transport Only)',
+          level: 'N/A',
+          explanation: `The IATA 30% state-of-charge requirement applies only to air shipments. This shipment is being transported by ${transportMode}, so IATA air-only rules do not apply. Ocean shipments of lithium batteries are governed by the IMDG Code instead.`,
+          action: 'No IATA state-of-charge action required. For ocean transport, consult the applicable IMDG Code provisions for lithium batteries.',
+          verification_status: 'not_applicable',
+          source: { ...IATA_SOURCE, title: 'IATA DGR State of Charge — Not Applicable (Non-Air Shipment)' },
+        });
+      }
     }
 
     return { findings, coverageDomains, docSpecs, questions };

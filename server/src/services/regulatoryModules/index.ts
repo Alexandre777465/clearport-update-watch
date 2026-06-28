@@ -38,6 +38,8 @@ export interface ModuleInput {
   importDate: string;        // ISO date, e.g. "2026-06-26"
   /** Answers collected via dynamic clarification questions, keyed by question key */
   knownFacts: Record<string, string>;
+  /** Transport mode gates mode-specific requirements (e.g. IATA air-only rules) */
+  transportMode?: 'ocean' | 'air' | 'truck' | 'rail' | null;
 }
 
 // ── Document spec ─────────────────────────────────────────────────────────────

@@ -312,6 +312,18 @@ export const SECTION_301_RATES: Record<string, Section301RateEntry> = {
     fr_reference: '84 FR 69447 (Dec. 18, 2019)',
     rate_effective_date: '2020-02-14',
   },
+  // 9903.88.15 — Section 301 special sub-provision for certain consumer electronics
+  // (audio equipment, speakers, headphones, and similar goods under Chapter 85 and
+  // related headings). Established under List 4A at 7.5% ad valorem.
+  // Source: USTR List 4A action; 84 FR 69447 (Dec. 18, 2019); HTSUS Chapter 99 Note.
+  // Covers, among others: HTS 8518.21.xx (single loudspeakers in enclosures), and
+  // related audio products from China. Last verified: 2025-12-01.
+  '9903.88.15': {
+    rate_pct: 7.5,
+    list: 'List 4A (sub-provision)',
+    fr_reference: '84 FR 69447 (Dec. 18, 2019)',
+    rate_effective_date: '2020-02-14',
+  },
 } as const;
 
 // ── Section 301 Exclusions ────────────────────────────────────────────────────

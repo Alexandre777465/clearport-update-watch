@@ -71,6 +71,7 @@ export async function evaluateBaselines(
   entry: WatchlistEntry,
   estimatedValueUsd?: number,
   knownFacts: Record<string, string> = {},
+  transportMode?: 'ocean' | 'air' | 'truck' | 'rail' | null,
 ): Promise<BaselineResult> {
   const normalizedHts = normalizeHts(entry.hts_code ?? '');
 
@@ -134,6 +135,7 @@ export async function evaluateBaselines(
     originCountry: entry.origin_country,
     importDate: today,
     knownFacts,
+    transportMode: transportMode ?? entry.transport_mode ?? null,
   };
   const moduleResult = evaluateAllModules(moduleInput);
 
@@ -314,6 +316,7 @@ export function assembleBaselines(
       let action: string;
       let status: 'verified_applicable' | 'official_unconfirmed' | 'not_applicable';
       let finalRate: number | null = null;
+      let financialImpact: string | undefined;
 
       if (excl?.excluded) {
         // A KNOWN ACTIVE exclusion covers this code on the import date.
@@ -328,6 +331,10 @@ export function assembleBaselines(
           : '';
         status = 'verified_applicable';
         finalRate = knownRate;
+        if (value != null) {
+          const s301Amt = (value * knownRate) / 100;
+          financialImpact = `$${s301Amt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on a $${value.toLocaleString('en-US')} shipment (${knownRate}% Section 301, ${rateEntry!.list})`;
+        }
         explanation = `HTS ${formatHts(hts.hts8!)} is classified under Section 301 ${hts.section301_ref} (${rateEntry!.list}), which imposes an additional ${knownRate}% on China-origin goods per ${rateEntry!.fr_reference}. No active USTR exclusion was found for this code as of ${SECTION_301_LAST_VERIFIED}.${verificationNote}`;
         action = `Budget +${knownRate}% Section 301 additional duty on top of the base MFN rate.`;
       } else {
@@ -348,6 +355,7 @@ export function assembleBaselines(
         verification_status: status,
         applicability_conditions: `China-origin goods classified under HTS ${formatHts(hts.hts8!)}.`,
         verified_rate_pct: finalRate,
+        financial_impact: financialImpact,
         source: {
           agency: 'USTR',
           name: 'Office of the United States Trade Representative',
@@ -358,6 +366,62 @@ export function assembleBaselines(
           last_verified_at: SECTION_301_LAST_VERIFIED,
           url: 'https://ustr.gov/issue-areas/enforcement/section-301-investigations',
           why_relevant: `USITC HTS official footnote cross-references China-origin goods under this heading to ${hts.section301_ref}.`,
+        },
+      });
+    }
+
+    // ── 2c. Merchandise Processing Fee (MPF) and Harbor Maintenance Fee (HMF) ──
+    // These fees apply to all formal entries (formal entry threshold: $2,500).
+    // MPF: 0.3464% of entered value, min $31.67 max $614.35 (19 U.S.C. 58c(a)(9)(A)).
+    // HMF: 0.125% of dutiable value for ocean shipments (26 U.S.C. 4461-4462).
+    // Both rates are set by statute; no rate change was published as of 2025-12-01.
+    if (value != null) {
+      const mpfPct = 0.3464;
+      const mpfRaw = (value * mpfPct) / 100;
+      const mpfAmt = Math.min(614.35, Math.max(31.67, mpfRaw));
+      const mpfFmt = mpfAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      out.push({
+        id: 'mpf',
+        category: 'Merchandise Processing Fee (MPF)',
+        level: 'Low',
+        explanation: `The Merchandise Processing Fee (MPF) is assessed on all formal CBP entries. The rate is 0.3464% of the entered value, subject to a minimum of $31.67 and a maximum of $614.35 per formal entry per HTS line (19 U.S.C. 58c(a)(9)(A)).`,
+        action: 'Include the MPF in your landed cost calculation. MPF is paid at time of entry.',
+        verification_status: 'verified_applicable',
+        applicability_conditions: 'All formal commercial entries into the United States (entered value above $2,500).',
+        verified_rate_pct: mpfPct,
+        financial_impact: `$${mpfFmt} on a $${value.toLocaleString('en-US')} shipment (0.3464%; min $31.67 / max $614.35 per 19 U.S.C. 58c(a)(9)(A))`,
+        source: {
+          agency: 'CBP',
+          name: 'U.S. Customs and Border Protection',
+          title: 'Merchandise Processing Fee — 19 U.S.C. 58c(a)(9)(A)',
+          cfr_citation: '19 U.S.C. 58c(a)(9)(A); 19 CFR 24.23',
+          last_verified_at: today,
+          url: 'https://www.cbp.gov/trade/programs-administration/fees/merchandise-processing-fee',
+          why_relevant: 'MPF applies to all formal CBP entries regardless of product type or origin.',
+        },
+      });
+
+      const hmfPct = 0.125;
+      const hmfAmt = (value * hmfPct) / 100;
+      const hmfFmt = hmfAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      out.push({
+        id: 'hmf',
+        category: 'Harbor Maintenance Fee (HMF)',
+        level: 'Low',
+        explanation: `The Harbor Maintenance Fee (HMF) is assessed at 0.125% of the dutiable value for commercial cargo shipped through U.S. ports (26 U.S.C. 4461-4462). HMF applies to ocean shipments entering through a U.S. port of entry; it does not apply to air or land-border shipments.`,
+        action: 'Include the HMF in your landed cost calculation if shipping by ocean. HMF is paid at time of entry.',
+        verification_status: 'verified_applicable',
+        applicability_conditions: 'Commercial cargo imported through a U.S. port via ocean carrier (26 U.S.C. 4461).',
+        verified_rate_pct: hmfPct,
+        financial_impact: `$${hmfFmt} on a $${value.toLocaleString('en-US')} shipment (0.125% per 26 U.S.C. 4461-4462)`,
+        source: {
+          agency: 'CBP',
+          name: 'U.S. Customs and Border Protection',
+          title: 'Harbor Maintenance Fee — 26 U.S.C. 4461',
+          cfr_citation: '26 U.S.C. 4461-4462; 19 CFR 24.24',
+          last_verified_at: today,
+          url: 'https://www.cbp.gov/trade/programs-administration/fees/harbor-maintenance-fee',
+          why_relevant: 'HMF applies to all ocean commercial cargo entering U.S. ports.',
         },
       });
     }

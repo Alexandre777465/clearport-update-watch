@@ -201,6 +201,9 @@ export interface WatchlistEntry {
   sold_on_amazon: boolean;
   sold_on_tiktok: boolean;
   sold_in_eu: boolean;
+  transport_mode?: 'ocean' | 'air' | 'truck' | 'rail' | null;
+  manufacturer_name?: string | null;
+  exporter_name?: string | null;
 }
 
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'N/A';

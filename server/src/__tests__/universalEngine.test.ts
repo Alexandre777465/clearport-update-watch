@@ -657,3 +657,214 @@ describe('generic_mechanical_part', () => {
     expect(active).toHaveLength(0);
   });
 });
+
+// ── Acceptance regression tests for correctness issues ────────────────────────
+// Reference: Issues identified in user acceptance test on 2026-06-28.
+// Covers: Section 301 rate table, FCC consolidation, transport mode gating,
+// AD/CVD gating, document deduplication.
+
+import {
+  SECTION_301_RATES,
+  checkSection301Exclusion,
+} from '../services/tariffRules';
+
+// ── Section 301 rate table ────────────────────────────────────────────────────
+describe('SECTION_301_RATES — rate table completeness', () => {
+  it('9903.88.15 is in the rate table at 7.5% (covers HTS 8518 audio speakers)', () => {
+    const entry = SECTION_301_RATES['9903.88.15'];
+    expect(entry).toBeDefined();
+    expect(entry?.rate_pct).toBe(7.5);
+  });
+
+  it('classic List 3 rate (9903.88.03) is 25%', () => {
+    expect(SECTION_301_RATES['9903.88.03']?.rate_pct).toBe(25);
+  });
+
+  it('List 4A (9903.88.04) is 7.5%', () => {
+    expect(SECTION_301_RATES['9903.88.04']?.rate_pct).toBe(7.5);
+  });
+
+  it('checkSection301Exclusion returns no exclusion for 8518210000 (no active exclusion in DB)', () => {
+    const result = checkSection301Exclusion('8518210000', '2026-06-28');
+    expect(result.excluded).toBe(false);
+    expect(result.exclusion).toBeNull();
+  });
+});
+
+// ── FCC: consolidated output for Bluetooth speaker ───────────────────────────
+describe('FCC module — Bluetooth speaker (has_wireless_tx confirmed)', () => {
+  const input: ModuleInput = {
+    htsDigits: '8518210000',
+    productText: 'portable bluetooth speaker audio',
+    attrs: { is_electronic: true },
+    originCountry: 'China',
+    importDate: '2026-06-28',
+    knownFacts: { has_wireless_tx: 'yes', product_function: 'audio_speaker' },
+  };
+
+  it('electronics module detects this product', () => {
+    const active = getActiveModules(input);
+    expect(active.map((m) => m.id)).toContain('electronics');
+  });
+
+  it('emits exactly ONE FCC-related finding (Equipment Authorization) not two', () => {
+    const result = evaluateAllModules(input);
+    const fccFindings = result.findings.filter((f) =>
+      f.id === 'fcc_equipment_authorization' || f.id === 'fcc_part15_sdoc',
+    );
+    // Should have fcc_equipment_authorization (verified_applicable) covering both.
+    // Must NOT have a conflicting fcc_part15_sdoc as insufficient_info alongside it.
+    const ea = fccFindings.find((f) => f.id === 'fcc_equipment_authorization');
+    expect(ea).toBeDefined();
+    expect(ea?.verification_status).toBe('verified_applicable');
+
+    const sdocConflict = fccFindings.find(
+      (f) => f.id === 'fcc_part15_sdoc' && f.verification_status === 'insufficient_info',
+    );
+    expect(sdocConflict).toBeUndefined();
+  });
+
+  it('emits exactly ONE FCC docSpec (combined FCC ID + Part 15 test report)', () => {
+    const result = evaluateAllModules(input);
+    const fccDocs = result.docSpecs.filter(
+      (d) =>
+        d.document.toLowerCase().includes('fcc') ||
+        d.document.toLowerCase().includes('sdoc') ||
+        d.document.toLowerCase().includes('part 15'),
+    );
+    // Must not be duplicated: only one FCC-related docSpec
+    expect(fccDocs.length).toBe(1);
+  });
+
+  it('passes structural assertions', () => {
+    assertStructural(evaluateAllModules(input));
+  });
+});
+
+// ── Batteries: ocean transport mode gates IATA air-only rules ─────────────────
+describe('batteries module — ocean transport mode', () => {
+  const baseInput: ModuleInput = {
+    htsDigits: '8518210000',
+    productText: 'portable bluetooth speaker lithium ion battery',
+    attrs: { has_battery: true },
+    originCountry: 'China',
+    importDate: '2026-06-28',
+    knownFacts: {
+      battery_type: 'lithium_ion',
+      battery_configuration: 'in_equipment',
+      battery_wh: '2_to_20wh',
+    },
+    transportMode: 'ocean',
+  };
+
+  it('IATA state-of-charge finding is not_applicable for ocean transport', () => {
+    const result = evaluateAllModules(baseInput);
+    const iatFinding = result.findings.find((f) => f.id === 'phmsa_soc_air');
+    // Should exist but be not_applicable, not a real requirement
+    expect(iatFinding?.verification_status).toBe('not_applicable');
+    expect(iatFinding?.level).toBe('N/A');
+  });
+
+  it('UN 3481 in-equipment finding is verified_applicable', () => {
+    const result = evaluateAllModules(baseInput);
+    const dotFinding = result.findings.find((f) => f.id === 'phmsa_dot_class');
+    expect(dotFinding).toBeDefined();
+    expect(dotFinding?.category).toMatch(/3481/);
+    expect(dotFinding?.verification_status).toBe('verified_applicable');
+  });
+
+  it('UN 38.3 docSpec is usually_requested (not required_to_clear)', () => {
+    const result = evaluateAllModules(baseInput);
+    const un383Doc = result.docSpecs.find((d) => d.document.toLowerCase().includes('un 38.3'));
+    expect(un383Doc).toBeDefined();
+    expect(un383Doc?.doc_status).toBe('usually_requested');
+  });
+
+  it('no SDS marked required_to_clear (it is a transport doc, not CBP clearance)', () => {
+    const result = evaluateAllModules(baseInput);
+    const sdsDoc = result.docSpecs.find((d) => d.document.toLowerCase().includes('safety data'));
+    if (sdsDoc) {
+      expect(sdsDoc.doc_status).not.toBe('required_to_clear');
+    }
+  });
+
+  it('passes structural assertions', () => {
+    assertStructural(evaluateAllModules(baseInput));
+  });
+});
+
+// ── Batteries: air transport shows IATA finding ───────────────────────────────
+describe('batteries module — air transport mode', () => {
+  const airInput: ModuleInput = {
+    htsDigits: '8518210000',
+    productText: 'portable bluetooth speaker lithium ion battery',
+    attrs: { has_battery: true },
+    originCountry: 'China',
+    importDate: '2026-06-28',
+    knownFacts: { battery_type: 'lithium_ion', battery_configuration: 'standalone_loose' },
+    transportMode: 'air',
+  };
+
+  it('IATA state-of-charge finding is official_unconfirmed for air transport', () => {
+    const result = evaluateAllModules(airInput);
+    const iatFinding = result.findings.find((f) => f.id === 'phmsa_soc_air');
+    expect(iatFinding?.verification_status).toBe('official_unconfirmed');
+    expect(iatFinding?.level).not.toBe('N/A');
+  });
+});
+
+// ── Bluetooth speaker — full acceptance test ───────────────────────────────────
+describe('bluetooth_speaker_acceptance — no AD/CVD, correct FCC, ocean gated', () => {
+  const input: ModuleInput = {
+    htsDigits: '8518210000',
+    productText: 'portable bluetooth speaker audio',
+    attrs: { is_electronic: true, has_battery: true },
+    originCountry: 'China',
+    importDate: '2026-06-28',
+    transportMode: 'ocean',
+    knownFacts: {
+      has_wireless_tx: 'yes',
+      product_function: 'audio_speaker',
+      battery_type: 'lithium_ion',
+      battery_configuration: 'in_equipment',
+      battery_wh: '2_to_20wh',
+    },
+  };
+
+  it('electronics and batteries modules both activate', () => {
+    const active = getActiveModules(input);
+    const ids = active.map((m) => m.id);
+    expect(ids).toContain('electronics');
+    expect(ids).toContain('batteries');
+  });
+
+  it('no duplicate document entries across electronics + batteries', () => {
+    const result = evaluateAllModules(input);
+    const docNames = result.docSpecs.map((d) => d.document.toLowerCase());
+    const dupes = docNames.filter((n, i) => docNames.indexOf(n) !== i);
+    expect(dupes).toHaveLength(0);
+  });
+
+  it('IATA finding is not_applicable (ocean transport)', () => {
+    const result = evaluateAllModules(input);
+    const iata = result.findings.find((f) => f.id === 'phmsa_soc_air');
+    expect(iata?.level).toBe('N/A');
+  });
+
+  it('FCC Equipment Authorization finding is verified_applicable (Bluetooth confirmed)', () => {
+    const result = evaluateAllModules(input);
+    const fcc = result.findings.find((f) => f.id === 'fcc_equipment_authorization');
+    expect(fcc?.verification_status).toBe('verified_applicable');
+    expect(fcc?.level).toBe('High');
+  });
+
+  it('UN 3481 in-equipment hazmat classification is present', () => {
+    const result = evaluateAllModules(input);
+    const dot = result.findings.find((f) => f.id === 'phmsa_dot_class');
+    expect(dot?.category).toMatch(/3481/i);
+  });
+
+  it('passes structural assertions', () => {
+    assertStructural(evaluateAllModules(input));
+  });
+});
