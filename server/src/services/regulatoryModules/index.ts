@@ -25,8 +25,11 @@
 import type { RiskCategory, CoverageItem } from '../../types';
 import type { DocItemStatus, ResponsibleParty } from '../../types';
 import type { CategoryId, ProductBooleans } from '../categoryDetector';
+import { extractFacts, activateFromFacts } from '../factEngine';
+import { detectCategories } from '../categoryDetector';
 
 export type { CategoryId, ProductBooleans };
+export { extractFacts, activateFromFacts, detectCategories };
 
 // ── Module input ──────────────────────────────────────────────────────────────
 
@@ -110,7 +113,10 @@ export const ALL_MODULES: RegulatoryModule[] = [
 ];
 
 export function getActiveModules(input: Omit<ModuleInput, 'importDate' | 'knownFacts'>): RegulatoryModule[] {
-  return ALL_MODULES.filter((m) => m.detects(input));
+  // Use factEngine-based detection so knownFacts can deactivate modules even
+  // before the full evaluate() call.
+  const activeCategories = detectCategories(input.htsDigits, input.productText, input.attrs);
+  return ALL_MODULES.filter((m) => activeCategories.has(m.id as CategoryId));
 }
 
 export function evaluateAllModules(input: ModuleInput): ModuleResult {
@@ -119,8 +125,18 @@ export function evaluateAllModules(input: ModuleInput): ModuleResult {
   const docSpecs: DocSpec[] = [];
   const questions: DynamicQuestion[] = [];
 
+  // Re-derive facts from both the product text AND the structured knownFacts.
+  // This ensures that a "No battery" answer deactivates the batteries module even
+  // if the text contained battery keywords — the answer has the highest precedence.
+  const activeCategories = detectCategories(
+    input.htsDigits,
+    input.productText,
+    input.attrs,
+    input.knownFacts,
+  );
+
   for (const mod of ALL_MODULES) {
-    if (!mod.detects(input)) continue;
+    if (!activeCategories.has(mod.id as CategoryId)) continue;
     const result = mod.evaluate(input);
     findings.push(...result.findings);
     coverageDomains.push(...result.coverageDomains);
