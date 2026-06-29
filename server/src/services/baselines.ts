@@ -108,7 +108,7 @@ export async function evaluateBaselines(
   const value = typeof estimatedValueUsd === 'number' && estimatedValueUsd > 0 ? estimatedValueUsd : null;
   const today = new Date().toISOString().slice(0, 10);
 
-  const baseCategories = assembleBaselines(entry, value, hts, regRows, today);
+  const baseCategories = assembleBaselines(entry, value, hts, regRows, today, knownFacts);
   const adcvdCategories = adcvdFindingsToCategories(adcvdFindings, today);
   const baselinePlusMfn = [...baseCategories, ...adcvdCategories];
 
@@ -176,6 +176,7 @@ export function assembleBaselines(
   hts: HtsLookupResult | null,
   regRows: RegulatoryBaselineRow[],
   today: string = new Date().toISOString().slice(0, 10),
+  knownFacts: Record<string, string> = {},
 ): RiskCategory[] {
   const out: RiskCategory[] = [];
 
@@ -484,8 +485,21 @@ export function assembleBaselines(
     // ── 2d. Section 122 temporary import surcharge (10%, Feb 24–Jul 23, 2026) ──
     // Presidential authority under 19 U.S.C. 2132 to impose a temporary surcharge
     // up to 15% for up to 150 days. Active window: Feb 24, 2026–Jul 23, 2026.
+    // knownFacts is forwarded so the civil-aircraft conditional exemption can be
+    // resolved when the importer has provided that information.
     {
-      const s122 = checkSection122Surcharge(normalizedHts, entry.origin_country, today);
+      const htsForS122 = hts?.requested ?? normalizeHts(entry.hts_code ?? '');
+      const s122 = checkSection122Surcharge(htsForS122, entry.origin_country, today, knownFacts);
+      const s122Source = {
+        agency: 'USTR / CBP',
+        name: 'Office of the United States Trade Representative / U.S. Customs and Border Protection',
+        title: `${SECTION_122_SURCHARGE.authority} — ${SECTION_122_SURCHARGE.chapter99_provision}`,
+        cfr_citation: `${SECTION_122_SURCHARGE.chapter99_provision}; ${SECTION_122_SURCHARGE.fr_reference}`,
+        effective_date: SECTION_122_SURCHARGE.effective_date,
+        last_verified_at: SECTION_122_SURCHARGE.last_verified,
+        url: SECTION_122_SURCHARGE.official_url,
+        why_relevant: `Section 122 temporary surcharge window: ${SECTION_122_SURCHARGE.effective_date}–${SECTION_122_SURCHARGE.expiry_date}.`,
+      };
 
       if (s122.applies === true) {
         const s122Amt = value != null ? (value * SECTION_122_SURCHARGE.rate_pct) / 100 : null;
@@ -494,45 +508,47 @@ export function assembleBaselines(
           id: 'section_122_surcharge',
           category: 'Section 122 Temporary Import Surcharge',
           level: 'High',
-          explanation: `A temporary 10% import surcharge is in effect under Section 122 of the Trade Act of 1974 (19 U.S.C. 2132), effective ${SECTION_122_SURCHARGE.effective_date} through ${SECTION_122_SURCHARGE.expiry_date}. The surcharge applies to substantially all imported merchandise under ${SECTION_122_SURCHARGE.chapter99_provision} and stacks with the MFN base rate, Section 301, and Section 232 tariffs. ${s122.note}`,
+          explanation: `A temporary 10% import surcharge is in effect under Section 122 of the Trade Act of 1974 (19 U.S.C. 2132), effective ${SECTION_122_SURCHARGE.effective_date} through ${SECTION_122_SURCHARGE.expiry_date}. The surcharge applies to substantially all imported merchandise under ${SECTION_122_SURCHARGE.chapter99_provision} and stacks with the MFN base rate and any Section 301 tariff. ${s122.note}`,
           action: `Include +${SECTION_122_SURCHARGE.rate_pct}% in your landed cost calculation for this shipment. The surcharge expires ${SECTION_122_SURCHARGE.expiry_date} — confirm whether any extension has been proclaimed before release.`,
           verification_status: 'verified_applicable',
-          applicability_conditions: `Import date between ${SECTION_122_SURCHARGE.effective_date} and ${SECTION_122_SURCHARGE.expiry_date}; HTS not in the exempt list; stacks with all other applicable tariffs.`,
+          applicability_conditions: `Import date between ${SECTION_122_SURCHARGE.effective_date} and ${SECTION_122_SURCHARGE.expiry_date}; HTS not in the exempt list.`,
           verified_rate_pct: SECTION_122_SURCHARGE.rate_pct,
           financial_impact: s122Amt != null
             ? `$${s122Fmt} on a $${value!.toLocaleString('en-US')} shipment (${SECTION_122_SURCHARGE.rate_pct}% Section 122, ${SECTION_122_SURCHARGE.chapter99_provision})`
             : `${SECTION_122_SURCHARGE.rate_pct}% of customs value — add a shipment value to see the dollar impact`,
-          source: {
-            agency: 'USTR / CBP',
-            name: 'Office of the United States Trade Representative / U.S. Customs and Border Protection',
-            title: `${SECTION_122_SURCHARGE.authority} — ${SECTION_122_SURCHARGE.chapter99_provision}`,
-            cfr_citation: `${SECTION_122_SURCHARGE.chapter99_provision}; ${SECTION_122_SURCHARGE.fr_reference}`,
-            effective_date: SECTION_122_SURCHARGE.effective_date,
-            last_verified_at: SECTION_122_SURCHARGE.last_verified,
-            url: SECTION_122_SURCHARGE.official_url,
-            why_relevant: `Section 122 temporary surcharge is active for this import date (${today}).`,
-          },
+          source: s122Source,
         });
-      } else if (s122.reason === 'hts_exempt') {
+      } else if (s122.applies === 'cannot_determine') {
+        out.push({
+          id: 'section_122_surcharge',
+          category: 'Section 122 Temporary Import Surcharge',
+          level: 'High',
+          explanation: s122.note,
+          action: `Provide the missing information (${s122.missing_condition ?? 'civil aircraft use certification'}) to resolve whether the Section 122 10% surcharge applies. If the goods are not for civil aircraft use, budget +${SECTION_122_SURCHARGE.rate_pct}% in your landed cost.`,
+          verification_status: 'insufficient_info',
+          applicability_conditions: `Import date in the active window (${SECTION_122_SURCHARGE.effective_date}–${SECTION_122_SURCHARGE.expiry_date}); civil aircraft use status unknown.`,
+          verified_rate_pct: null,
+          missing_info: s122.missing_condition,
+          source: s122Source,
+        });
+      } else if (
+        s122.reason === 'hts_exempt' ||
+        s122.reason === 'already_s232_auto' ||
+        s122.reason === 'already_s232_steel_aluminum' ||
+        s122.reason === 'origin_usmca' ||
+        s122.reason === 'origin_cafta_dr'
+      ) {
         out.push({
           id: 'section_122_surcharge',
           category: 'Section 122 Temporary Import Surcharge',
           level: 'N/A',
-          explanation: `The Section 122 temporary 10% import surcharge (${SECTION_122_SURCHARGE.effective_date}–${SECTION_122_SURCHARGE.expiry_date}) does not apply to this HTS code. ${s122.note}`,
-          action: 'No Section 122 surcharge is owed for this HTS classification.',
+          explanation: s122.note,
+          action: 'No Section 122 surcharge is owed for this shipment.',
           verification_status: 'not_applicable',
-          source: {
-            agency: 'USTR / CBP',
-            name: 'Office of the United States Trade Representative / U.S. Customs and Border Protection',
-            title: `${SECTION_122_SURCHARGE.authority} — ${SECTION_122_SURCHARGE.chapter99_provision}`,
-            cfr_citation: `${SECTION_122_SURCHARGE.chapter99_provision}; ${SECTION_122_SURCHARGE.fr_reference}`,
-            last_verified_at: SECTION_122_SURCHARGE.last_verified,
-            url: SECTION_122_SURCHARGE.official_url,
-            why_relevant: 'HTS code falls within an exempt category; no surcharge applies.',
-          },
+          source: s122Source,
         });
       }
-      // before/after window: no card — surcharge simply not active on this date
+      // before/after window: no card — surcharge not active on this import date
     }
   }
 
@@ -693,17 +709,19 @@ const DOMAIN_REGISTRY: Array<{
     label: `Section 122 Temporary Surcharge (${SECTION_122_SURCHARGE.effective_date}–${SECTION_122_SURCHARGE.expiry_date})`,
     cat: 'tariff',
     relevant: () => true,
-    resolve: (cats, entry, hts) => {
+    resolve: (cats, entry) => {
       const c = cats.find((x) => x.id === 'section_122_surcharge');
       if (c?.verification_status === 'verified_applicable')
         return { status: 'verified_applicable', note: `Applies — +${SECTION_122_SURCHARGE.rate_pct}% (${SECTION_122_SURCHARGE.chapter99_provision}, active through ${SECTION_122_SURCHARGE.expiry_date})` };
+      if (c?.verification_status === 'insufficient_info')
+        return { status: 'insufficient_info', note: c.missing_info ?? 'Civil aircraft use certification required to resolve Section 122 exemption', missing: [c.missing_info ?? 'civil_aircraft_use certification'] };
       if (c?.verification_status === 'not_applicable')
-        return { status: 'not_applicable', note: c.explanation ?? 'HTS exempt from Section 122 surcharge' };
-      // No card pushed: check if out of the date window or use a live check
+        return { status: 'not_applicable', note: c.explanation?.slice(0, 120) ?? 'Exempt from Section 122 surcharge' };
+      // No card was pushed — surcharge was not in the active date window
       const today = new Date().toISOString().slice(0, 10);
       const s122 = checkSection122Surcharge(entry.hts_code ?? '', entry.origin_country, today);
       if (s122.reason === 'before_effective_date') return { status: 'not_applicable', note: `Import date is before surcharge effective date (${SECTION_122_SURCHARGE.effective_date})` };
-      if (s122.reason === 'after_expiry') return { status: 'not_applicable', note: `Import date is after surcharge expiry (${SECTION_122_SURCHARGE.expiry_date})` };
+      if (s122.reason === 'after_expiry') return { status: 'not_applicable', note: `Surcharge expired ${SECTION_122_SURCHARGE.expiry_date}` };
       return { status: 'no_applicable_rule', note: 'Section 122 surcharge date window not active' };
     },
   },

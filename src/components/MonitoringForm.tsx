@@ -1218,7 +1218,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
                 <li className="flex gap-2.5 text-sm">
                   <DollarSign className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
                   <span>
-                    <span className="font-medium">Known customs charges: </span>
+                    <span className="font-medium">{t(lang, "known_customs_charges")} </span>
                     {knownTotalDollar != null
                       ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(knownTotalDollar) +
                         (hasUnknown ? " + AD/CVD (rate pending manufacturer/exporter)" : "")
@@ -1412,6 +1412,7 @@ function DynamicClarificationStep({
   onContinue: () => void;
   onSkip: () => void;
 }) {
+  const lang = useLang();
   const setAnswer = (key: string, value: string) =>
     onChange({ ...answers, [key]: value });
 
@@ -1433,7 +1434,7 @@ function DynamicClarificationStep({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Product details for compliance screening</h2>
+        <h2 className="text-lg font-semibold">{t(lang, "clarification_title")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           These questions let ClearPort determine exactly which regulations apply and what documentation you will need. Select "I don't know" to skip — ClearPort will state exactly what it cannot determine and why.
         </p>

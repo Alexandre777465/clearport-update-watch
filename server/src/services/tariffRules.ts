@@ -542,107 +542,278 @@ export function computeMpf(enteredValueUsd: number, importDate: string): {
 //   Rate: 10% ad valorem on all articles from all countries unless officially
 //     exempted by the proclamation annex.
 //   Duration: 150 days beginning February 24, 2026.
-//   Last effective day: July 23, 2026.
-//   (Day 1 = Feb 24; day 150 = Jul 23, 2026.)
+//   Last effective day: July 23, 2026 (day 1 = Feb 24; day 150 = Jul 23).
 //
 // Chapter 99 classification:
 //   Chapter 99 subheading: 9903.99.10 — Temporary surcharge under Section 122,
 //   Trade Act of 1974; 10% ad valorem; effective 2026-02-24 through 2026-07-23.
-//   Source: Presidential Proclamation [TBD — cite FR Doc. once published].
-//   This subheading is provisional; confirm the exact Chapter 99 line from the
-//   Federal Register notice before relying on this citation in customs filings.
+//   Source: Presidential Proclamation [FR Doc. pending — confirm from the
+//   Federal Register notice before relying on this citation in customs filings].
 //
-// Stacking: The Section 122 surcharge stacks on top of the MFN base rate,
-//   Section 301 tariff, and Section 232 tariff. It is applied to the customs
-//   (dutiable) value.
+// Stacking: The Section 122 surcharge stacks on top of the MFN base rate and
+//   any Section 301 tariff. It does NOT stack on top of Section 232 on the same
+//   covered portion — goods already subject to Section 232 (automobile parts
+//   under Proclamation 10908, and steel/aluminum under Proclamations 9704/9777)
+//   are carved out of the Section 122 surcharge base to prevent double-stacking
+//   on the same covered merchandise.
+//
+// Exemptions fall into four categories:
+//   1. Unconditional HTS exemptions — pharmaceutical products (Chapter 30),
+//      medical/surgical instruments (headings 9018–9022), petroleum and natural
+//      gas (headings 2709–2711).  These exemptions apply regardless of origin,
+//      end use, or any other condition.
+//   2. Section 232 no-stacking — goods covered by the Section 232 automobile-
+//      parts tariff (Proclamation 10908, 9903.94.05) or the Section 232 steel/
+//      aluminum tariff (Proclamations 9704/9777) are exempt on the covered
+//      portion of value to avoid double-stacking.
+//   3. Conditional civil-aircraft exemption — goods of civil-aircraft-eligible
+//      HTS headings that are certified for civil aircraft use under U.S. Note 1,
+//      Subchapter XX, Chapter 98 of the HTSUS are exempt.  The exemption is
+//      conditional: it applies ONLY when the importer holds and presents a
+//      qualifying FAA/EASA certification.  If certification status is unknown,
+//      the result is "Cannot determine — missing: civil_aircraft_use certification".
+//   4. Origin-based FTA exemptions — goods from USMCA countries (Canada, Mexico)
+//      and CAFTA-DR countries (Costa Rica, El Salvador, Guatemala, Honduras,
+//      Nicaragua, Dominican Republic) are exempt under their respective FTAs.
 //
 // Last verified: 2026-06-28.
 
+/** Classification for a Section 122 exemption entry. */
+export type Section122ExemptionType =
+  | 'unconditional'
+  | 'already_s232_auto'
+  | 'already_s232_steel_aluminum';
+
+/**
+ * A single structured entry in the Section 122 exemption table.
+ *
+ * Civil-aircraft conditional exemptions are NOT stored here — they are
+ * handled by `civil_aircraft_eligible_prefixes` + `checkSection122Surcharge`
+ * `knownFacts` logic.
+ *
+ * Origin-based FTA exemptions (USMCA, CAFTA-DR) are stored separately in
+ * `usmca_origins` and `cafta_dr_origins`.
+ */
+export interface Section122ExemptItem {
+  /** Digit-only HTS prefixes covered by this exemption (matched by startsWith). */
+  readonly hts_prefixes: readonly string[];
+  readonly type: Section122ExemptionType;
+  readonly description: string;
+  /** Chapter 99 provision for the exemption or no-stacking rule, if any. */
+  readonly chapter99_provision?: string;
+  readonly fr_reference: string;
+}
+
 export interface Section122Coverage {
   readonly rate_pct: number;
-  readonly effective_date: string;   // ISO — first day the surcharge applies
-  readonly expiry_date: string;      // ISO — last day the surcharge applies (inclusive)
+  /** ISO date — first day the surcharge applies (inclusive). */
+  readonly effective_date: string;
+  /** ISO date — last day the surcharge applies (inclusive, day 150). */
+  readonly expiry_date: string;
   readonly authority: string;
-  /** HTSUS Chapter 99 subheading (provisional — verify from FR notice) */
+  /** HTSUS Chapter 99 subheading for the surcharge itself (provisional). */
   readonly chapter99_provision: string;
   readonly fr_reference: string;
   readonly official_url: string;
   readonly last_verified: string;
-  /** Digit-only HTS prefixes that are officially exempted from this surcharge */
-  readonly exempt_hts_prefixes: readonly string[];
-  /** Lowercase origin country strings that are fully exempt (if any) */
-  readonly exempt_origins: readonly string[];
+  /** Lowercase origin country strings qualifying for USMCA FTA exemption. */
+  readonly usmca_origins: readonly string[];
+  /** Lowercase origin country strings qualifying for CAFTA-DR FTA exemption. */
+  readonly cafta_dr_origins: readonly string[];
+  /**
+   * HTS prefixes for which civil-aircraft conditional exemption MAY apply.
+   * For these prefixes, `checkSection122Surcharge` checks `knownFacts.civil_aircraft_use`:
+   *   'yes'  → exempt (certified for civil aircraft use)
+   *   'no'   → surcharge applies (not for aircraft)
+   *   absent → cannot_determine (certification status unknown)
+   */
+  readonly civil_aircraft_eligible_prefixes: readonly string[];
+  /** Structured exemption table (unconditional + Section 232 no-stacking). */
+  readonly exempt_entries: readonly Section122ExemptItem[];
 }
 
 export const SECTION_122_SURCHARGE: Section122Coverage = {
   rate_pct: 10,
   effective_date: '2026-02-24',
-  expiry_date:    '2026-07-23',   // day 150 inclusive (Feb 24 = day 1)
+  expiry_date:    '2026-07-23',
   authority: 'Section 122, Trade Act of 1974 (19 U.S.C. 2132)',
-  chapter99_provision: '9903.99.10', // provisional — confirm from Federal Register
+  chapter99_provision: '9903.99.10',
   fr_reference: 'Presidential Proclamation, effective Feb. 24, 2026 [FR Doc. pending]',
   official_url: 'https://www.federalregister.gov/presidential-documents/proclamations',
   last_verified: '2026-06-28',
 
-  // Officially exempted HTS prefixes (products in these headings are not subject
-  // to the Section 122 surcharge per the proclamation annex).
-  // Common categories exempted under balance-of-payments actions:
-  //   • Pharmaceutical preparations (Chapter 30)
-  //   • Medical instruments and devices (Chapter 90, headings 9018–9022)
-  //   • Humanitarian aid / food aid
-  //   • Crude petroleum and natural gas (headings 2709, 2711)
-  //
-  // This list reflects the proclaimed exemptions as of the last-verified date.
-  // Any new exemption grant or revocation would be published in the Federal Register.
-  exempt_hts_prefixes: [
-    // Chapter 30 — pharmaceutical products (all headings)
-    '3001', '3002', '3003', '3004', '3005', '3006',
-    // Chapter 90 — medical / surgical instruments (headings 9018–9022)
-    '9018', '9019', '9020', '9021', '9022',
-    // Crude petroleum and natural gas
-    '2709', '2710', '2711',
+  // ── FTA origin exemptions ─────────────────────────────────────────────────
+  usmca_origins: ['canada', 'ca', 'mexico', 'mx'],
+  cafta_dr_origins: [
+    'costa rica', 'el salvador', 'guatemala', 'honduras', 'nicaragua', 'dominican republic',
   ],
 
-  // No origin-level exemptions are presently proclaimed.
-  exempt_origins: [],
+  // ── Civil-aircraft-eligible HTS prefixes ──────────────────────────────────
+  // Goods of these headings may be exempt when certified for civil aircraft use
+  // under U.S. Note 1, Subchapter XX, Chapter 98 of the HTSUS.
+  civil_aircraft_eligible_prefixes: [
+    '8411', // turbo-jets, turbo-propellers, and gas turbines
+    '8412', // hydraulic power engines and motors
+    '8483', // shafts, bearings, gears, gearing, clutches (aircraft drivetrains)
+    '8501', // electric motors and generators
+    '8511', // ignition equipment for spark-ignition or compression-ignition engines
+    '8518', // loudspeakers, microphones, amplifiers (cabin/cockpit audio systems)
+    '8519', // sound recording/reproducing apparatus (in-flight entertainment)
+    '8525', // transmission apparatus for radio/TV (avionics TX)
+    '8526', // radar apparatus, radio navigation aids (avionics RX/NAV)
+    '8537', // boards, panels, consoles for electric control (aircraft control panels)
+    '8544', // insulated wire, cable, optical fiber cable (aircraft wiring harnesses)
+    '9001', // optical fibers, optical fiber bundles (aircraft instruments)
+    '9014', // direction-finding compasses, navigation instruments for aircraft
+    '9015', // surveying, hydrographic, oceanographic instruments
+  ],
+
+  // ── Structured exemption table ────────────────────────────────────────────
+  exempt_entries: [
+    // ── 1. Unconditional HTS exemptions ───────────────────────────────────
+    {
+      hts_prefixes: ['3001', '3002', '3003', '3004', '3005', '3006'],
+      type: 'unconditional',
+      description:
+        'Pharmaceutical products — HTSUS Chapter 30, all headings 3001–3006. ' +
+        'Exempted unconditionally; applies regardless of origin or end use.',
+      fr_reference: 'Presidential Proclamation, effective Feb. 24, 2026 [FR Doc. pending]',
+    },
+    {
+      hts_prefixes: ['9018', '9019', '9020', '9021', '9022'],
+      type: 'unconditional',
+      description:
+        'Medical and surgical instruments, apparatus, and parts — HTSUS Chapter 90, ' +
+        'headings 9018–9022. Includes diagnostic, monitoring, dental, orthopaedic, ' +
+        'X-ray, and related medical devices. Exempted unconditionally.',
+      fr_reference: 'Presidential Proclamation, effective Feb. 24, 2026 [FR Doc. pending]',
+    },
+    {
+      hts_prefixes: ['2709', '2710', '2711'],
+      type: 'unconditional',
+      description:
+        'Petroleum oils, preparations, and natural gas — HTSUS headings 2709 (crude), ' +
+        '2710 (refined petroleum products), and 2711 (petroleum gases, natural gas, LPG). ' +
+        'Exempted unconditionally.',
+      fr_reference: 'Presidential Proclamation, effective Feb. 24, 2026 [FR Doc. pending]',
+    },
+
+    // ── 2. Section 232 auto-parts no-stacking (Proclamation 10908) ────────
+    // HTS codes covered by the 25% Section 232 automobile-parts tariff are
+    // carved out of the Section 122 surcharge base. The Annex I list from
+    // Proclamation 10908 is reproduced here at the same digit depth to match
+    // the covered_hts_prefixes in SECTION_232_AUTO.
+    {
+      hts_prefixes: [
+        // Chapter 8708 — motor vehicle parts (brakes, gear boxes, axles, etc.)
+        '870810', '870821', '870822', '870829',
+        '870830',   // brakes, servo-brakes, and parts (incl. brake drums 8708.30.50.20)
+        '870840', '870850', '870860', '870870', '870880', '870891', '870892',
+        '87089360', '87089375',   // 8708.93.60/75 clutches (non-agricultural)
+        '870894', '870895',
+        '87089953', '87089955', '87089958', '87089968',  // 8708.99.53/55/58/68
+        // Chapter 8706/8707 — chassis and bodies
+        '870600', '870710', '870790',
+        // Engine/drivetrain parts covered by Proclamation 10908 Annex I
+        '840731', '840732', '840733', '840734',  // spark-ignition engines (vehicles)
+        '840820',   // compression-ignition engines (vehicles)
+        '840991', '840999',   // parts for 8407/8408 engines
+        '848310', '848330', '848340', '848350', '848360', '848390',
+        '852610',   // GPS navigation apparatus (vehicles)
+        '854430',   // ignition/wiring sets (vehicles)
+      ],
+      type: 'already_s232_auto',
+      description:
+        'Automobile parts covered by the Section 232 tariff under Presidential ' +
+        'Proclamation 10908 (9903.94.05, 25% ad valorem). The Section 122 ' +
+        'surcharge does not stack on the same covered portion of these goods.',
+      chapter99_provision: '9903.94.05',
+      fr_reference: 'Proclamation 10908 (90 FR 18753, Apr. 29, 2025)',
+    },
+
+    // ── 3. Section 232 steel/aluminum no-stacking (Proclamations 9704/9777) ─
+    {
+      hts_prefixes: [
+        // Chapter 72 — iron and steel
+        '7201','7202','7203','7204','7205','7206','7207','7208','7209','7210',
+        '7211','7212','7213','7214','7215','7216','7217','7218','7219','7220',
+        '7221','7222','7223','7224','7225','7226','7227','7228','7229',
+        // Chapter 73 — articles of iron or steel
+        '7301','7302','7303','7304','7305','7306','7307','7308','7309','7310',
+        '7311','7312','7313','7314','7315','7316','7317','7318','7319','7320',
+        '7321','7322','7323','7324','7325','7326',
+        // Chapter 76 — aluminum and articles thereof
+        '7601','7602','7603','7604','7605','7606','7607','7608','7609','7610',
+        '7611','7612','7613','7614','7615','7616',
+      ],
+      type: 'already_s232_steel_aluminum',
+      description:
+        'Steel and aluminum products covered by the Section 232 tariff under ' +
+        'Proclamations 9704 and 9777 (25% steel / 10% aluminum). The Section 122 ' +
+        'surcharge does not stack on the same covered portion of these goods.',
+      chapter99_provision: '9903.80.01 / 9903.85.01',
+      fr_reference:
+        'Proclamation 9704 (83 FR 11619, Mar. 15, 2018); ' +
+        'Proclamation 9777 (83 FR 20253, May 1, 2018)',
+    },
+  ],
 } as const;
 
 export interface Section122Result {
-  applies: boolean;
+  applies: boolean | 'cannot_determine';
   reason:
     | 'applicable'
     | 'before_effective_date'
     | 'after_expiry'
     | 'hts_exempt'
-    | 'origin_exempt';
+    | 'origin_usmca'
+    | 'origin_cafta_dr'
+    | 'already_s232_auto'
+    | 'already_s232_steel_aluminum'
+    | 'cannot_determine';
   rate_pct: number | null;
   note: string;
   source_ref: string;
+  /** Populated when reason === 'cannot_determine'; names the missing fact. */
+  missing_condition?: string;
 }
 
 /**
  * Determine whether the Section 122 temporary surcharge applies to this import.
  *
- * @param normalizedHts  Digit-only HTS code (any length; matched by prefix)
- * @param originCountry  Origin country as submitted (free text; lowercased internally)
- * @param importDate     ISO import date (e.g. "2026-06-28")
- * @param surcharge      Surcharge definition (defaults to production constant)
+ * Check order:
+ *   1. Date window (before / after the 150-day window)
+ *   2. USMCA origin exemption (Canada, Mexico)
+ *   3. CAFTA-DR origin exemption
+ *   4. Unconditional HTS exemptions (pharmaceutical, medical, petroleum)
+ *   5. Section 232 no-stacking (auto-parts, steel/aluminum)
+ *   6. Conditional civil-aircraft exemption — returns cannot_determine when
+ *      HTS is civil-aircraft-eligible but `knownFacts.civil_aircraft_use` is absent
+ *   7. Applicable (no exemption found)
+ *
+ * @param normalizedHts   Digit-only HTS code (any length; matched by prefix)
+ * @param originCountry   Origin country as submitted (free text; lowercased internally)
+ * @param importDate      ISO import date (e.g. "2026-06-28")
+ * @param knownFacts      Optional fact map — supply `civil_aircraft_use: 'yes'|'no'`
+ *                        to resolve the conditional civil-aircraft exemption
+ * @param surcharge       Surcharge definition (defaults to production constant)
  */
 export function checkSection122Surcharge(
   normalizedHts: string,
   originCountry: string,
   importDate: string,
+  knownFacts: Record<string, string> = {},
   surcharge: Section122Coverage = SECTION_122_SURCHARGE,
 ): Section122Result {
   const src = `${surcharge.authority}; HTSUS ${surcharge.chapter99_provision}; ${surcharge.fr_reference}`;
 
-  // ── Date window ───────────────────────────────────────────────────────────
+  // ── 1. Date window ────────────────────────────────────────────────────────
   if (importDate < surcharge.effective_date) {
     return {
       applies: false,
       reason: 'before_effective_date',
       rate_pct: null,
-      note: `Import date ${importDate} is before the February 24, 2026 effective date of the Section 122 temporary surcharge. Surcharge does not apply to this shipment.`,
+      note: `Import date ${importDate} is before the ${surcharge.effective_date} effective date of the Section 122 temporary surcharge. Surcharge does not apply to this shipment.`,
       source_ref: src,
     };
   }
@@ -651,43 +822,108 @@ export function checkSection122Surcharge(
       applies: false,
       reason: 'after_expiry',
       rate_pct: null,
-      note: `Import date ${importDate} is after July 23, 2026 — the 150-day Section 122 temporary surcharge expired on that date. Surcharge does not apply to this shipment.`,
+      note: `Import date ${importDate} is after ${surcharge.expiry_date} — the 150-day Section 122 temporary surcharge expired on that date. Surcharge does not apply to this shipment.`,
       source_ref: src,
     };
   }
 
-  // ── HTS exemption check ───────────────────────────────────────────────────
-  const isHtsExempt = surcharge.exempt_hts_prefixes.some((p) => normalizedHts.startsWith(p));
-  if (isHtsExempt) {
-    const exemptPrefix = surcharge.exempt_hts_prefixes.find((p) => normalizedHts.startsWith(p))!;
-    return {
-      applies: false,
-      reason: 'hts_exempt',
-      rate_pct: null,
-      note: `HTS ${normalizedHts} (prefix ${exemptPrefix}) is in an officially exempted category under the Section 122 proclamation annex. The 10% temporary surcharge does not apply to this article.`,
-      source_ref: src,
-    };
-  }
-
-  // ── Origin exemption check ────────────────────────────────────────────────
+  // ── 2. USMCA origin exemption ─────────────────────────────────────────────
   const originLc = originCountry.toLowerCase();
-  const isOriginExempt = surcharge.exempt_origins.some((o) => originLc.includes(o));
-  if (isOriginExempt) {
+  if (surcharge.usmca_origins.some((o) => originLc.includes(o))) {
     return {
       applies: false,
-      reason: 'origin_exempt',
+      reason: 'origin_usmca',
       rate_pct: null,
-      note: `Origin country ${originCountry} is exempt from the Section 122 surcharge under the proclamation.`,
+      note: `${originCountry}-origin goods are exempt from the Section 122 surcharge under the United States-Mexico-Canada Agreement (USMCA). No Section 122 surcharge applies to this shipment.`,
       source_ref: src,
     };
   }
 
-  // ── Applicable ────────────────────────────────────────────────────────────
+  // ── 3. CAFTA-DR origin exemption ──────────────────────────────────────────
+  if (surcharge.cafta_dr_origins.some((o) => originLc.includes(o))) {
+    return {
+      applies: false,
+      reason: 'origin_cafta_dr',
+      rate_pct: null,
+      note: `${originCountry}-origin goods are exempt from the Section 122 surcharge under the Dominican Republic-Central America-United States Free Trade Agreement (CAFTA-DR). No Section 122 surcharge applies to this shipment.`,
+      source_ref: src,
+    };
+  }
+
+  // ── 4 & 5. Unconditional HTS exemptions + Section 232 no-stacking ─────────
+  for (const entry of surcharge.exempt_entries) {
+    if (!entry.hts_prefixes.some((p) => normalizedHts.startsWith(p))) continue;
+
+    if (entry.type === 'unconditional') {
+      const matchedPrefix = entry.hts_prefixes.find((p) => normalizedHts.startsWith(p))!;
+      return {
+        applies: false,
+        reason: 'hts_exempt',
+        rate_pct: null,
+        note: `HTS ${normalizedHts} (matched prefix ${matchedPrefix}) falls within an unconditionally exempted category: ${entry.description} The Section 122 10% temporary surcharge does not apply.`,
+        source_ref: `${src}; ${entry.fr_reference}`,
+      };
+    }
+
+    if (entry.type === 'already_s232_auto') {
+      return {
+        applies: false,
+        reason: 'already_s232_auto',
+        rate_pct: null,
+        note: `HTS ${normalizedHts} is covered by the Section 232 automobile-parts tariff (${entry.chapter99_provision ?? '9903.94.05'}, Proclamation 10908). The Section 122 surcharge does not stack on the same covered portion of these goods.`,
+        source_ref: `${src}; ${entry.fr_reference}`,
+      };
+    }
+
+    if (entry.type === 'already_s232_steel_aluminum') {
+      return {
+        applies: false,
+        reason: 'already_s232_steel_aluminum',
+        rate_pct: null,
+        note: `HTS ${normalizedHts} is covered by the Section 232 steel/aluminum tariff (${entry.chapter99_provision ?? '9903.80.01 / 9903.85.01'}). The Section 122 surcharge does not stack on the same covered portion of these goods.`,
+        source_ref: `${src}; ${entry.fr_reference}`,
+      };
+    }
+  }
+
+  // ── 6. Conditional civil-aircraft exemption ───────────────────────────────
+  // This exemption requires that the goods are certified for civil aircraft use
+  // under U.S. Note 1, Subchapter XX, Chapter 98 of the HTSUS.  Without that
+  // certification, the surcharge applies.  If certification status is unknown,
+  // the result is cannot_determine.
+  const isCivilAircraftEligible = surcharge.civil_aircraft_eligible_prefixes.some((p) =>
+    normalizedHts.startsWith(p),
+  );
+  if (isCivilAircraftEligible) {
+    const civilUse = knownFacts['civil_aircraft_use'];
+    if (civilUse === 'yes') {
+      return {
+        applies: false,
+        reason: 'hts_exempt',
+        rate_pct: null,
+        note: `HTS ${normalizedHts} is exempt from the Section 122 surcharge because the goods are certified for civil aircraft use per U.S. Note 1, Subchapter XX, Chapter 98 of the HTSUS (9880.00.00). Retain the FAA/EASA airworthiness certification (e.g. FAA Form 8130-3 or EASA Form 1) as evidence.`,
+        source_ref: `${src}; U.S. Note 1, Subchapter XX, Chapter 98 HTSUS`,
+      };
+    }
+    if (!civilUse) {
+      return {
+        applies: 'cannot_determine',
+        reason: 'cannot_determine',
+        rate_pct: null,
+        note: `HTS ${normalizedHts} is in a civil-aircraft-eligible heading. The Section 122 exemption for civil aircraft use (U.S. Note 1, Subchapter XX, Chapter 98) may apply — but only if the goods are certified for civil aircraft use. Cannot determine — missing: civil_aircraft_use certification status (answer 'yes' if the goods hold an FAA Form 8130-3 or equivalent EASA Form 1 civil airworthiness release).`,
+        source_ref: `${src}; U.S. Note 1, Subchapter XX, Chapter 98 HTSUS`,
+        missing_condition: 'civil_aircraft_use certification (FAA Form 8130-3 or EASA Form 1)',
+      };
+    }
+    // civilUse === 'no' or any other non-'yes' value: exemption does not apply; fall through
+  }
+
+  // ── 7. Applicable ─────────────────────────────────────────────────────────
   return {
     applies: true,
     reason: 'applicable',
     rate_pct: surcharge.rate_pct,
-    note: `HTS ${normalizedHts} from ${originCountry} is subject to the ${surcharge.rate_pct}% Section 122 temporary surcharge (${surcharge.chapter99_provision}), effective ${surcharge.effective_date} through ${surcharge.expiry_date}. This surcharge stacks on top of MFN, Section 301, and Section 232 rates.`,
+    note: `HTS ${normalizedHts} from ${originCountry} is subject to the ${surcharge.rate_pct}% Section 122 temporary surcharge (${surcharge.chapter99_provision}), effective ${surcharge.effective_date} through ${surcharge.expiry_date}. This surcharge stacks on top of the MFN base rate and Section 301 tariff.`,
     source_ref: src,
   };
 }

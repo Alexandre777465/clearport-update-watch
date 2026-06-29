@@ -609,6 +609,13 @@ const DICT = {
   law_status_not_supported: { en: "Not supported by ClearPort yet", zh: "ClearPort 暂不支持" },
   doc_group_carrier: { en: "Provided by carrier", zh: "由承运人提供" },
 
+  // ── Compliance clarification step ────────────────────────────────────────
+  clarification_title: { en: "Product details for compliance screening", zh: "合规筛查产品详情" },
+  clarification_subtitle: { en: "Answer any questions you can — we'll refine the results.", zh: "尽量回答以下问题，我们将优化筛查结果。" },
+
+  // ── Tariff / cost section ─────────────────────────────────────────────────
+  known_customs_charges: { en: "Known customs charges:", zh: "已知关税费用：" },
+
   // ── Misc ─────────────────────────────────────────────────────────────────
   banner_saved: { en: "Product saved for monitoring.", zh: "产品已保存以进行监测。" },
   err_generic: { en: "Something went wrong. Please try again.", zh: "出现问题，请重试。" },

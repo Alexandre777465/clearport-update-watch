@@ -875,81 +875,176 @@ describe('bluetooth_speaker_acceptance — no AD/CVD, correct FCC, ocean gated',
 });
 
 // ── Section 122 surcharge ─────────────────────────────────────────────────────
+// Use 9403 (furniture) for pure date-window tests — not civil-aircraft-eligible,
+// not Section 232-covered, not pharma — so the only variable is the date.
+
 describe('checkSection122Surcharge — date window', () => {
-  it('before effective date returns before_effective_date', () => {
-    const result = checkSection122Surcharge('8518210000', 'China', '2026-02-23');
-    expect(result.applies).toBe(false);
-    expect(result.reason).toBe('before_effective_date');
+  const HTS_FURNITURE = '9403906000'; // household furniture, non-eligible for any exemption
+
+  it('day before effective date returns before_effective_date', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Vietnam', '2026-02-23');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('before_effective_date');
+    expect(r.rate_pct).toBeNull();
   });
 
-  it('on effective date returns applicable', () => {
-    const result = checkSection122Surcharge('8518210000', 'China', '2026-02-24');
-    expect(result.applies).toBe(true);
-    expect(result.reason).toBe('applicable');
-    expect(result.rate_pct).toBe(10);
+  it('on effective date (Feb 24, 2026) returns applicable', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Vietnam', '2026-02-24');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+    expect(r.rate_pct).toBe(10);
   });
 
-  it('mid-window (June 28, 2026) returns applicable with 10%', () => {
-    const result = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
-    expect(result.applies).toBe(true);
-    expect(result.reason).toBe('applicable');
-    expect(result.rate_pct).toBe(10);
+  it('mid-window (June 28, 2026) returns applicable at 10%', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Vietnam', '2026-06-28');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+    expect(r.rate_pct).toBe(10);
   });
 
-  it('on expiry date (July 23, 2026) returns applicable', () => {
-    const result = checkSection122Surcharge('8518210000', 'China', '2026-07-23');
-    expect(result.applies).toBe(true);
-    expect(result.reason).toBe('applicable');
+  it('on expiry date (July 23, 2026) is still applicable — day 150 is inclusive', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Vietnam', '2026-07-23');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
   });
 
-  it('day after expiry returns after_expiry', () => {
-    const result = checkSection122Surcharge('8518210000', 'China', '2026-07-24');
-    expect(result.applies).toBe(false);
-    expect(result.reason).toBe('after_expiry');
+  it('day after expiry (July 24, 2026) returns after_expiry', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Vietnam', '2026-07-24');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('after_expiry');
+    expect(r.rate_pct).toBeNull();
   });
 });
 
-describe('checkSection122Surcharge — HTS exemptions', () => {
-  it('pharma HTS 3004 is exempt', () => {
-    const result = checkSection122Surcharge('3004905090', 'Germany', '2026-06-28');
-    expect(result.applies).toBe(false);
-    expect(result.reason).toBe('hts_exempt');
+describe('checkSection122Surcharge — ordinary vs aircraft loudspeaker (HTS 8518.21)', () => {
+  // 8518 is civil-aircraft-eligible; the outcome depends on knownFacts.
+
+  it('ordinary household Bluetooth speaker (civil_aircraft_use: no) → applicable', () => {
+    const r = checkSection122Surcharge('8518210000', 'China', '2026-06-28', { civil_aircraft_use: 'no' });
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+    expect(r.rate_pct).toBe(10);
+    // Must NOT mention a civil aircraft exemption
+    expect(r.note).not.toContain('civil aircraft exempt');
   });
 
-  it('petroleum HTS 2710 is exempt', () => {
-    const result = checkSection122Surcharge('2710199000', 'Canada', '2026-06-28');
-    expect(result.applies).toBe(false);
-    expect(result.reason).toBe('hts_exempt');
+  it('aircraft-qualified loudspeaker (civil_aircraft_use: yes) → hts_exempt', () => {
+    const r = checkSection122Surcharge('8518210000', 'China', '2026-06-28', { civil_aircraft_use: 'yes' });
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('hts_exempt');
+    expect(r.rate_pct).toBeNull();
+    expect(r.note).toContain('civil aircraft');
   });
 
-  it('medical instruments HTS 9018 is exempt', () => {
-    const result = checkSection122Surcharge('9018909090', 'Japan', '2026-06-28');
-    expect(result.applies).toBe(false);
-    expect(result.reason).toBe('hts_exempt');
+  it('unknown civil-aircraft status → cannot_determine with missing_condition', () => {
+    const r = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
+    expect(r.applies).toBe('cannot_determine');
+    expect(r.reason).toBe('cannot_determine');
+    expect(r.missing_condition).toBeTruthy();
+    expect(r.note).toContain('Cannot determine');
+  });
+});
+
+describe('checkSection122Surcharge — Section 232 no-stacking', () => {
+  it('Section 232 auto brake drum (HTS 870830) → already_s232_auto', () => {
+    // Brake drums (8708.30.xx) are covered by Proclamation 10908; no stacking.
+    const r = checkSection122Surcharge('8708305020', 'China', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('already_s232_auto');
+    expect(r.rate_pct).toBeNull();
+    expect(r.note).toContain('9903.94.05');
   });
 
-  it('non-exempt HTS 8518.21 (Bluetooth speaker) is applicable mid-window', () => {
-    const result = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
-    expect(result.applies).toBe(true);
-    expect(result.reason).toBe('applicable');
+  it('Section 232 steel (HTS 7208 hot-rolled coil) → already_s232_steel_aluminum', () => {
+    const r = checkSection122Surcharge('7208399000', 'South Korea', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('already_s232_steel_aluminum');
+    expect(r.rate_pct).toBeNull();
   });
 
-  it('non-exempt HTS 9403 (furniture) is applicable mid-window', () => {
-    const result = checkSection122Surcharge('9403906000', 'Vietnam', '2026-06-28');
-    expect(result.applies).toBe(true);
-    expect(result.reason).toBe('applicable');
+  it('Section 232 aluminum (HTS 7606 sheet) → already_s232_steel_aluminum', () => {
+    const r = checkSection122Surcharge('7606120000', 'China', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('already_s232_steel_aluminum');
+  });
+});
+
+describe('checkSection122Surcharge — exact exempt vs non-exempt electronics', () => {
+  // Exact exempt electronics: HTS 9018 medical instruments (unconditional)
+  it('exact exempt electronics — medical instrument 9018 → hts_exempt (unconditional)', () => {
+    const r = checkSection122Surcharge('9018909090', 'Germany', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('hts_exempt');
+    expect(r.rate_pct).toBeNull();
+    expect(r.note).toContain('unconditionally exempted');
+  });
+
+  // Non-exempt electronics: HTS 8504 (transformers/power supplies) — not civil-aircraft-eligible
+  it('non-exempt electronics — power transformer 8504 → applicable', () => {
+    const r = checkSection122Surcharge('8504409510', 'China', '2026-06-28');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+    expect(r.rate_pct).toBe(10);
+  });
+
+  // Also confirm pharma exemption for completeness
+  it('pharmaceutical HTS 3004 → hts_exempt (unconditional)', () => {
+    const r = checkSection122Surcharge('3004905090', 'India', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('hts_exempt');
+  });
+});
+
+describe('checkSection122Surcharge — USMCA and CAFTA-DR origin exemptions', () => {
+  const HTS_FURNITURE = '9403906000';
+
+  it('Canada origin → origin_usmca (exempt)', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Canada', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('origin_usmca');
+    expect(r.note).toContain('USMCA');
+  });
+
+  it('Mexico origin → origin_usmca (exempt)', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Mexico', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('origin_usmca');
+  });
+
+  it('Honduras origin → origin_cafta_dr (exempt)', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'Honduras', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('origin_cafta_dr');
+    expect(r.note).toContain('CAFTA-DR');
+  });
+
+  it('El Salvador origin → origin_cafta_dr (exempt)', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'El Salvador', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('origin_cafta_dr');
+  });
+
+  it('China origin (not USMCA/CAFTA) → applicable', () => {
+    const r = checkSection122Surcharge(HTS_FURNITURE, 'China', '2026-06-28');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+  });
+
+  // USMCA check fires before HTS check — even an exempt pharma from Canada shows origin_usmca
+  it('Canada + pharma HTS → origin_usmca (origin check fires first)', () => {
+    const r = checkSection122Surcharge('3004905090', 'Canada', '2026-06-28');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('origin_usmca');
   });
 });
 
 describe('checkSection122Surcharge — stacking with Section 301', () => {
-  it('Section 122 surcharge does not affect Section 301 rate table', () => {
-    // Stacking is purely additive in baselines.ts — verify neither function
-    // mutates the other's output.
-    const s122 = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
+  it('Section 122 and Section 301 rates are independent and additive', () => {
+    const r = checkSection122Surcharge('8518210000', 'China', '2026-06-28', { civil_aircraft_use: 'no' });
     const s301Rate = SECTION_301_RATES['9903.88.15']?.rate_pct;
-    expect(s122.rate_pct).toBe(10);
+    expect(r.rate_pct).toBe(10);
     expect(s301Rate).toBe(7.5);
-    // Combined rate on a $50,000 shipment: MFN 0% + S301 7.5% + S122 10% = $8,750
+    // On a $50,000 Bluetooth speaker: S301 $3,750 + S122 $5,000 = $8,750
     const combined = (50000 * (7.5 + 10)) / 100;
     expect(combined).toBe(8750);
   });
