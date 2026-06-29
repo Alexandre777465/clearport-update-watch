@@ -19,7 +19,8 @@ export type CategoryId =
   | 'food'
   | 'medical_devices'
   | 'chemicals'
-  | 'furniture';
+  | 'furniture'
+  | 'sports';
 
 export interface ProductBooleans {
   is_children?: boolean;

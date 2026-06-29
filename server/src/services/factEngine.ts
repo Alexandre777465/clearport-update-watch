@@ -36,7 +36,16 @@ export type FactKey =
   | 'contains_textile'
   | 'contains_wood'
   | 'medical_intended_use'
-  | 'is_automotive_part';
+  | 'is_automotive_part'
+  // ── Sports & Outdoor facts ─────────────────────────────────────────────────
+  | 'is_sports_equipment'       // product is sports/recreational equipment
+  | 'head_protection'           // helmet or head-protection product
+  | 'flotation_or_lifesaving'   // PFD / life jacket / buoyancy aid
+  | 'load_bearing'              // bears the user's body weight (harnesses, ropes)
+  | 'climbing_or_fall_arrest'   // climbing / fall-arrest / rope-access equipment
+  | 'inflatable'                // inflatable or air-bladder product
+  | 'intended_for_water'        // used in or on water
+  | 'protective_equipment';     // sports impact / body-protection gear
 
 export const ALL_FACT_KEYS: readonly FactKey[] = [
   'contains_battery',
@@ -52,6 +61,14 @@ export const ALL_FACT_KEYS: readonly FactKey[] = [
   'contains_wood',
   'medical_intended_use',
   'is_automotive_part',
+  'is_sports_equipment',
+  'head_protection',
+  'flotation_or_lifesaving',
+  'load_bearing',
+  'climbing_or_fall_arrest',
+  'inflatable',
+  'intended_for_water',
+  'protective_equipment',
 ];
 
 // ── Fact type ─────────────────────────────────────────────────────────────────
@@ -116,6 +133,9 @@ export const MODULE_MANIFESTS: readonly ModuleManifest[] = [
   { id: 'medical_devices', requiredFacts: ['medical_intended_use'] },
   { id: 'chemicals',       requiredFacts: ['contains_chemical'] },
   { id: 'furniture',       requiredFacts: ['contains_wood'] },
+  // Sports activates from general sports signal OR from specific safety subtypes
+  // that always warrant sports-module evaluation regardless of text markers.
+  { id: 'sports',          requiredFacts: ['is_sports_equipment', 'climbing_or_fall_arrest', 'flotation_or_lifesaving'] },
 ];
 
 // ── Text rules ────────────────────────────────────────────────────────────────
@@ -247,6 +267,71 @@ const TEXT_RULES: Readonly<Record<FactKey, TextRules>> = {
       /\bbrake\b|\bbumper\b|\baxle\b|\bsuspension\b|\bdriveshaft\b|\bcrankshaft\b|\bcamshaft\b|\bpiston\b|\btransmission\b|\bclutch\b|\bdifferential\b|\bmotor\s*vehicle\b|\bautomotive\b|\bautomobile\b|\bpassenger\s*vehicle\b|\btruck\s*part\b|\bvehicle\s*part\b|\bwheel\s*hub\b|\bsteering\b|\bmuffler\b|\bexhaust\b|\bradiator\b|\bshock\s*absorber\b|\bspark\s*plug\b|\bfuel\s*injector\b|\bcatalytic\s*converter\b/i,
     inferenceRe: undefined,
   },
+
+  // ── Sports & Outdoor ─────────────────────────────────────────────────────────
+  //
+  // Safeguard: "active", "performance", "fitness", "athletic", "outdoor",
+  // "professional" alone must NOT activate is_sports_equipment.
+  // positiveRe requires specific equipment names or unambiguous activity terms.
+  // inferenceRe requires compound nouns (e.g. "fitness equipment"), not bare adjectives.
+
+  is_sports_equipment: {
+    negativeRe:
+      /\bnot\s+(?:a\s+)?sports?\s+(?:equipment|product|item|gear)\b|\bnot\s+intended\s+for\s+sports?\b/i,
+    positiveRe:
+      /\bbicycle\b|\bbike\s+(?:frame|wheel|saddle|handlebar|pedal|fork|cassette|derailleur)\b|\bkayak\b|\bcanoe\b|\bsurfboard\b|\bpaddleboard\b|\bwetsuit\b|\blife\s+jacket\b|\bpersonal\s+flotation\s+device\b|\bPFD\b|\bbuoyancy\s+aid\b|\bclimbing\s+harness\b|\bfall[- ]?arrest\b|\bfall\s+protection\s+harness\b|\btreadmill\b|\belliptical\b|\bstationary\s+(?:bike|bicycle)\b|\bspin\s+bike\b|\bexercise\s+(?:machine|bike)\b|\browing\s+machine\b|\bdumbbell[s]?\b|\bbarbell[s]?\b|\bweight\s+(?:plate|bench|rack)\b|\bshin\s+guard\b|\bknee\s+(?:pad|guard)\b|\belbow\s+(?:pad|guard)\b|\bboxing\s+gloves?\b|\bsparring\s+(?:gloves?|equipment|gear)\b|\bskateboard\b|\binline\s+skates?\b|\bice\s+skates?\b|\broller\s+skates?\b|\btrampoline\b|\bski\s+(?:equipment|poles?|boots?|goggle|jacket|pants)\b|\bskiing\s+equipment\b|\bsnowboard\b|\bsoccer\s+goal\b|\bfootball\s+goal\b|\bgoal\s+(?:net|post)\b|\btennis\s+racket\b|\bbadminton\s+racket\b|\bgolf\s+club\b|\bhockey\s+stick\b|\bbaseball\s+bat\b|\bsports?\s+(?:protective\s+)?equipment\b|\bsports?\s+gear\b|\bsports?\s+goods\b|\bfitness\s+(?:tracker|wearable|band|watch)\b|\bGPS\s+(?:running|sports?|fitness)\s+watch\b|\bgymnastics\s+equipment\b|\bwakeboard\b|\bwater\s+ski\b|\bscuba\s+(?:tank|regulator|mask|fins|gear)\b|\bsnorkeling\s+(?:set|gear|mask)\b|\bbelay\s+device\b|\bclimbing\s+(?:rope|shoe|wall)\b|\bfull[- ]?body\s+harness\b|\bself[- ]?retracting\s+lifeline\b|\bsports?\s+protective\s+gear\b|\bcombat\s+sports?\b|\bmartial\s+arts?\s+equipment\b/i,
+    inferenceRe:
+      /\bgym\s+equipment\b|\bfitness\s+equipment\b|\bsports?\s+equipment\b|\bworkout\s+equipment\b|\brecreational\s+equipment\b|\bexercise\s+equipment\b|\boutdoor\s+(?:sports?|recreation)\s+equipment\b/i,
+  },
+
+  head_protection: {
+    negativeRe: /\bnot\s+a\s+helmet\b|\bnot\s+head\s+protection\b|\bno\s+helmet\b/i,
+    positiveRe:
+      /\bhelmet\b|\bhead\s+protection\b|\bprotective\s+headgear\b/i,
+    inferenceRe: undefined,
+  },
+
+  flotation_or_lifesaving: {
+    negativeRe: /\bnot\s+(?:a\s+)?(?:life\s+jacket|PFD|flotation|lifesaving)\b/i,
+    positiveRe:
+      /\blife\s+jacket\b|\bpersonal\s+flotation\s+device\b|\bPFD\b|\bbuoyancy\s+aid\b|\blife\s+preserver\b|\blife\s+vest\b|\bcoast\s+guard\s+(?:approved|certification)\b|\bUSCG\s+(?:type|approved)\b/i,
+    inferenceRe: undefined,
+  },
+
+  load_bearing: {
+    negativeRe: /\bnot\s+load[- ]?bearing\b|\bdecorative\s+only\b/i,
+    positiveRe:
+      /\bclimbing\s+harness\b|\bfall[- ]?(?:arrest|protection)\s+harness\b|\bfull[- ]?body\s+harness\b|\bworking\s+load\s+limit\b|\bsafe\s+working\s+load\b|\brated\s+(?:load|capacity)\b|\bload[- ]?bearing\b|\blifeline\b|\bself[- ]?retracting\s+lifeline\b|\brope\s+access\s+(?:equipment|system)\b|\bbelay\s+device\b/i,
+    inferenceRe: /\bcarabiner\b|\banchor\s+point\b/i,
+  },
+
+  climbing_or_fall_arrest: {
+    negativeRe: /\bnot\s+climbing\s+equipment\b|\bnot\s+(?:a\s+)?fall[- ]?arrest\b/i,
+    positiveRe:
+      /\bclimbing\s+(?:harness|equipment|rope|gear)\b|\bfall[- ]?arrest\b|\bfall\s+protection\s+(?:harness|system|equipment)\b|\brope\s+access\b|\bbelay\b|\brappel\b|\babseil\b|\bascender\b|\bdescender\b|\brock\s+climbing\b|\bmountaineering\b|\balpinism\b|\bvia\s+ferrata\b|\bbouldering\b|\bself[- ]?retracting\s+lifeline\b/i,
+    inferenceRe: /\bcarabiner\b|\banchor\s+point\b|\bbelay\s+device\b/i,
+  },
+
+  inflatable: {
+    negativeRe: /\bnot\s+inflatable\b|\bsolid[- ]?(?:shell|hull|frame)\b|\bhard[- ]?shell\b/i,
+    positiveRe:
+      /\binflatable\b|\binflates\b|\bair\s+chamber\b|\bair\s+bladder\b|\bpump\s+(?:to\s+)?inflate\b|\bself[- ]?inflating\b|\bpneumatic\s+(?:cushion|chamber|mat)\b|\bdrop[-\s]?stitch\b/i,
+    inferenceRe: undefined,
+  },
+
+  intended_for_water: {
+    negativeRe: /\bnot\s+for\s+water\b|\bindoor\s+only\b/i,
+    positiveRe:
+      /\baquatic\b|\bwater\s+sports?\b|\bkayak\b|\bcanoe\b|\bsurfboard\b|\bpaddleboard\b|\bwetsuit\b|\bswimming\b|\bsnorkeling\b|\bdiving\b|\bwater\s+ski\b|\bsailboard\b|\bwakeboard\b|\bscuba\b|\bboating\b|\bopen\s+water\b/i,
+    inferenceRe: /\bpool\b|\baqua\b/i,
+  },
+
+  protective_equipment: {
+    negativeRe: /\bnot\s+protective\s+(?:equipment|gear)\b|\bnot\s+(?:a\s+)?safety\s+(?:gear|equipment)\b/i,
+    positiveRe:
+      /\bshin\s+guard\b|\bknee\s+(?:pad|guard)\b|\belbow\s+(?:pad|guard)\b|\bbody\s+armor\b|\bface\s+guard\b|\bmouthguard\b|\bprotective\s+(?:vest|padding|gear|equipment|cup)\b|\bimpact\s+(?:protection|absorbing|resistant)\b|\bsports?\s+protective\s+(?:gear|equipment)\b/i,
+    inferenceRe: /\bpadding\b|\bprotective\b/i,
+  },
 };
 
 // ── HTS rules ─────────────────────────────────────────────────────────────────
@@ -283,6 +368,17 @@ const HTS_RULES: readonly HtsRule[] = [
                '3808','3809','3810','3811','3812','3813','3814','3815','3816','3817',
                '3818','3819','3820','3821','3822','3823','3824','3825','3826','3827'],
                                                          fact: 'contains_chemical',    value: 'yes' },
+  // Sports & Outdoor Equipment
+  // 8712: bicycles (also mapped to automotive — sports takes independent priority)
+  // 9506: sports, athletic, gymnastic, outdoor equipment and apparatus
+  // 9507: fishing tackle, hunting/shooting sports
+  { prefixes: ['8712'],                                    fact: 'is_sports_equipment', value: 'yes' },
+  { prefixes: ['9506','9507'],                             fact: 'is_sports_equipment', value: 'yes' },
+  // NOTE: 6307.20 covers life jackets but the 4-digit prefix '6307' is too broad
+  // (flags, dishcloths, and other made-up textile articles share the same heading).
+  // flotation_or_lifesaving is set by TEXT_RULES positiveRe ("life jacket", "PFD",
+  // "buoyancy aid") and by ANSWER_RULES (sports_product_type: pfd_life_jacket).
+  // Do NOT add a bare 6307 HTS rule — it would activate sports for all 6307 goods.
   // Food: chapters 1–24 (handled separately below)
   // Textiles: chapters 50–63 + 64 (handled separately below)
 ];
@@ -361,6 +457,55 @@ const ANSWER_RULES: Record<string, readonly AnswerRule[]> = {
   vehicle_type: [
     { fact: 'is_automotive_part', value: 'yes', matchValues: ['passenger_vehicle', 'heavy_commercial', 'non_road'] },
     { fact: 'is_automotive_part', value: 'no',  matchValues: ['not_automotive', 'not_applicable'] },
+  ],
+
+  // ── Sports answer rules ────────────────────────────────────────────────────
+  sports_product_type: [
+    { fact: 'is_sports_equipment',     value: 'yes', matchValues: [
+        'bicycle', 'kayak_canoe', 'surfboard_paddleboard', 'climbing_equipment',
+        'pfd_life_jacket', 'fitness_machine', 'free_weights', 'combat_sports',
+        'snow_sports', 'water_sports', 'ball_racket_sports', 'trampoline',
+        'protective_gear', 'scuba_snorkel', 'other_sports',
+      ]},
+    { fact: 'is_sports_equipment',     value: 'no',  matchValues: ['not_sports', 'not_applicable'] },
+    { fact: 'head_protection',         value: 'yes', matchValues: ['bicycle'] },
+    { fact: 'flotation_or_lifesaving', value: 'yes', matchValues: ['pfd_life_jacket', 'kayak_canoe', 'surfboard_paddleboard'] },
+    { fact: 'climbing_or_fall_arrest', value: 'yes', matchValues: ['climbing_equipment'] },
+    { fact: 'intended_for_water',      value: 'yes', matchValues: ['kayak_canoe', 'surfboard_paddleboard', 'water_sports', 'scuba_snorkel', 'pfd_life_jacket'] },
+    { fact: 'protective_equipment',    value: 'yes', matchValues: ['protective_gear', 'combat_sports'] },
+  ],
+  sports_helmet_type: [
+    { fact: 'head_protection', value: 'yes', matchValues: ['bicycle_helmet', 'ski_snowboard_helmet', 'motorcycle_helmet', 'other_helmet'] },
+    { fact: 'head_protection', value: 'no',  matchValues: ['no_helmet', 'not_applicable'] },
+  ],
+  pfd_type: [
+    { fact: 'flotation_or_lifesaving', value: 'yes', matchValues: ['type_1', 'type_2', 'type_3', 'type_5'] },
+    { fact: 'flotation_or_lifesaving', value: 'no',  matchValues: ['not_pfd', 'not_applicable'] },
+    { fact: 'inflatable',              value: 'yes', matchValues: ['type_5'] },
+  ],
+  climbing_equipment_type: [
+    { fact: 'climbing_or_fall_arrest', value: 'yes', matchValues: [
+        'harness', 'rope', 'carabiner', 'belay_device', 'fall_arrest_system', 'anchor',
+      ]},
+    { fact: 'load_bearing',            value: 'yes', matchValues: [
+        'harness', 'rope', 'carabiner', 'belay_device', 'fall_arrest_system', 'anchor',
+      ]},
+    { fact: 'climbing_or_fall_arrest', value: 'no',  matchValues: ['not_applicable'] },
+  ],
+  water_sports_type: [
+    { fact: 'intended_for_water', value: 'yes', matchValues: ['kayak', 'canoe', 'surfboard', 'paddleboard', 'wetsuit', 'swim', 'scuba', 'other_water'] },
+    { fact: 'intended_for_water', value: 'no',  matchValues: ['not_applicable'] },
+    { fact: 'inflatable',         value: 'yes', matchValues: ['inflatable_kayak', 'inflatable_paddleboard', 'inflatable_boat'] },
+  ],
+  protective_gear_type: [
+    { fact: 'protective_equipment', value: 'yes', matchValues: ['shin_guard', 'knee_pad', 'elbow_pad', 'body_armor', 'face_guard', 'mouthguard', 'other_protective'] },
+    { fact: 'protective_equipment', value: 'no',  matchValues: ['not_applicable'] },
+    { fact: 'head_protection',      value: 'yes', matchValues: ['head_guard', 'face_guard'] },
+  ],
+  is_occupational: [
+    // Fall-arrest equipment used in occupational settings → OSHA route
+    // Consumer/recreational climbing stays in voluntary standards route
+    { fact: 'load_bearing',         value: 'yes', matchValues: ['yes_occupational', 'yes_recreational'] },
   ],
 };
 

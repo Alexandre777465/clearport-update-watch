@@ -98,6 +98,7 @@ import { foodModule } from './food';
 import { medicalDevicesModule } from './medicalDevices';
 import { chemicalsModule } from './chemicals';
 import { furnitureModule } from './furniture';
+import { sportsModule } from './sports';
 
 export const ALL_MODULES: RegulatoryModule[] = [
   automotiveModule,
@@ -110,6 +111,7 @@ export const ALL_MODULES: RegulatoryModule[] = [
   medicalDevicesModule,
   chemicalsModule,
   furnitureModule,
+  sportsModule,
 ];
 
 export function getActiveModules(input: Omit<ModuleInput, 'importDate' | 'knownFacts'>): RegulatoryModule[] {

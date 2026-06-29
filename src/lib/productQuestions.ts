@@ -20,7 +20,8 @@ export type ModuleId =
   | "food"
   | "medical_devices"
   | "chemicals"
-  | "furniture";
+  | "furniture"
+  | "sports";
 
 export interface ProductQuestion {
   key: string;
@@ -299,6 +300,131 @@ const QUESTION_BANK: ProductQuestion[] = [
       { value: "yes",     label: "Yes — fabric, leather, or foam upholstery" },
       { value: "no",      label: "No upholstery" },
       { value: "unknown", label: "I don't know" },
+    ],
+  },
+
+  // ── SPORTS & OUTDOOR EQUIPMENT ─────────────────────────────────────────────
+  {
+    key: "sports_product_type",
+    module: "sports",
+    question: "What type of sports or outdoor equipment is this?",
+    helpText: "Determines which mandatory safety standards apply (CPSC, USCG, ASTM, etc.).",
+    options: [
+      { value: "bicycle",              label: "Bicycle (includes e-bike)" },
+      { value: "kayak_canoe",          label: "Kayak, canoe, or paddleboard" },
+      { value: "surfboard_paddleboard", label: "Surfboard or stand-up paddleboard" },
+      { value: "climbing_equipment",   label: "Climbing / fall-arrest equipment" },
+      { value: "pfd_life_jacket",      label: "Life jacket / PFD / buoyancy aid" },
+      { value: "fitness_machine",      label: "Fitness machine (treadmill, elliptical, rower)" },
+      { value: "free_weights",         label: "Free weights / dumbbells / barbells / weight bench" },
+      { value: "combat_sports",        label: "Combat sports / martial arts equipment" },
+      { value: "snow_sports",          label: "Snow sports (skis, snowboard, poles, boots)" },
+      { value: "water_sports",         label: "Water sports (wetsuit, fins, water ski, wakeboard)" },
+      { value: "ball_racket_sports",   label: "Ball or racket sports (tennis, golf, soccer, baseball)" },
+      { value: "trampoline",           label: "Trampoline or gymnastics equipment" },
+      { value: "protective_gear",      label: "Protective gear (shin guards, knee/elbow pads, body armor)" },
+      { value: "scuba_snorkel",        label: "SCUBA or snorkeling equipment" },
+      { value: "other_sports",         label: "Other sports or recreational equipment" },
+      { value: "not_sports",           label: "Not sports equipment — misclassified" },
+      { value: "unknown",              label: "I don't know" },
+    ],
+  },
+  {
+    key: "sports_helmet_type",
+    module: "sports",
+    question: "Does this product include a helmet or head protection?",
+    helpText: "Bicycle helmets require CPSC 16 CFR Part 1203 certification. Ski/snowboard helmets follow ASTM F2040.",
+    showIf: { key: "sports_product_type", values: ["bicycle", "snow_sports", "combat_sports", "other_sports"] },
+    options: [
+      { value: "bicycle_helmet",        label: "Bicycle helmet" },
+      { value: "ski_snowboard_helmet",  label: "Ski / snowboard helmet" },
+      { value: "motorcycle_helmet",     label: "Motorcycle helmet (DOT FMVSS 218)" },
+      { value: "other_helmet",          label: "Other head protection" },
+      { value: "no_helmet",             label: "No helmet — does not include head protection" },
+      { value: "not_applicable",        label: "Not applicable" },
+      { value: "unknown",               label: "I don't know" },
+    ],
+  },
+  {
+    key: "pfd_type",
+    module: "sports",
+    question: "What USCG PFD type is this life jacket / flotation device?",
+    helpText: "46 CFR Part 160 requires USCG approval. Type I (offshore), II (near-shore), III (flotation aid), V (special use, may be inflatable).",
+    showIf: { key: "sports_product_type", values: ["pfd_life_jacket", "kayak_canoe"] },
+    options: [
+      { value: "type_1",       label: "Type I — Offshore Life Jacket" },
+      { value: "type_2",       label: "Type II — Near-Shore Buoyant Vest" },
+      { value: "type_3",       label: "Type III — Flotation Aid (kayaking, paddling)" },
+      { value: "type_5",       label: "Type V — Special Use (inflatable, hybrid)" },
+      { value: "not_pfd",      label: "Not a PFD — other water safety product" },
+      { value: "not_applicable", label: "Not applicable" },
+      { value: "unknown",      label: "I don't know" },
+    ],
+  },
+  {
+    key: "climbing_equipment_type",
+    module: "sports",
+    question: "What type of climbing or fall-arrest equipment is this?",
+    helpText: "Load-bearing fall-arrest equipment for occupational use must meet OSHA 29 CFR 1910.140. Recreational climbing follows voluntary UIAA/EN standards.",
+    showIf: { key: "sports_product_type", values: ["climbing_equipment"] },
+    options: [
+      { value: "harness",            label: "Full-body or sit harness" },
+      { value: "rope",               label: "Dynamic or static climbing rope" },
+      { value: "carabiner",          label: "Carabiner or snap hook" },
+      { value: "belay_device",       label: "Belay / rappel device" },
+      { value: "fall_arrest_system", label: "Self-retracting lifeline (SRL) / fall arrest system" },
+      { value: "anchor",             label: "Anchor point / sling / anchor strap" },
+      { value: "not_applicable",     label: "Not applicable" },
+      { value: "unknown",            label: "I don't know" },
+    ],
+  },
+  {
+    key: "is_occupational",
+    module: "sports",
+    question: "Is this fall-arrest equipment intended for occupational use?",
+    helpText: "Occupational (workplace) fall protection triggers OSHA 29 CFR 1910.140. Consumer/recreational climbing uses voluntary UIAA and EN standards.",
+    showIf: { key: "climbing_equipment_type", values: ["harness", "rope", "carabiner", "belay_device", "fall_arrest_system", "anchor"] },
+    options: [
+      { value: "yes_occupational",  label: "Yes — intended for workplace / occupational use" },
+      { value: "yes_recreational",  label: "No — recreational climbing / consumer use only" },
+      { value: "unknown",           label: "I don't know" },
+    ],
+  },
+  {
+    key: "water_sports_type",
+    module: "sports",
+    question: "What type of watercraft or water-sports product is this?",
+    showIf: { key: "sports_product_type", values: ["kayak_canoe", "surfboard_paddleboard", "water_sports"] },
+    options: [
+      { value: "kayak",                   label: "Kayak (hard shell)" },
+      { value: "inflatable_kayak",        label: "Kayak (inflatable)" },
+      { value: "canoe",                   label: "Canoe" },
+      { value: "surfboard",               label: "Surfboard (hard)" },
+      { value: "paddleboard",             label: "Stand-up paddleboard (hard)" },
+      { value: "inflatable_paddleboard",  label: "Stand-up paddleboard (inflatable)" },
+      { value: "wetsuit",                 label: "Wetsuit or drysuit" },
+      { value: "scuba",                   label: "SCUBA gear" },
+      { value: "other_water",             label: "Other water sports equipment" },
+      { value: "not_applicable",          label: "Not applicable" },
+      { value: "unknown",                 label: "I don't know" },
+    ],
+  },
+  {
+    key: "protective_gear_type",
+    module: "sports",
+    question: "What type of protective gear is this?",
+    showIf: { key: "sports_product_type", values: ["protective_gear", "combat_sports"] },
+    options: [
+      { value: "shin_guard",       label: "Shin guard" },
+      { value: "knee_pad",         label: "Knee pad" },
+      { value: "elbow_pad",        label: "Elbow pad" },
+      { value: "body_armor",       label: "Body armor / chest protector" },
+      { value: "head_guard",       label: "Head guard (boxing, martial arts)" },
+      { value: "face_guard",       label: "Face guard or mask" },
+      { value: "mouthguard",       label: "Mouthguard" },
+      { value: "other_protective", label: "Other protective gear" },
+      { value: "not_applicable",   label: "Not applicable" },
+      { value: "unknown",          label: "I don't know" },
     ],
   },
 ];
