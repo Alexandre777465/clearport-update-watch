@@ -21,7 +21,7 @@ function getDb(): SupabaseClient {
 // Service-role client for backend operations — bypasses RLS
 export const db = new Proxy({} as SupabaseClient, {
   get(_, prop: string | symbol) {
-    return (getDb() as Record<string | symbol, unknown>)[prop];
+    return (getDb() as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
 
