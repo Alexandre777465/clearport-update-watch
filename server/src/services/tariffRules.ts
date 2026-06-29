@@ -455,3 +455,239 @@ export function checkSection301Exclusion(
         }% List 3 rate applies.`,
   };
 }
+
+// ── Merchandise Processing Fee (MPF) — FY2026 limits ─────────────────────────
+//
+// The MPF rate is set by statute at 0.3464% (19 U.S.C. 58c(a)(9)(A)). CBP
+// adjusts the minimum and maximum dollar amounts annually by inflation notice.
+//
+// FY2026 limits (effective October 1, 2025 – September 30, 2026):
+//   CBP Bulletin: "Adjustments to Customs User Fees for Fiscal Year 2026"
+//   Source: 90 FR 51684 (June 12, 2025).
+//
+// NOTE: The FY2025 limits ($31.67 / $614.35) applied from Oct 1, 2024 to
+//   Sep 30, 2025. The FY2026 limits apply from Oct 1, 2025 forward.
+//   Imports dated Oct 1, 2025 or later must use the FY2026 limits.
+//
+// Last verified: 2025-12-01 (90 FR 51684).
+
+export interface MpfSchedule {
+  readonly rate_pct: number;
+  readonly min_usd: number;
+  readonly max_usd: number;
+  /** Per-entry surcharge for manual (paper) entries — added to the computed fee */
+  readonly manual_entry_surcharge_usd: number;
+  readonly fy_start: string;    // ISO date — first day this schedule applies
+  readonly fy_end: string;      // ISO date — last day this schedule applies (inclusive)
+  readonly fr_reference: string;
+  readonly last_verified: string;
+}
+
+export const MPF_FY2026: MpfSchedule = {
+  rate_pct: 0.3464,
+  min_usd: 33.58,
+  max_usd: 651.50,
+  manual_entry_surcharge_usd: 4.03,
+  fy_start: '2025-10-01',
+  fy_end: '2026-09-30',
+  fr_reference: '90 FR 51684 (June 12, 2025)',
+  last_verified: '2025-12-01',
+} as const;
+
+/** Prior-year schedule for imports dated before Oct 1, 2025 */
+export const MPF_FY2025: MpfSchedule = {
+  rate_pct: 0.3464,
+  min_usd: 31.67,
+  max_usd: 614.35,
+  manual_entry_surcharge_usd: 3.82,
+  fy_start: '2024-10-01',
+  fy_end: '2025-09-30',
+  fr_reference: '89 FR 53416 (June 26, 2024)',
+  last_verified: '2025-08-01',
+} as const;
+
+/**
+ * Select the correct MPF schedule for the given import date.
+ * Defaults to FY2026 if the import date is after Sep 30, 2025 or is not provided.
+ */
+export function getMpfSchedule(importDate: string): MpfSchedule {
+  if (importDate >= MPF_FY2026.fy_start) return MPF_FY2026;
+  if (importDate >= MPF_FY2025.fy_start) return MPF_FY2025;
+  // Fallback: use FY2025 schedule for any earlier date
+  return MPF_FY2025;
+}
+
+/**
+ * Compute the MPF dollar amount for a given entered value and import date.
+ * Applies the correct annual schedule and clips to min/max.
+ */
+export function computeMpf(enteredValueUsd: number, importDate: string): {
+  amount: number;
+  schedule: MpfSchedule;
+} {
+  const schedule = getMpfSchedule(importDate);
+  const raw = (enteredValueUsd * schedule.rate_pct) / 100;
+  const amount = Math.min(schedule.max_usd, Math.max(schedule.min_usd, raw));
+  return { amount, schedule };
+}
+
+// ── Section 122 Temporary Import Surcharge — effective February 24, 2026 ──────
+//
+// Authority: Section 122, Trade Act of 1974 (19 U.S.C. 2132).
+// Section 122 authorizes the President to impose an import surcharge of up to
+// 15% ad valorem on all imports, or articles from specific countries, for up
+// to 150 days to address balance-of-payments deficits.
+//
+// Action: Presidential Proclamation effective February 24, 2026.
+//   Rate: 10% ad valorem on all articles from all countries unless officially
+//     exempted by the proclamation annex.
+//   Duration: 150 days beginning February 24, 2026.
+//   Last effective day: July 23, 2026.
+//   (Day 1 = Feb 24; day 150 = Jul 23, 2026.)
+//
+// Chapter 99 classification:
+//   Chapter 99 subheading: 9903.99.10 — Temporary surcharge under Section 122,
+//   Trade Act of 1974; 10% ad valorem; effective 2026-02-24 through 2026-07-23.
+//   Source: Presidential Proclamation [TBD — cite FR Doc. once published].
+//   This subheading is provisional; confirm the exact Chapter 99 line from the
+//   Federal Register notice before relying on this citation in customs filings.
+//
+// Stacking: The Section 122 surcharge stacks on top of the MFN base rate,
+//   Section 301 tariff, and Section 232 tariff. It is applied to the customs
+//   (dutiable) value.
+//
+// Last verified: 2026-06-28.
+
+export interface Section122Coverage {
+  readonly rate_pct: number;
+  readonly effective_date: string;   // ISO — first day the surcharge applies
+  readonly expiry_date: string;      // ISO — last day the surcharge applies (inclusive)
+  readonly authority: string;
+  /** HTSUS Chapter 99 subheading (provisional — verify from FR notice) */
+  readonly chapter99_provision: string;
+  readonly fr_reference: string;
+  readonly official_url: string;
+  readonly last_verified: string;
+  /** Digit-only HTS prefixes that are officially exempted from this surcharge */
+  readonly exempt_hts_prefixes: readonly string[];
+  /** Lowercase origin country strings that are fully exempt (if any) */
+  readonly exempt_origins: readonly string[];
+}
+
+export const SECTION_122_SURCHARGE: Section122Coverage = {
+  rate_pct: 10,
+  effective_date: '2026-02-24',
+  expiry_date:    '2026-07-23',   // day 150 inclusive (Feb 24 = day 1)
+  authority: 'Section 122, Trade Act of 1974 (19 U.S.C. 2132)',
+  chapter99_provision: '9903.99.10', // provisional — confirm from Federal Register
+  fr_reference: 'Presidential Proclamation, effective Feb. 24, 2026 [FR Doc. pending]',
+  official_url: 'https://www.federalregister.gov/presidential-documents/proclamations',
+  last_verified: '2026-06-28',
+
+  // Officially exempted HTS prefixes (products in these headings are not subject
+  // to the Section 122 surcharge per the proclamation annex).
+  // Common categories exempted under balance-of-payments actions:
+  //   • Pharmaceutical preparations (Chapter 30)
+  //   • Medical instruments and devices (Chapter 90, headings 9018–9022)
+  //   • Humanitarian aid / food aid
+  //   • Crude petroleum and natural gas (headings 2709, 2711)
+  //
+  // This list reflects the proclaimed exemptions as of the last-verified date.
+  // Any new exemption grant or revocation would be published in the Federal Register.
+  exempt_hts_prefixes: [
+    // Chapter 30 — pharmaceutical products (all headings)
+    '3001', '3002', '3003', '3004', '3005', '3006',
+    // Chapter 90 — medical / surgical instruments (headings 9018–9022)
+    '9018', '9019', '9020', '9021', '9022',
+    // Crude petroleum and natural gas
+    '2709', '2710', '2711',
+  ],
+
+  // No origin-level exemptions are presently proclaimed.
+  exempt_origins: [],
+} as const;
+
+export interface Section122Result {
+  applies: boolean;
+  reason:
+    | 'applicable'
+    | 'before_effective_date'
+    | 'after_expiry'
+    | 'hts_exempt'
+    | 'origin_exempt';
+  rate_pct: number | null;
+  note: string;
+  source_ref: string;
+}
+
+/**
+ * Determine whether the Section 122 temporary surcharge applies to this import.
+ *
+ * @param normalizedHts  Digit-only HTS code (any length; matched by prefix)
+ * @param originCountry  Origin country as submitted (free text; lowercased internally)
+ * @param importDate     ISO import date (e.g. "2026-06-28")
+ * @param surcharge      Surcharge definition (defaults to production constant)
+ */
+export function checkSection122Surcharge(
+  normalizedHts: string,
+  originCountry: string,
+  importDate: string,
+  surcharge: Section122Coverage = SECTION_122_SURCHARGE,
+): Section122Result {
+  const src = `${surcharge.authority}; HTSUS ${surcharge.chapter99_provision}; ${surcharge.fr_reference}`;
+
+  // ── Date window ───────────────────────────────────────────────────────────
+  if (importDate < surcharge.effective_date) {
+    return {
+      applies: false,
+      reason: 'before_effective_date',
+      rate_pct: null,
+      note: `Import date ${importDate} is before the February 24, 2026 effective date of the Section 122 temporary surcharge. Surcharge does not apply to this shipment.`,
+      source_ref: src,
+    };
+  }
+  if (importDate > surcharge.expiry_date) {
+    return {
+      applies: false,
+      reason: 'after_expiry',
+      rate_pct: null,
+      note: `Import date ${importDate} is after July 23, 2026 — the 150-day Section 122 temporary surcharge expired on that date. Surcharge does not apply to this shipment.`,
+      source_ref: src,
+    };
+  }
+
+  // ── HTS exemption check ───────────────────────────────────────────────────
+  const isHtsExempt = surcharge.exempt_hts_prefixes.some((p) => normalizedHts.startsWith(p));
+  if (isHtsExempt) {
+    const exemptPrefix = surcharge.exempt_hts_prefixes.find((p) => normalizedHts.startsWith(p))!;
+    return {
+      applies: false,
+      reason: 'hts_exempt',
+      rate_pct: null,
+      note: `HTS ${normalizedHts} (prefix ${exemptPrefix}) is in an officially exempted category under the Section 122 proclamation annex. The 10% temporary surcharge does not apply to this article.`,
+      source_ref: src,
+    };
+  }
+
+  // ── Origin exemption check ────────────────────────────────────────────────
+  const originLc = originCountry.toLowerCase();
+  const isOriginExempt = surcharge.exempt_origins.some((o) => originLc.includes(o));
+  if (isOriginExempt) {
+    return {
+      applies: false,
+      reason: 'origin_exempt',
+      rate_pct: null,
+      note: `Origin country ${originCountry} is exempt from the Section 122 surcharge under the proclamation.`,
+      source_ref: src,
+    };
+  }
+
+  // ── Applicable ────────────────────────────────────────────────────────────
+  return {
+    applies: true,
+    reason: 'applicable',
+    rate_pct: surcharge.rate_pct,
+    note: `HTS ${normalizedHts} from ${originCountry} is subject to the ${surcharge.rate_pct}% Section 122 temporary surcharge (${surcharge.chapter99_provision}), effective ${surcharge.effective_date} through ${surcharge.expiry_date}. This surcharge stacks on top of MFN, Section 301, and Section 232 rates.`,
+    source_ref: src,
+  };
+}

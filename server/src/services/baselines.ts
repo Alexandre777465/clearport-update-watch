@@ -15,6 +15,9 @@ import {
   SECTION_301_LAST_VERIFIED,
   checkSection232Auto,
   checkSection301Exclusion,
+  checkSection122Surcharge,
+  SECTION_122_SURCHARGE,
+  computeMpf,
 } from './tariffRules';
 import { evaluateAllModules } from './regulatoryModules/index';
 import type { ModuleInput, DocSpec as ModuleDocSpec, DynamicQuestion } from './regulatoryModules/index';
@@ -372,30 +375,27 @@ export function assembleBaselines(
 
     // ── 2c. Merchandise Processing Fee (MPF) and Harbor Maintenance Fee (HMF) ──
     // These fees apply to all formal entries (formal entry threshold: $2,500).
-    // MPF: 0.3464% of entered value, min $31.67 max $614.35 (19 U.S.C. 58c(a)(9)(A)).
+    // MPF: 0.3464% of entered value, with annual min/max adjustments (19 U.S.C. 58c(a)(9)(A)).
     // HMF: 0.125% of dutiable value for ocean shipments (26 U.S.C. 4461-4462).
-    // Both rates are set by statute; no rate change was published as of 2025-12-01.
     if (value != null) {
-      const mpfPct = 0.3464;
-      const mpfRaw = (value * mpfPct) / 100;
-      const mpfAmt = Math.min(614.35, Math.max(31.67, mpfRaw));
+      const { amount: mpfAmt, schedule: mpfSched } = computeMpf(value, today);
       const mpfFmt = mpfAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       out.push({
         id: 'mpf',
         category: 'Merchandise Processing Fee (MPF)',
         level: 'Low',
-        explanation: `The Merchandise Processing Fee (MPF) is assessed on all formal CBP entries. The rate is 0.3464% of the entered value, subject to a minimum of $31.67 and a maximum of $614.35 per formal entry per HTS line (19 U.S.C. 58c(a)(9)(A)).`,
+        explanation: `The Merchandise Processing Fee (MPF) is assessed on all formal CBP entries at 0.3464% of entered value, subject to a minimum of $${mpfSched.min_usd.toFixed(2)} and a maximum of $${mpfSched.max_usd.toFixed(2)} per formal entry per HTS line (19 U.S.C. 58c(a)(9)(A); ${mpfSched.fr_reference}).`,
         action: 'Include the MPF in your landed cost calculation. MPF is paid at time of entry.',
         verification_status: 'verified_applicable',
         applicability_conditions: 'All formal commercial entries into the United States (entered value above $2,500).',
-        verified_rate_pct: mpfPct,
-        financial_impact: `$${mpfFmt} on a $${value.toLocaleString('en-US')} shipment (0.3464%; min $31.67 / max $614.35 per 19 U.S.C. 58c(a)(9)(A))`,
+        verified_rate_pct: mpfSched.rate_pct,
+        financial_impact: `$${mpfFmt} on a $${value.toLocaleString('en-US')} shipment (0.3464%; min $${mpfSched.min_usd.toFixed(2)} / max $${mpfSched.max_usd.toFixed(2)} per 19 U.S.C. 58c(a)(9)(A))`,
         source: {
           agency: 'CBP',
           name: 'U.S. Customs and Border Protection',
-          title: 'Merchandise Processing Fee — 19 U.S.C. 58c(a)(9)(A)',
+          title: `Merchandise Processing Fee — 19 U.S.C. 58c(a)(9)(A); ${mpfSched.fr_reference}`,
           cfr_citation: '19 U.S.C. 58c(a)(9)(A); 19 CFR 24.23',
-          last_verified_at: today,
+          last_verified_at: mpfSched.last_verified,
           url: 'https://www.cbp.gov/trade/programs-administration/fees/merchandise-processing-fee',
           why_relevant: 'MPF applies to all formal CBP entries regardless of product type or origin.',
         },
@@ -479,6 +479,60 @@ export function assembleBaselines(
         });
       }
       // s232.applies === false → no category pushed; the domain resolver will show 'not_applicable'
+    }
+
+    // ── 2d. Section 122 temporary import surcharge (10%, Feb 24–Jul 23, 2026) ──
+    // Presidential authority under 19 U.S.C. 2132 to impose a temporary surcharge
+    // up to 15% for up to 150 days. Active window: Feb 24, 2026–Jul 23, 2026.
+    {
+      const s122 = checkSection122Surcharge(normalizedHts, entry.origin_country, today);
+
+      if (s122.applies === true) {
+        const s122Amt = value != null ? (value * SECTION_122_SURCHARGE.rate_pct) / 100 : null;
+        const s122Fmt = s122Amt?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        out.push({
+          id: 'section_122_surcharge',
+          category: 'Section 122 Temporary Import Surcharge',
+          level: 'High',
+          explanation: `A temporary 10% import surcharge is in effect under Section 122 of the Trade Act of 1974 (19 U.S.C. 2132), effective ${SECTION_122_SURCHARGE.effective_date} through ${SECTION_122_SURCHARGE.expiry_date}. The surcharge applies to substantially all imported merchandise under ${SECTION_122_SURCHARGE.chapter99_provision} and stacks with the MFN base rate, Section 301, and Section 232 tariffs. ${s122.note}`,
+          action: `Include +${SECTION_122_SURCHARGE.rate_pct}% in your landed cost calculation for this shipment. The surcharge expires ${SECTION_122_SURCHARGE.expiry_date} — confirm whether any extension has been proclaimed before release.`,
+          verification_status: 'verified_applicable',
+          applicability_conditions: `Import date between ${SECTION_122_SURCHARGE.effective_date} and ${SECTION_122_SURCHARGE.expiry_date}; HTS not in the exempt list; stacks with all other applicable tariffs.`,
+          verified_rate_pct: SECTION_122_SURCHARGE.rate_pct,
+          financial_impact: s122Amt != null
+            ? `$${s122Fmt} on a $${value!.toLocaleString('en-US')} shipment (${SECTION_122_SURCHARGE.rate_pct}% Section 122, ${SECTION_122_SURCHARGE.chapter99_provision})`
+            : `${SECTION_122_SURCHARGE.rate_pct}% of customs value — add a shipment value to see the dollar impact`,
+          source: {
+            agency: 'USTR / CBP',
+            name: 'Office of the United States Trade Representative / U.S. Customs and Border Protection',
+            title: `${SECTION_122_SURCHARGE.authority} — ${SECTION_122_SURCHARGE.chapter99_provision}`,
+            cfr_citation: `${SECTION_122_SURCHARGE.chapter99_provision}; ${SECTION_122_SURCHARGE.fr_reference}`,
+            effective_date: SECTION_122_SURCHARGE.effective_date,
+            last_verified_at: SECTION_122_SURCHARGE.last_verified,
+            url: SECTION_122_SURCHARGE.official_url,
+            why_relevant: `Section 122 temporary surcharge is active for this import date (${today}).`,
+          },
+        });
+      } else if (s122.reason === 'hts_exempt') {
+        out.push({
+          id: 'section_122_surcharge',
+          category: 'Section 122 Temporary Import Surcharge',
+          level: 'N/A',
+          explanation: `The Section 122 temporary 10% import surcharge (${SECTION_122_SURCHARGE.effective_date}–${SECTION_122_SURCHARGE.expiry_date}) does not apply to this HTS code. ${s122.note}`,
+          action: 'No Section 122 surcharge is owed for this HTS classification.',
+          verification_status: 'not_applicable',
+          source: {
+            agency: 'USTR / CBP',
+            name: 'Office of the United States Trade Representative / U.S. Customs and Border Protection',
+            title: `${SECTION_122_SURCHARGE.authority} — ${SECTION_122_SURCHARGE.chapter99_provision}`,
+            cfr_citation: `${SECTION_122_SURCHARGE.chapter99_provision}; ${SECTION_122_SURCHARGE.fr_reference}`,
+            last_verified_at: SECTION_122_SURCHARGE.last_verified,
+            url: SECTION_122_SURCHARGE.official_url,
+            why_relevant: 'HTS code falls within an exempt category; no surcharge applies.',
+          },
+        });
+      }
+      // before/after window: no card — surcharge simply not active on this date
     }
   }
 
@@ -632,6 +686,25 @@ const DOMAIN_REGISTRY: Array<{
           return { status: 'not_applicable', note: check.note };
       }
       return { status: 'not_applicable', note: `HTS not in ${SECTION_232_AUTO.proclamation} Annex I` };
+    },
+  },
+  {
+    key: 'section_122_surcharge',
+    label: `Section 122 Temporary Surcharge (${SECTION_122_SURCHARGE.effective_date}–${SECTION_122_SURCHARGE.expiry_date})`,
+    cat: 'tariff',
+    relevant: () => true,
+    resolve: (cats, entry, hts) => {
+      const c = cats.find((x) => x.id === 'section_122_surcharge');
+      if (c?.verification_status === 'verified_applicable')
+        return { status: 'verified_applicable', note: `Applies — +${SECTION_122_SURCHARGE.rate_pct}% (${SECTION_122_SURCHARGE.chapter99_provision}, active through ${SECTION_122_SURCHARGE.expiry_date})` };
+      if (c?.verification_status === 'not_applicable')
+        return { status: 'not_applicable', note: c.explanation ?? 'HTS exempt from Section 122 surcharge' };
+      // No card pushed: check if out of the date window or use a live check
+      const today = new Date().toISOString().slice(0, 10);
+      const s122 = checkSection122Surcharge(entry.hts_code ?? '', entry.origin_country, today);
+      if (s122.reason === 'before_effective_date') return { status: 'not_applicable', note: `Import date is before surcharge effective date (${SECTION_122_SURCHARGE.effective_date})` };
+      if (s122.reason === 'after_expiry') return { status: 'not_applicable', note: `Import date is after surcharge expiry (${SECTION_122_SURCHARGE.expiry_date})` };
+      return { status: 'no_applicable_rule', note: 'Section 122 surcharge date window not active' };
     },
   },
   {
@@ -798,6 +871,7 @@ export function buildCoverageMatrix(
     mfn_duty: 'hts_duty',
     section_301: 'hts_section301',
     section_232_auto: 'section_232_auto',
+    section_122_surcharge: 'section_122_surcharge',
   };
 
   // Domains from the registry

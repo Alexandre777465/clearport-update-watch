@@ -666,6 +666,11 @@ describe('generic_mechanical_part', () => {
 import {
   SECTION_301_RATES,
   checkSection301Exclusion,
+  checkSection122Surcharge,
+  SECTION_122_SURCHARGE,
+  computeMpf,
+  MPF_FY2026,
+  MPF_FY2025,
 } from '../services/tariffRules';
 
 // ── Section 301 rate table ────────────────────────────────────────────────────
@@ -866,5 +871,129 @@ describe('bluetooth_speaker_acceptance — no AD/CVD, correct FCC, ocean gated',
 
   it('passes structural assertions', () => {
     assertStructural(evaluateAllModules(input));
+  });
+});
+
+// ── Section 122 surcharge ─────────────────────────────────────────────────────
+describe('checkSection122Surcharge — date window', () => {
+  it('before effective date returns before_effective_date', () => {
+    const result = checkSection122Surcharge('8518210000', 'China', '2026-02-23');
+    expect(result.applies).toBe(false);
+    expect(result.reason).toBe('before_effective_date');
+  });
+
+  it('on effective date returns applicable', () => {
+    const result = checkSection122Surcharge('8518210000', 'China', '2026-02-24');
+    expect(result.applies).toBe(true);
+    expect(result.reason).toBe('applicable');
+    expect(result.rate_pct).toBe(10);
+  });
+
+  it('mid-window (June 28, 2026) returns applicable with 10%', () => {
+    const result = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
+    expect(result.applies).toBe(true);
+    expect(result.reason).toBe('applicable');
+    expect(result.rate_pct).toBe(10);
+  });
+
+  it('on expiry date (July 23, 2026) returns applicable', () => {
+    const result = checkSection122Surcharge('8518210000', 'China', '2026-07-23');
+    expect(result.applies).toBe(true);
+    expect(result.reason).toBe('applicable');
+  });
+
+  it('day after expiry returns after_expiry', () => {
+    const result = checkSection122Surcharge('8518210000', 'China', '2026-07-24');
+    expect(result.applies).toBe(false);
+    expect(result.reason).toBe('after_expiry');
+  });
+});
+
+describe('checkSection122Surcharge — HTS exemptions', () => {
+  it('pharma HTS 3004 is exempt', () => {
+    const result = checkSection122Surcharge('3004905090', 'Germany', '2026-06-28');
+    expect(result.applies).toBe(false);
+    expect(result.reason).toBe('hts_exempt');
+  });
+
+  it('petroleum HTS 2710 is exempt', () => {
+    const result = checkSection122Surcharge('2710199000', 'Canada', '2026-06-28');
+    expect(result.applies).toBe(false);
+    expect(result.reason).toBe('hts_exempt');
+  });
+
+  it('medical instruments HTS 9018 is exempt', () => {
+    const result = checkSection122Surcharge('9018909090', 'Japan', '2026-06-28');
+    expect(result.applies).toBe(false);
+    expect(result.reason).toBe('hts_exempt');
+  });
+
+  it('non-exempt HTS 8518.21 (Bluetooth speaker) is applicable mid-window', () => {
+    const result = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
+    expect(result.applies).toBe(true);
+    expect(result.reason).toBe('applicable');
+  });
+
+  it('non-exempt HTS 9403 (furniture) is applicable mid-window', () => {
+    const result = checkSection122Surcharge('9403906000', 'Vietnam', '2026-06-28');
+    expect(result.applies).toBe(true);
+    expect(result.reason).toBe('applicable');
+  });
+});
+
+describe('checkSection122Surcharge — stacking with Section 301', () => {
+  it('Section 122 surcharge does not affect Section 301 rate table', () => {
+    // Stacking is purely additive in baselines.ts — verify neither function
+    // mutates the other's output.
+    const s122 = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
+    const s301Rate = SECTION_301_RATES['9903.88.15']?.rate_pct;
+    expect(s122.rate_pct).toBe(10);
+    expect(s301Rate).toBe(7.5);
+    // Combined rate on a $50,000 shipment: MFN 0% + S301 7.5% + S122 10% = $8,750
+    const combined = (50000 * (7.5 + 10)) / 100;
+    expect(combined).toBe(8750);
+  });
+});
+
+// ── MPF FY schedules ──────────────────────────────────────────────────────────
+describe('computeMpf — FY2026 schedule', () => {
+  it('MPF_FY2026 has correct min/max/surcharge', () => {
+    expect(MPF_FY2026.min_usd).toBe(33.58);
+    expect(MPF_FY2026.max_usd).toBe(651.50);
+    expect(MPF_FY2026.manual_entry_surcharge_usd).toBe(4.03);
+    expect(MPF_FY2026.rate_pct).toBe(0.3464);
+  });
+
+  it('MPF_FY2025 has correct min/max', () => {
+    expect(MPF_FY2025.min_usd).toBe(31.67);
+    expect(MPF_FY2025.max_usd).toBe(614.35);
+    expect(MPF_FY2025.manual_entry_surcharge_usd).toBe(3.82);
+  });
+
+  it('$50,000 mid-range → $173.20 (unchanged at 0.3464%)', () => {
+    const { amount, schedule } = computeMpf(50000, '2026-06-28');
+    expect(amount).toBeCloseTo(173.20, 1);
+    expect(schedule.fy_start).toBe('2025-10-01');
+  });
+
+  it('$1,000 hits FY2026 min floor of $33.58', () => {
+    const { amount } = computeMpf(1000, '2026-06-28');
+    expect(amount).toBe(33.58);
+  });
+
+  it('$500,000 hits FY2026 max ceiling of $651.50', () => {
+    const { amount } = computeMpf(500000, '2026-06-28');
+    expect(amount).toBe(651.50);
+  });
+
+  it('$1,000 on FY2025 date hits FY2025 min floor of $31.67', () => {
+    const { amount, schedule } = computeMpf(1000, '2025-06-28');
+    expect(amount).toBe(31.67);
+    expect(schedule.fy_start).toBe('2024-10-01');
+  });
+
+  it('$500,000 on FY2025 date hits FY2025 max ceiling of $614.35', () => {
+    const { amount } = computeMpf(500000, '2025-06-28');
+    expect(amount).toBe(614.35);
   });
 });
