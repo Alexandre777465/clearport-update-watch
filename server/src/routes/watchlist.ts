@@ -54,6 +54,9 @@ const watchlistSchema = z.object({
   sold_in_eu: z.boolean().default(false),
   // User answers from the dynamic clarification step (module-specific questions).
   known_facts: z.record(z.string(), z.string()).optional(),
+  // Expected import date (ISO 8601, e.g. '2026-09-15'). When absent, today is
+  // used as an estimate for effective-date and expiry checks.
+  import_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 // POST /api/public/watchlist
@@ -141,6 +144,7 @@ router.post('/', async (req, res) => {
     manufacturer_name: data.manufacturer_name?.trim(),
     exporter_name: data.exporter_name?.trim(),
     known_facts: data.known_facts,
+    import_date: data.import_date,
   });
   // Confirmation email (no-op unless Resend + ENABLE_EMAIL_ALERTS are configured).
   void sendWatchlistConfirmation(entry as any);
@@ -164,6 +168,7 @@ async function runScanInBackground(
     manufacturer_name?: string;
     exporter_name?: string;
     known_facts?: Record<string, string>;
+    import_date?: string;
   },
 ): Promise<void> {
   try {
@@ -187,6 +192,8 @@ async function runScanInBackground(
       coverageMatrix: baselineResult.coverage,
       missingFacts: baselineResult.missingFacts,
       moduleDocSpecs: baselineResult.moduleDocSpecs,
+      knownFacts: extra?.known_facts,
+      importDate: extra?.import_date,
     });
 
     if (!result) {

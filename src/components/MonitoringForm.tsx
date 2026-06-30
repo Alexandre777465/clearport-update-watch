@@ -1246,6 +1246,44 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       {/* ── Information still missing ─────────────────────────────────────── */}
       <section>
         <h3 className="mb-3 font-semibold">{t(lang, "info_missing_title")}</h3>
+
+        {/* Structured clarification questions from the verifier */}
+        {(riskScan.clarification_questions ?? []).length > 0 && (
+          <div className="mb-3 space-y-3">
+            {(riskScan.clarification_questions ?? []).map((q, i) => (
+              <Card key={i} className="border-amber-200 bg-amber-50/60 p-4">
+                <div className="space-y-1.5 text-sm">
+                  <p className="font-semibold text-amber-900">
+                    {t(lang, "clarif_missing_info")} {q.missing_info}
+                  </p>
+                  <p className="text-amber-800">
+                    <span className="font-medium">{t(lang, "clarif_why_matters")} </span>
+                    {q.why_it_matters}
+                  </p>
+                  <p className="text-amber-800">
+                    <span className="font-medium">{t(lang, "clarif_affects")} </span>
+                    {q.affects_category}
+                  </p>
+                  {q.options && q.options.length > 0 && (
+                    <div className="mt-2">
+                      <p className="font-medium text-amber-900 mb-1">
+                        {t(lang, "clarif_resubmit")}
+                      </p>
+                      <ul className="space-y-0.5 pl-3">
+                        {q.options.map((opt) => (
+                          <li key={opt.value} className="text-amber-800">
+                            · {opt.label}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+
         <Card className="p-4">
           {missingFacts.length > 0 ? (
             <ul className="space-y-1.5">
@@ -1256,11 +1294,11 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : (riskScan.clarification_questions ?? []).length === 0 ? (
             <p className="text-sm text-muted-foreground">
               {t(lang, "info_missing_none")}
             </p>
-          )}
+          ) : null}
         </Card>
       </section>
 

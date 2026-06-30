@@ -27,6 +27,8 @@ import type {
   WatchlistEntry, ProductRiskScan, RiskCategory, RiskLevel,
   VerificationStatus, DocumentChecklistItem, DocItemStatus, ResponsibleParty,
 } from '../types';
+import { buildObligations } from './obligationEngine';
+import { verifyScan } from './reportVerifier';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -85,6 +87,11 @@ export interface ScanOptions {
   missingFacts?: string[];
   // Document specs from the universal regulatory module engine.
   moduleDocSpecs?: import('./regulatoryModules/index').DocSpec[];
+  // Structured clarification answers provided by the user (key → selected value).
+  knownFacts?: Record<string, string>;
+  // Expected import date (ISO, e.g. '2026-09-15'). When absent, today is used
+  // as an estimate for date-based rule checks.
+  importDate?: string;
 }
 
 export async function generateRiskScan(
@@ -243,7 +250,37 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
 
     const sanitized = sanitizeAndPrice(parsed, documents, opts.estimatedValueUsd);
     // Always finalize in English — translation is a separate phase handled in watchlist.ts.
-    return finalizeScan(sanitized, opts.baselineCategories ?? [], 'en', opts.coverageMatrix, opts.missingFacts, opts.moduleDocSpecs);
+    const tmode = (opts.transportMode as 'ocean' | 'air' | 'truck' | 'rail' | null | undefined) ?? null;
+    const finalized = finalizeScan(sanitized, opts.baselineCategories ?? [], 'en', opts.coverageMatrix, opts.missingFacts, opts.moduleDocSpecs, tmode);
+    // Independent verification gate: checks structural integrity of the draft
+    // report before it is stored. Issues are corrected silently server-side.
+    const productText = [entry.product_name, entry.product_description].filter(Boolean).join(' ');
+    const { passed, report, issues } = verifyScan(finalized, {
+      transportMode: tmode,
+      productFacts: {
+        htsDigits: (entry.hts_code ?? '').replace(/[^0-9]/g, ''),
+        productText: productText || undefined,
+        originCountry: entry.origin_country,
+        importDate: opts.importDate ?? new Date().toISOString().slice(0, 10),
+        attrs: {
+          is_children: entry.is_children,
+          has_battery: entry.has_battery,
+          is_electronic: entry.is_electronic,
+          is_textile: entry.is_textile,
+          is_cosmetic: entry.is_cosmetic,
+          is_food_contact: entry.is_food_contact,
+          is_supplement: (entry as any).is_supplement,
+        },
+        knownFacts: opts.knownFacts,
+      },
+    });
+    if (!passed) {
+      console.warn(
+        `[reportVerifier] ${issues.length} issue(s) corrected in scan for HTS ${entry.hts_code}:`,
+        issues.map((i) => i.code).join(', '),
+      );
+    }
+    return report;
   } catch (err: any) {
     console.error(`[riskScanner] Failed to generate scan (lang=${entry.language}, hts=${entry.hts_code}): ${err.message}`);
     return null;
@@ -339,6 +376,8 @@ type DocSpec = {
   doc_status: DocItemStatus;
   condition?: string;
   responsible_party: ResponsibleParty;
+  /** Transport modes this document applies to.  Absent = all modes. */
+  transport_modes?: ('ocean' | 'air' | 'truck' | 'rail')[];
 };
 
 function documentsForFinding(c: RiskCategory): DocSpec[] {
@@ -372,10 +411,18 @@ function documentsForFinding(c: RiskCategory): DocSpec[] {
         doc_status: 'required_to_clear',
       },
       {
-        document: 'Bill of Lading / Air Waybill',
+        document: 'Bill of Lading (BoL)',
         owner: 'carrier', responsible_party: 'carrier',
-        reason: 'Transport document issued by the carrier and presented with the entry.',
+        reason: 'Ocean transport document issued by the carrier and presented with the CBP entry.',
         doc_status: 'required_to_clear',
+        transport_modes: ['ocean'],
+      },
+      {
+        document: 'Air Waybill (AWB)',
+        owner: 'carrier', responsible_party: 'carrier',
+        reason: 'Air transport document issued by the carrier and presented with the CBP entry.',
+        doc_status: 'required_to_clear',
+        transport_modes: ['air'],
       },
     ];
   }
@@ -490,13 +537,18 @@ function documentsForFinding(c: RiskCategory): DocSpec[] {
 function buildChecklist(
   supported: RiskCategory[],
   moduleDocSpecs?: import('./regulatoryModules/index').DocSpec[],
+  transportMode?: 'ocean' | 'air' | 'truck' | 'rail' | null,
 ): DocumentChecklistItem[] {
   const out: DocumentChecklistItem[] = [];
   const seen = new Set<string>();
 
+  const modeMatches = (modes?: ('ocean' | 'air' | 'truck' | 'rail')[]) =>
+    !modes || !transportMode || modes.includes(transportMode);
+
   for (const c of supported) {
     const verified = c.verification_status === 'verified_applicable';
     for (const d of documentsForFinding(c)) {
+      if (!modeMatches(d.transport_modes)) continue;
       const key = d.document.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -511,6 +563,7 @@ function buildChecklist(
         responsible_party: d.responsible_party,
         finding_id: c.id,
         source: c.source,
+        transport_modes: d.transport_modes,
       });
     }
   }
@@ -519,6 +572,7 @@ function buildChecklist(
   if (moduleDocSpecs) {
     const findingStatus = new Map(supported.map((c) => [c.id, c.verification_status]));
     for (const d of moduleDocSpecs) {
+      if (!modeMatches(d.transport_modes)) continue;
       const key = d.document.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -534,6 +588,7 @@ function buildChecklist(
         condition: d.condition,
         responsible_party: d.responsible_party,
         finding_id: d.finding_id,
+        transport_modes: d.transport_modes,
       });
     }
   }
@@ -555,6 +610,7 @@ export function finalizeScan(
   coverageMatrix?: import('../types').CoverageItem[],
   missingFacts?: string[],
   moduleDocSpecs?: import('./regulatoryModules/index').DocSpec[],
+  transportMode?: 'ocean' | 'air' | 'truck' | 'rail' | null,
 ): ScanResult {
   const baselineTopics = new Set<string>();
   baselines.forEach((b) => topicsOf(b.category).forEach((t) => baselineTopics.add(t)));
@@ -648,7 +704,17 @@ export function finalizeScan(
   // grouped by responsible party, each item traceable to its finding + source.
   // The model's proposed checklist is intentionally discarded so no untraceable
   // or unsupported document can ever appear.
-  const checklist = buildChecklist(supported, moduleDocSpecs);
+  // Transport mode filtering: mode-specific documents (BoL = ocean, AWB = air)
+  // are suppressed when the shipment mode is known and doesn't match.
+  const mode = (transportMode ?? null) as 'ocean' | 'air' | 'truck' | 'rail' | null;
+  const checklist = buildChecklist(supported, moduleDocSpecs, mode);
+
+  // Build universal obligation records from all merged categories + doc specs.
+  const allDocSpecs = [
+    ...supported.flatMap((c) => documentsForFinding(c).map((d) => ({ ...d, finding_id: c.id ?? '' }))),
+    ...(moduleDocSpecs ?? []),
+  ];
+  const obligations = buildObligations(merged, allDocSpecs, mode);
 
   return {
     ...scan,
@@ -662,6 +728,7 @@ export function finalizeScan(
     readiness_score,
     coverage_matrix: coverageMatrix,
     missing_facts: missingFacts,
+    obligations,
   };
 }
 

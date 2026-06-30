@@ -275,19 +275,21 @@ export interface DocumentChecklistItem {
   responsible_party?: ResponsibleParty; // more precise than responsibility
   finding_id?: string;               // originating baseline/finding id (traceable)
   source?: SourceCitation;           // official source backing this requirement
+  transport_modes?: ('ocean' | 'air' | 'truck' | 'rail')[]; // absent = all modes
 }
 
 // CoverageItem — one entry in the "What ClearPort checked" matrix.
 // Every domain ClearPort screens for the submitted product gets a status so the
 // user sees what was checked, even when nothing was found.
 export type CoverageStatus =
-  | 'verified_applicable'   // confirmed applies to this product
-  | 'likely_match'          // scope criteria met; producer/exporter or formal entry needed
-  | 'official_unconfirmed'  // real rule exists; applicability not yet confirmed from facts
-  | 'no_applicable_rule'    // checked — no matching official rule or order found
-  | 'not_applicable'        // definitively does not apply based on submitted product facts
-  | 'insufficient_info'     // cannot assess — key product facts are missing
-  | 'source_unavailable';   // official source temporarily unavailable
+  | 'verified_applicable'            // confirmed applies to this product
+  | 'likely_match'                   // scope criteria met; producer/exporter or formal entry needed
+  | 'official_unconfirmed'           // real rule exists; applicability not yet confirmed from facts
+  | 'no_applicable_rule'             // checked — no matching official rule or order found
+  | 'not_applicable'                 // definitively does not apply based on submitted product facts
+  | 'insufficient_info'              // cannot assess — key product facts are missing
+  | 'source_unavailable'             // official source temporarily unavailable
+  | 'informational_no_specific_rule'; // screened — no mandatory rule identified; informational only
 
 export interface CoverageItem {
   domain: string;         // display label, e.g. "AD/CVD — Brake Drums (A-570-174)"
@@ -298,6 +300,21 @@ export interface CoverageItem {
   note?: string;          // one-sentence result summary shown to user
   missing_facts?: string[]; // specific facts needed to resolve this domain
   official_url?: string;
+}
+
+export interface ClarificationQuestion {
+  /** Machine key for the missing fact (e.g. 'transport_mode', 'is_children'). */
+  fact_key: string;
+  /** Short label shown to the user — the exact fact that is missing. */
+  missing_info: string;
+  /** One-sentence explanation of which rule / conclusion this fact affects. */
+  why_it_matters: string;
+  /** The finding id that is blocked pending this fact. */
+  affects_finding_id: string;
+  /** Human-readable category name of the blocked finding. */
+  affects_category: string;
+  /** Selectable options the user can pick from (when applicable). */
+  options?: Array<{ value: string; label: string }>;
 }
 
 export interface ProductRiskScan {
@@ -314,6 +331,44 @@ export interface ProductRiskScan {
   confidence_level: 'Low' | 'Medium' | 'High';
   coverage_matrix?: CoverageItem[];
   missing_facts?: string[];
+  clarification_questions?: ClarificationQuestion[];
   translation_status?: string | null;
   created_at: string;
+  obligations?: ObligationRecord[];
+}
+
+// ── Universal obligation model ─────────────────────────────────────────────────
+// Every regulatory output is normalised to one ObligationRecord per legal rule.
+// Laws with different timings become separate records; records are deduplicated
+// by canonical key before display.
+
+export type ObligationStatus =
+  | 'mandatory'                    // verified applicable — compliance is required
+  | 'voluntary'                    // official standard; no mandatory federal rule
+  | 'informational_no_specific_rule' // screened; no mandatory rule identified
+  | 'not_applicable'               // definitively excluded for this product/route
+  | 'cannot_determine';            // fact(s) missing to resolve applicability
+
+export type ObligationTiming =
+  | 'customs_clearance'    // must be resolved to release goods at CBP
+  | 'transport'            // governs the physical shipment (carrier docs)
+  | 'before_sale'          // pre-market requirement; not a customs-clearance doc
+  | 'post_market'          // surveillance or reporting obligation after import
+  | 'available_on_request' // must exist; CBP or agency may request at any time
+  | 'usually_requested';   // not universally required; CBP frequently asks for it
+
+export interface ObligationRecord {
+  obligation_id: string;      // dedup key: lower(citation)::status::timing
+  module: string;             // originating module id, e.g. 'sports', 'textiles'
+  legal_citation: string;     // exact CFR/USC/EO citation or HTS provision
+  official_source?: string;   // URL to the authoritative source
+  product_scope?: string;     // applicability conditions (who this covers)
+  triggering_facts?: string[]; // fact keys that activate this obligation
+  exclusion_facts?: string[];  // fact keys that exclude this obligation
+  status: ObligationStatus;
+  timing: ObligationTiming;
+  responsible_party?: ResponsibleParty;
+  required_evidence?: string[];
+  document_name?: string;     // canonical document name, if any
+  transport_modes?: ('ocean' | 'air' | 'truck' | 'rail')[]; // null = all modes
 }

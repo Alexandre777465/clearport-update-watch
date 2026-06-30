@@ -301,7 +301,9 @@ export interface SourceCitation {
 export type VerificationStatus =
   | "verified_applicable"
   | "official_unconfirmed"
-  | "no_verified_source";
+  | "no_verified_source"
+  | "not_applicable"
+  | "insufficient_info";
 
 export type CoverageStatus =
   | "verified_applicable"
@@ -310,7 +312,8 @@ export type CoverageStatus =
   | "no_applicable_rule"
   | "not_applicable"
   | "insufficient_info"
-  | "source_unavailable";
+  | "source_unavailable"
+  | "informational_no_specific_rule";
 
 export interface CoverageItem {
   domain: string;
@@ -362,7 +365,48 @@ export interface DocumentChecklistItem {
   responsible_party?: ResponsibleParty;
   finding_id?: string;
   source?: SourceCitation;
+  transport_modes?: ("ocean" | "air" | "truck" | "rail")[]; // absent = all modes
   uploaded?: boolean;  // client-side state only
+}
+
+export type ObligationStatus =
+  | "mandatory"
+  | "voluntary"
+  | "informational_no_specific_rule"
+  | "not_applicable"
+  | "cannot_determine";
+
+export type ObligationTiming =
+  | "customs_clearance"
+  | "transport"
+  | "before_sale"
+  | "post_market"
+  | "available_on_request"
+  | "usually_requested";
+
+export interface ObligationRecord {
+  obligation_id: string;
+  module: string;
+  legal_citation: string;
+  official_source?: string;
+  product_scope?: string;
+  triggering_facts?: string[];
+  exclusion_facts?: string[];
+  status: ObligationStatus;
+  timing: ObligationTiming;
+  responsible_party?: ResponsibleParty;
+  required_evidence?: string[];
+  document_name?: string;
+  transport_modes?: ("ocean" | "air" | "truck" | "rail")[];
+}
+
+export interface ClarificationQuestion {
+  fact_key: string;
+  missing_info: string;
+  why_it_matters: string;
+  affects_finding_id: string;
+  affects_category: string;
+  options?: Array<{ value: string; label: string }>;
 }
 
 export interface ProductRiskScan {
@@ -379,7 +423,9 @@ export interface ProductRiskScan {
   confidence_level: 'Low' | 'Medium' | 'High';
   coverage_matrix?: CoverageItem[];
   missing_facts?: string[];
+  clarification_questions?: ClarificationQuestion[];
   created_at: string;
+  obligations?: ObligationRecord[];
 }
 
 export interface ProductAttributes {
