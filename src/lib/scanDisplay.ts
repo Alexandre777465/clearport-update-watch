@@ -33,6 +33,7 @@ export const DOMAIN_FINDING_MAP: Record<string, string> = {
   mfn_duty: "hts_duty",
   section_301: "hts_section301",
   section_232_auto: "section_232_auto",
+  section_122_surcharge: "section_122_surcharge",
 };
 
 /**
@@ -140,6 +141,18 @@ export function buildCostRows(scan: ProductRiskScan, lang: Lang): CostRow[] {
         rows.push({ label: t(lang, "imp_costs_s232"), answer: "Does not apply", rateText: null, ratePct: null, status: c.status, coverageItem: c });
       } else {
         rows.push({ label: t(lang, "imp_costs_s232"), answer: rateText ? `Applies — +${rateText}` : "Confirm with customs broker", rateText, ratePct, status: c.status, coverageItem: c });
+      }
+
+    } else if (c.domain_key === "section_122_surcharge") {
+      if (c.status === "not_applicable" || c.status === "no_applicable_rule") {
+        rows.push({ label: t(lang, "imp_costs_s122"), answer: "Does not apply", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else if (c.status === "verified_applicable" && ratePct != null) {
+        rows.push({ label: t(lang, "imp_costs_s122"), answer: `Applies — +${ratePct}% — 9903.01.25`, rateText, ratePct, status: c.status, coverageItem: c });
+      } else if (c.status === "insufficient_info") {
+        const missing = c.missing_facts?.join(", ") ?? "civil aircraft use certification";
+        rows.push({ label: t(lang, "imp_costs_s122"), answer: `Cannot determine — missing: ${missing}`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else {
+        rows.push({ label: t(lang, "imp_costs_s122"), answer: "Cannot determine — confirm applicability", rateText: null, ratePct: null, status: c.status, coverageItem: c });
       }
 
     } else if (c.domain_key.startsWith("adcvd_A-")) {
@@ -364,7 +377,12 @@ export function collectMissingFacts(scan: ProductRiskScan): string[] {
     .forEach((c) => (c.missing_facts ?? []).forEach(add));
 
   scan.risk_categories
-    .filter((c) => c.missing_info)
+    .filter(
+      (c) =>
+        c.missing_info &&
+        c.verification_status !== "verified_applicable" &&
+        c.verification_status !== "not_applicable",
+    )
     .forEach((c) => add(c.missing_info!));
 
   return result;

@@ -477,28 +477,31 @@ export const sportsModule: RegulatoryModule = {
     if (isCombat) {
       findings.push({
         id: 'sports_combat_protective_no_federal',
-        category: 'Combat Sports / Protective Gear — No Mandatory Federal Standard (Adults)',
-        level: 'Low',
+        category: 'Combat Sports / Protective Gear — No Mandatory Federal Standard Identified (Adults)',
+        level: 'N/A',
         explanation:
-          'Adult combat sports equipment (boxing gloves, shin guards, sparring gear, body armor) ' +
-          'and general sports protective gear (knee pads, elbow pads) do not have a mandatory U.S. federal ' +
-          'safety standard for adult use. ' +
-          'Relevant voluntary standards include ASTM F2697 (general sports protective equipment), ' +
-          'NOCSAE standards (football/lacrosse helmets), and sport-specific ASTM or ISO standards. ' +
+          'No product-specific mandatory U.S. federal safety standard has been identified for adult ' +
+          'combat sports equipment (boxing gloves, shin guards, sparring gear, body armor) or general ' +
+          'adult protective gear (knee pads, elbow pads). No completed ASTM boxing glove performance ' +
+          'standard is currently active; any ASTM work items in development are not active standards ' +
+          'and must not be treated as requirements. ' +
+          'Sport-specific NOCSAE standards exist for certain helmets (football, lacrosse) and batting ' +
+          'helmets (baseball), but these apply to those specific helmet types, not general boxing or ' +
+          'combat-sports protective gear. ' +
           'If the product is intended for children ≤12, CPSIA third-party testing is required ' +
           'and is covered under the children\'s products module.',
         action:
-          'No mandatory certification is required for adult protective gear. ' +
+          'No mandatory certification is required for adult boxing gloves or general adult protective gear. ' +
           'If marketed to children ≤12, obtain CPSIA third-party testing. ' +
           'If the product is labeled as meeting a specific voluntary standard, retain the relevant test report.',
-        verification_status: 'official_unconfirmed',
+        verification_status: 'not_applicable',
         source: {
           name: 'CPSC Sports & Recreational Guidance',
           title: 'CPSC Business Guidance — Sports, Recreational, and Outdoor Products',
           agency: 'CPSC',
           url: 'https://www.cpsc.gov/Business--Manufacturing/Business-Education/Business-Guidance/Sports-Recreational-and-Outdoor-Products',
           last_verified_at: '2025-08-01',
-          why_relevant: 'CPSC guidance covering sports and recreational equipment; no mandatory standard for adult combat/protective gear.',
+          why_relevant: 'CPSC guidance confirms no mandatory federal standard for adult combat/protective gear; no mandatory certification required.',
         },
       });
     }
@@ -511,10 +514,10 @@ export const sportsModule: RegulatoryModule = {
       domain: 'Sports & Outdoor Equipment — CPSC / USCG / OSHA',
       domain_key: 'sports_outdoor_equipment',
       category: 'product_regulation',
-      status: hasMandatory ? 'verified_applicable' : 'official_unconfirmed',
+      status: hasMandatory ? 'verified_applicable' : 'no_applicable_rule',
       note: hasMandatory
         ? 'Mandatory safety requirements identified. See findings for details.'
-        : 'No mandatory federal standard identified for this product type. Voluntary standards may apply.',
+        : 'No mandatory federal standard identified for this product type. Voluntary standards may apply — see findings for details.',
       official_url: 'https://www.cpsc.gov/Business--Manufacturing/Business-Education/Business-Guidance/Sports-Recreational-and-Outdoor-Products',
     });
 

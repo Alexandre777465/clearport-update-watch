@@ -404,3 +404,63 @@ describe('Scenario 15: Explicit "not_sports" answer suppresses all sports findin
     expect(sportsFindings).toHaveLength(0);
   });
 });
+
+// ── Report integrity bug regressions ─────────────────────────────────────────
+// Bug 2: Adult combat sports must show 'not_applicable' (no mandatory standard
+//         identified), NOT 'official_unconfirmed' (cannot determine).
+// Bug 3: ASTM F2697 must never appear in boxing glove findings — it covers
+//         detention facility barrier testing, not sports protective equipment.
+
+describe('Bug 2 & 3 — boxing gloves: no ASTM F2697, not_applicable status', () => {
+  const text = 'cowhide leather boxing gloves, PU foam padding, polyester lining, adults only';
+  const hts = '42032180';
+  const answers = { sports_product_type: 'combat_sports', protective_gear_type: 'boxing_gloves', age_range: 'adults_only' };
+
+  it('Bug 3 — ASTM F2697 never appears in boxing glove findings (wrong standard)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    for (const finding of result.findings) {
+      expect(finding.explanation ?? '').not.toContain('F2697');
+      expect(finding.explanation ?? '').not.toContain('ASTM F2697');
+    }
+  });
+
+  it('Bug 3 — no "detention" or "correctional" language in sports findings', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    for (const finding of result.findings) {
+      expect((finding.explanation ?? '').toLowerCase()).not.toContain('detention');
+      expect((finding.explanation ?? '').toLowerCase()).not.toContain('correctional');
+    }
+  });
+
+  it('Bug 2 — combat sports finding has verification_status not_applicable (no mandatory standard)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const combatFinding = result.findings.find((f) => f.id === 'sports_combat_protective_no_federal');
+    expect(combatFinding).toBeDefined();
+    expect(combatFinding!.verification_status).toBe('not_applicable');
+  });
+
+  it('Bug 2 — combat sports finding level is N/A (excluded from regulatory section by UI filter)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const combatFinding = result.findings.find((f) => f.id === 'sports_combat_protective_no_federal');
+    expect(combatFinding!.level).toBe('N/A');
+  });
+
+  it('Bug 2 — sports coverage domain is no_applicable_rule (not official_unconfirmed) for boxing gloves', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const domain = result.coverageDomains.find((d) => d.domain_key === 'sports_outdoor_equipment');
+    expect(domain).toBeDefined();
+    expect(domain!.status).toBe('no_applicable_rule');
+  });
+
+  it('Bug 2 — combat finding explanation says "No product-specific mandatory U.S. federal safety standard"', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const combatFinding = result.findings.find((f) => f.id === 'sports_combat_protective_no_federal');
+    expect(combatFinding!.explanation).toContain('No product-specific mandatory U.S. federal safety standard');
+  });
+
+  it('Bug 3 — combat finding explanation mentions "No completed ASTM boxing glove"', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const combatFinding = result.findings.find((f) => f.id === 'sports_combat_protective_no_federal');
+    expect(combatFinding!.explanation).toContain('No completed ASTM boxing glove');
+  });
+});

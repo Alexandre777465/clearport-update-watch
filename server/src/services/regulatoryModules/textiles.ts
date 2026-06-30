@@ -36,8 +36,11 @@ const FOOTWEAR_HTS_PREFIXES = ['6401', '6402', '6403'];
 const TEXTILES_TEXT_RE =
   /\b(fabric|textile|apparel|garment|clothing|shirt|pants|dress|jacket|coat|sweater|hat|cap|glove|sock|underwear|footwear|shoe|boot|sandal|fiber|yarn|knit|woven|cotton|wool|silk|polyester|nylon|linen|denim)\b/i;
 
+// 16 CFR Part 423 (Care Labeling Rule) covers "textile wearing apparel" — it
+// explicitly exempts accessories such as gloves, hats, belts, and scarves per
+// FTC guidance. Only garments worn on the body for coverage are included here.
 const APPAREL_TEXT_RE =
-  /\b(apparel|garment|clothing|shirt|pants|dress|jacket|coat|sweater|hat|cap|glove|sock|underwear)\b/i;
+  /\b(apparel|garment|clothing|shirt|pants|dress|jacket|coat|sweater|sock|underwear)\b/i;
 
 const WOOL_TEXT_RE = /\bwool\b|cashmere|merino|alpaca|mohair/i;
 

@@ -1092,3 +1092,63 @@ describe('computeMpf — FY2026 schedule', () => {
     expect(amount).toBe(614.35);
   });
 });
+
+// ── Bug 4 regression — care label exemption for gloves ────────────────────────
+
+describe('Bug 4 — gloves exempt from FTC Care Labeling Rule (16 CFR 423)', () => {
+  it('boxing gloves (HTS 4203.21.8060) do NOT trigger care labeling requirement', () => {
+    const input = makeInput(
+      '42032180',
+      'cowhide leather boxing gloves, PU foam padding, polyester textile lining, adults only',
+    );
+    const result = evaluateAllModules(input);
+    const careLabelFinding = result.findings.find((f) => f.id === 'ftc_care_labeling');
+    if (careLabelFinding) {
+      // Must be not_applicable — gloves are NOT wearing apparel under 16 CFR 423
+      expect(careLabelFinding.verification_status).toBe('not_applicable');
+    }
+  });
+
+  it('boxing gloves TFPIA fiber-content labeling still applies (polyester lining)', () => {
+    const input = makeInput(
+      '42032180',
+      'cowhide leather boxing gloves, PU foam padding, polyester textile lining, adults only',
+    );
+    const result = evaluateAllModules(input);
+    const tfpiaFinding = result.findings.find((f) => f.id === 'ftc_textile_labeling');
+    expect(tfpiaFinding).toBeDefined();
+    // TFPIA applies — polyester lining is a textile component
+    expect(tfpiaFinding!.verification_status).not.toBe('not_applicable');
+  });
+});
+
+// ── Bug 5 regression — false boolean attrs suppress modules ───────────────────
+
+describe('Bug 5 — explicit false attrs suppress corresponding module', () => {
+  it('is_electronic=false suppresses electronics module even when text contains "electronic"', () => {
+    const mods = detectCategories(
+      '',
+      'electronic-grade cowhide leather boxing gloves protective equipment',
+      { is_electronic: false },
+    );
+    expect(mods.has('electronics')).toBe(false);
+  });
+
+  it('has_battery=false suppresses batteries module', () => {
+    const mods = detectCategories(
+      '',
+      'rechargeable battery-powered sports watch tracker',
+      { has_battery: false },
+    );
+    expect(mods.has('batteries')).toBe(false);
+  });
+
+  it('is_children=false suppresses childrens module', () => {
+    const mods = detectCategories(
+      '',
+      "children's toy sports equipment for kids under 12",
+      { is_children: false },
+    );
+    expect(mods.has('childrens')).toBe(false);
+  });
+});

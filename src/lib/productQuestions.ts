@@ -442,7 +442,18 @@ export function getQuestionsForProduct(
   attrs: ProductAttrs = {},
   knownFacts: Record<string, string> = {},
 ): ProductQuestion[] {
-  const modules = detectModules(htsDigits, productText, attrs, knownFacts);
+  // Map explicit false booleans to negative structured answers so that a user
+  // unchecking "Electronic product" (etc.) immediately suppresses that module's
+  // questions without waiting for a full scan round-trip.
+  const attrOverrides: Record<string, string> = {};
+  if (attrs.is_electronic  === false) attrOverrides['product_function']        = 'not_electronic';
+  if (attrs.has_battery    === false) attrOverrides['battery_type']             = 'no_battery';
+  if (attrs.is_children    === false) attrOverrides['age_range']                = 'not_for_children';
+  if (attrs.is_textile     === false) attrOverrides['textile_type']             = 'not_textile';
+  if (attrs.is_cosmetic    === false) attrOverrides['contains_otc_ingredient']  = 'not_cosmetic';
+  if (attrs.is_food_contact === false) attrOverrides['food_contact_use']        = 'no';
+  const mergedFacts = { ...attrOverrides, ...knownFacts };
+  const modules = detectModules(htsDigits, productText, attrs, mergedFacts);
   return QUESTION_BANK.filter((q) => modules.has(q.module));
 }
 

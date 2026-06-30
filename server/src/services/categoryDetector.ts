@@ -36,16 +36,21 @@ export interface ProductBooleans {
 // fact engine at inference level (confidence < explicit sources).
 function attrsToAnswers(attrs: ProductBooleans): Record<string, string> {
   const out: Record<string, string> = {};
-  // These map to the same question keys used in ANSWER_RULES but with an
-  // '_attr_inferred' suffix to distinguish them from real structured answers.
-  // We use the actual question keys so ANSWER_RULES picks them up.
-  if (attrs.has_battery    === true)  out['battery_type']         = 'other_chemistry';
-  if (attrs.is_electronic  === true)  out['product_function']     = 'other_no_radio';
-  if (attrs.is_children    === true)  out['age_range']            = 'age_3_to_12';
-  if (attrs.is_textile     === true)  out['textile_type']         = 'yes_textile';
+  // Positive attrs activate the module; negative attrs suppress it so text/HTS
+  // detection can't override an explicit user denial (e.g. unchecking Electronic).
+  if (attrs.has_battery    === true)  out['battery_type']            = 'other_chemistry';
+  if (attrs.has_battery    === false) out['battery_type']            = 'no_battery';
+  if (attrs.is_electronic  === true)  out['product_function']        = 'other_no_radio';
+  if (attrs.is_electronic  === false) out['product_function']        = 'not_electronic';
+  if (attrs.is_children    === true)  out['age_range']               = 'age_3_to_12';
+  if (attrs.is_children    === false) out['age_range']               = 'not_for_children';
+  if (attrs.is_textile     === true)  out['textile_type']            = 'yes_textile';
+  if (attrs.is_textile     === false) out['textile_type']            = 'not_textile';
   if (attrs.is_cosmetic    === true)  out['contains_otc_ingredient'] = 'no';
-  if (attrs.is_food_contact === true) out['food_contact_use']     = 'yes';
-  if (attrs.is_supplement  === true)  out['is_meat_or_poultry']   = 'no';  // supplement → food module
+  if (attrs.is_cosmetic    === false) out['contains_otc_ingredient'] = 'not_cosmetic';
+  if (attrs.is_food_contact === true) out['food_contact_use']        = 'yes';
+  if (attrs.is_food_contact === false) out['food_contact_use']       = 'no';
+  if (attrs.is_supplement  === true)  out['is_meat_or_poultry']      = 'no';  // supplement → food module
   return out;
 }
 

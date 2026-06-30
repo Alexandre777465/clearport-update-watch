@@ -388,13 +388,16 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   const [retryKnownFacts, setRetryKnownFacts] = useState<Record<string, string> | null>(null);
 
   // Detect which regulatory modules apply as the user types — drives question list.
+  // Passing attrs ensures that false booleans (e.g. is_electronic=false) suppress
+  // the corresponding module questions immediately without a round-trip to the scan.
   const dynamicQuestions = useMemo(
     () =>
       getQuestionsForProduct(
         form.htsCode.replace(/[^0-9]/g, ""),
         `${form.productName} ${form.description}`,
+        attrs,
       ),
-    [form.htsCode, form.productName, form.description],
+    [form.htsCode, form.productName, form.description, attrs],
   );
 
   const set =
@@ -1071,7 +1074,7 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       : null;
 
   // Section 3: non-tariff regulatory findings
-  const tariffCatIds = new Set(["hts_duty", "hts_section301", "section_232_auto", "section_232"]);
+  const tariffCatIds = new Set(["hts_duty", "hts_section301", "section_232_auto", "section_232", "section_122_surcharge"]);
   const tariffCatNames = new Set([
     "Tariff Risk", "HTS Classification Risk", "Section 301 China Tariff", "AD/CVD Risk",
   ]);
@@ -1241,10 +1244,10 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       )}
 
       {/* ── Information still missing ─────────────────────────────────────── */}
-      {missingFacts.length > 0 && (
-        <section>
-          <h3 className="mb-3 font-semibold">{t(lang, "info_missing_title")}</h3>
-          <Card className="p-4">
+      <section>
+        <h3 className="mb-3 font-semibold">{t(lang, "info_missing_title")}</h3>
+        <Card className="p-4">
+          {missingFacts.length > 0 ? (
             <ul className="space-y-1.5">
               {missingFacts.map((fact, i) => (
                 <li key={i} className="flex gap-2 text-sm">
@@ -1253,9 +1256,13 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
                 </li>
               ))}
             </ul>
-          </Card>
-        </section>
-      )}
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {t(lang, "info_missing_none")}
+            </p>
+          )}
+        </Card>
+      </section>
 
       {/* ── Next steps (max 3) ────────────────────────────────────────────── */}
       {nextSteps.length > 0 && (

@@ -610,3 +610,152 @@ describe("$50,000 ocean shipment — brake drum from China — full cost breakdo
     expect(fabricated).toHaveLength(0);
   });
 });
+
+// ── Bug-7 acceptance test: boxing gloves HTS 4203.21.8060, China→USA ──────────
+// Scenario: cowhide leather boxing gloves, China → USA, $50,000 customs value,
+// ocean transport, adults only, combat-sports subtype.
+// Rates: MFN 4.9% + Section 301 25% + Section 122 10% = 39.9%
+// Expected known total: $19,950 + MPF $173.20 + HMF $62.50 = $20,185.70
+
+const BOXING_GLOVES_MFN = {
+  id: "hts_duty",
+  category: "Customs Duty (MFN / General Rate)",
+  level: "Low" as const,
+  explanation: "MFN rate for HTS 4203.21.8060 boxing gloves is 4.9%.",
+  action: "Confirm HTS with broker.",
+  verification_status: "verified_applicable" as const,
+  verified_rate_pct: 4.9,
+  source: { agency: "USITC", name: "USITC", title: "HTS 4203.21.8060", last_verified_at: "2026-06-30", url: "https://hts.usitc.gov" },
+};
+
+const BOXING_GLOVES_S301 = {
+  id: "hts_section301",
+  category: "Section 301 China Tariff",
+  level: "High" as const,
+  explanation: "Section 301 List 3 (9903.88.03) applies — +25%.",
+  action: "Include in landed cost.",
+  verification_status: "verified_applicable" as const,
+  verified_rate_pct: 25,
+  source: { agency: "USTR", name: "USTR", title: "Section 301 List 3", cfr_citation: "9903.88.03", last_verified_at: "2026-06-30", url: "https://ustr.gov" },
+};
+
+const BOXING_GLOVES_S122 = {
+  id: "section_122_surcharge",
+  category: "Section 122 Temporary Surcharge",
+  level: "High" as const,
+  explanation: "10% temporary surcharge under Section 122 / 9903.01.25 in effect.",
+  action: "Include in landed cost.",
+  verification_status: "verified_applicable" as const,
+  verified_rate_pct: 10,
+  source: { agency: "CBP", name: "Section 122 Trade Act 1974", title: "9903.01.25", last_verified_at: "2026-06-30", url: "https://www.federalregister.gov" },
+};
+
+const BOXING_GLOVES_SCAN: ProductRiskScan = {
+  id: "mock-scan-boxing-gloves",
+  watchlist_entry_id: "mock-entry-boxing",
+  overall_risk: "High",
+  overall_summary: "Boxing gloves from China — multiple tariff layers apply.",
+  risk_categories: [BOXING_GLOVES_MFN, BOXING_GLOVES_S301, BOXING_GLOVES_S122],
+  document_checklist: [],
+  broker_questions: [],
+  supplier_questions: [],
+  next_actions: [],
+  readiness_score: 80,
+  confidence_level: "High",
+  created_at: "2026-06-30T10:00:00.000Z",
+  coverage_matrix: [
+    { domain: "MFN Duty", domain_key: "mfn_duty", category: "tariff", status: "verified_applicable", finding_id: "hts_duty" },
+    { domain: "Section 301", domain_key: "section_301", category: "tariff", status: "verified_applicable", finding_id: "hts_section301" },
+    { domain: "Section 122 Temporary Surcharge", domain_key: "section_122_surcharge", category: "tariff", status: "verified_applicable", finding_id: "section_122_surcharge" },
+    { domain: "Customs Entry", domain_key: "customs_entry", category: "customs", status: "verified_applicable" },
+  ],
+  missing_facts: [],
+};
+
+describe("Bug-7 acceptance — boxing gloves HTS 4203.21.8060 from China, $50,000, ocean", () => {
+  const rows = buildCostRows(BOXING_GLOVES_SCAN, "en");
+  const enhancedRows = buildEnhancedCostRows(BOXING_GLOVES_SCAN, "en", 50_000, "ocean");
+
+  it("Bug 1 — Section 122 temporary surcharge row is present in the payment table", () => {
+    const s122 = rows.find((r) => r.coverageItem.domain_key === "section_122_surcharge");
+    expect(s122).toBeDefined();
+  });
+
+  it("Bug 1 — Section 122 row shows +10% and chapter 99 provision 9903.01.25", () => {
+    const s122 = rows.find((r) => r.coverageItem.domain_key === "section_122_surcharge");
+    expect(s122?.rateText).toBe("10%");
+    expect(s122?.ratePct).toBe(10);
+    expect(s122?.answer).toContain("+10%");
+    expect(s122?.answer).toContain("9903.01.25");
+  });
+
+  it("Bug 1 — Section 122 contributes to knownPct total", () => {
+    const { knownPct } = computeKnownTariffTotal(rows);
+    // MFN 4.9% + S301 25% + S122 10% = 39.9%
+    expect(knownPct).toBeCloseTo(39.9, 5);
+  });
+
+  it("Bug 1 — Section 122 dollar amount is $5,000 ($50,000 × 10%)", () => {
+    const s122 = enhancedRows.find((r) => r.coverageItem?.domain_key === "section_122_surcharge");
+    expect(s122).toBeDefined();
+    expect(s122!.dollarText).toBe("$5,000.00");
+  });
+
+  it("Bug 1 — known total with MFN + S301 + S122 + MPF + HMF = $20,185.70", () => {
+    // 4.9% + 25% + 10% = 39.9% of $50,000 = $19,950
+    // MPF: $50,000 × 0.3464% = $173.20
+    // HMF: $50,000 × 0.125% = $62.50
+    // Total: $20,185.70
+    const knownRows = enhancedRows.filter((r) => r.dollarText != null &&
+      r.status !== "not_applicable" && r.status !== "no_applicable_rule");
+    const total = knownRows.reduce((sum, r) => sum + parseFloat(r.dollarText!.replace(/[$,]/g, "")), 0);
+    expect(total).toBeCloseTo(20_185.70, 1);
+  });
+
+  it("Bug 1 — universal invariant: every applicable charge in coverage_matrix appears in cost rows", () => {
+    const applicableDomains = BOXING_GLOVES_SCAN.coverage_matrix!
+      .filter((c) => c.status === "verified_applicable" && c.category === "tariff")
+      .map((c) => c.domain_key);
+    for (const dk of applicableDomains) {
+      const row = rows.find((r) => r.coverageItem.domain_key === dk);
+      expect(row).toBeDefined();
+    }
+  });
+
+  it("Bug 6 — collectMissingFacts returns empty for a clean boxing gloves scan", () => {
+    const facts = collectMissingFacts(BOXING_GLOVES_SCAN);
+    expect(facts).toHaveLength(0);
+  });
+
+  it("Bug 6 — collectMissingFacts does not include generic 'Applies to all imported goods' statements", () => {
+    const scanWithGenericInfo: ProductRiskScan = {
+      ...BOXING_GLOVES_SCAN,
+      risk_categories: [
+        ...BOXING_GLOVES_SCAN.risk_categories,
+        {
+          id: "cbp_entry",
+          category: "Customs Entry Filing",
+          level: "Low" as const,
+          explanation: "Required for all commercial imports.",
+          action: "File with CBP.",
+          verification_status: "verified_applicable" as const,
+          missing_info: "Applies to all imported goods",
+        },
+      ],
+    };
+    const facts = collectMissingFacts(scanWithGenericInfo);
+    expect(facts).not.toContain("Applies to all imported goods");
+  });
+
+  it("Bug 1 — Section 122 DOMAIN_FINDING_MAP entry correctly resolves rate via finding_id", () => {
+    const scanNoFindingId: ProductRiskScan = {
+      ...BOXING_GLOVES_SCAN,
+      coverage_matrix: [
+        { domain: "Section 122", domain_key: "section_122_surcharge", category: "tariff", status: "verified_applicable" },
+      ],
+    };
+    const fallbackRows = buildCostRows(scanNoFindingId, "en");
+    const s122 = fallbackRows.find((r) => r.coverageItem.domain_key === "section_122_surcharge");
+    expect(s122?.ratePct).toBe(10);
+  });
+});
