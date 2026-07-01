@@ -280,7 +280,9 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
         issues.map((i) => i.code).join(', '),
       );
     }
-    return report;
+    // Rebuild checklist and obligations from verifier-corrected categories so
+    // that downgraded findings never leave required documents behind.
+    return postVerifySync(report, opts.moduleDocSpecs, tmode);
   } catch (err: any) {
     console.error(`[riskScanner] Failed to generate scan (lang=${entry.language}, hts=${entry.hts_code}): ${err.message}`);
     return null;
@@ -380,7 +382,7 @@ type DocSpec = {
   transport_modes?: ('ocean' | 'air' | 'truck' | 'rail')[];
 };
 
-function documentsForFinding(c: RiskCategory): DocSpec[] {
+export function documentsForFinding(c: RiskCategory): DocSpec[] {
   const id = c.id ?? '';
   const verified = c.verification_status === 'verified_applicable';
 
@@ -523,12 +525,31 @@ function documentsForFinding(c: RiskCategory): DocSpec[] {
       doc_status: 'before_sale',
     }];
   }
+  if (id === 'ftc_textile_labeling') {
+    return [{
+      document: 'Fiber content label (FTC TFPIA, 16 CFR Part 303)',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'FTC TFPIA requires every textile article to bear a label disclosing fiber content; supplier provides the fiber breakdown.',
+      doc_status: verified ? 'before_sale' : 'required_if',
+      condition: verified ? undefined : 'product confirmed as a textile article subject to FTC TFPIA',
+    }];
+  }
+  if (id === 'ftc_care_labeling') {
+    return [{
+      document: 'Care label (FTC 16 CFR Part 423)',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'FTC Care Labeling Rule requires permanently attached care instructions on wearing apparel; supplier provides care-label data.',
+      doc_status: verified ? 'before_sale' : 'required_if',
+      condition: verified ? undefined : 'product confirmed as wearing apparel requiring care instructions under FTC Part 423',
+    }];
+  }
   if (topics.has('textile')) {
     return [{
-      document: 'Fiber content & care-labeling information (FTC 16 CFR 303)',
+      document: 'Fiber content label (FTC TFPIA, 16 CFR Part 303)',
       owner: 'supplier', responsible_party: 'supplier',
-      reason: 'Supplier provides fiber content and care-label data for FTC textile labeling compliance.',
-      doc_status: 'before_sale',
+      reason: 'Supplier provides fiber content data for FTC textile labeling compliance.',
+      doc_status: verified ? 'before_sale' : 'required_if',
+      condition: verified ? undefined : 'product confirmed as a textile article subject to FTC TFPIA',
     }];
   }
   return [];
@@ -729,6 +750,76 @@ export function finalizeScan(
     coverage_matrix: coverageMatrix,
     missing_facts: missingFacts,
     obligations,
+  };
+}
+
+/**
+ * Rebuild the document checklist, obligations, and all derived summary fields
+ * from the verifier-corrected risk_categories.  Must be called after verifyScan
+ * so that downgraded findings never leave "required" documents behind.
+ *
+ * Invariant enforced: if verification_status is anything other than
+ * verified_applicable, no linked document may be labelled required/mandatory.
+ */
+export function postVerifySync(
+  report: ScanResult,
+  moduleDocSpecs: import('./regulatoryModules/index').DocSpec[] | undefined,
+  mode: 'ocean' | 'air' | 'truck' | 'rail' | null,
+): ScanResult {
+  const corrected = report.risk_categories;
+
+  const supported = corrected.filter(
+    (c) => c.verification_status === 'verified_applicable' || c.verification_status === 'official_unconfirmed',
+  );
+  const verified = supported.filter((c) => c.verification_status === 'verified_applicable');
+  const unconfirmed = supported.filter((c) => c.verification_status === 'official_unconfirmed');
+
+  const checklist = buildChecklist(supported, moduleDocSpecs, mode);
+
+  const allDocSpecs = [
+    ...supported.flatMap((c) => documentsForFinding(c).map((d) => ({ ...d, finding_id: c.id ?? '' }))),
+    ...(moduleDocSpecs ?? []),
+  ];
+  const obligations = buildObligations(corrected, allDocSpecs, mode);
+
+  const next_actions = dedupeStrings(
+    supported.map((c) => c.action).filter((a): a is string => !!a),
+  ).slice(0, 6);
+
+  const broker_questions = dedupeStrings([
+    ...(corrected.some(
+      (c) => c.category.toLowerCase().includes('duty') && c.verification_status === 'verified_applicable',
+    )
+      ? ['Can you confirm the HTS classification so the verified base duty rate applies, and the total duty including any trade-remedy tariffs?']
+      : []),
+    ...unconfirmed.map(
+      (c) => `Does "${c.category}" apply to this product${c.source?.cfr_citation ? ` under ${c.source.cfr_citation}` : ''}, and what exactly is required?`,
+    ),
+    ...verified
+      .filter((c) => c.source?.agency && c.source.agency !== 'USITC')
+      .map((c) => `What documentation proves compliance with ${c.category} (${c.source?.cfr_citation ?? c.source?.agency})?`),
+  ]).slice(0, 6);
+
+  const supplier_questions = dedupeStrings(
+    verified
+      .filter((c) => c.source?.agency && c.source.agency !== 'USITC')
+      .map((c) => `Can you provide documentation/test evidence for ${c.category} (${c.source?.cfr_citation ?? c.source?.agency})?`),
+  ).slice(0, 6);
+
+  let readiness = 60;
+  if (verified.some((c) => c.category.toLowerCase().includes('duty'))) readiness += 15;
+  readiness -= 7 * verified.filter((c) => c.source?.agency !== 'USITC').length;
+  readiness -= 4 * unconfirmed.length;
+  const readiness_score = Math.max(10, Math.min(95, readiness));
+
+  return {
+    ...report,
+    document_checklist: checklist,
+    obligations,
+    next_actions,
+    broker_questions,
+    supplier_questions,
+    readiness_score,
   };
 }
 
