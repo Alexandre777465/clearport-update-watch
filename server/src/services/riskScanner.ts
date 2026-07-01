@@ -377,6 +377,7 @@ type DocSpec = {
   reason: string;
   doc_status: DocItemStatus;
   condition?: string;
+  missing_fact?: string;
   responsible_party: ResponsibleParty;
   /** Transport modes this document applies to.  Absent = all modes. */
   transport_modes?: ('ocean' | 'air' | 'truck' | 'rail')[];
@@ -530,8 +531,8 @@ export function documentsForFinding(c: RiskCategory): DocSpec[] {
       document: 'Fiber content label (FTC TFPIA, 16 CFR Part 303)',
       owner: 'supplier', responsible_party: 'supplier',
       reason: 'FTC TFPIA requires every textile article to bear a label disclosing fiber content; supplier provides the fiber breakdown.',
-      doc_status: verified ? 'before_sale' : 'required_if',
-      condition: verified ? undefined : 'product confirmed as a textile article subject to FTC TFPIA',
+      doc_status: verified ? 'before_sale' : 'cannot_determine',
+      missing_fact: verified ? undefined : 'Confirm whether any component of the product consists of textile fibers subject to FTC TFPIA (16 CFR Part 303)',
     }];
   }
   if (id === 'ftc_care_labeling') {
@@ -539,8 +540,8 @@ export function documentsForFinding(c: RiskCategory): DocSpec[] {
       document: 'Care label (FTC 16 CFR Part 423)',
       owner: 'supplier', responsible_party: 'supplier',
       reason: 'FTC Care Labeling Rule requires permanently attached care instructions on wearing apparel; supplier provides care-label data.',
-      doc_status: verified ? 'before_sale' : 'required_if',
-      condition: verified ? undefined : 'product confirmed as wearing apparel requiring care instructions under FTC Part 423',
+      doc_status: verified ? 'before_sale' : 'cannot_determine',
+      missing_fact: verified ? undefined : 'Confirm whether the product is wearing apparel requiring permanently attached care instructions under FTC Part 423',
     }];
   }
   if (topics.has('textile')) {
@@ -548,8 +549,8 @@ export function documentsForFinding(c: RiskCategory): DocSpec[] {
       document: 'Fiber content label (FTC TFPIA, 16 CFR Part 303)',
       owner: 'supplier', responsible_party: 'supplier',
       reason: 'Supplier provides fiber content data for FTC textile labeling compliance.',
-      doc_status: verified ? 'before_sale' : 'required_if',
-      condition: verified ? undefined : 'product confirmed as a textile article subject to FTC TFPIA',
+      doc_status: verified ? 'before_sale' : 'cannot_determine',
+      missing_fact: verified ? undefined : 'Confirm whether the product contains textile fibers subject to FTC TFPIA (16 CFR Part 303)',
     }];
   }
   return [];
@@ -562,13 +563,18 @@ function buildChecklist(
 ): DocumentChecklistItem[] {
   const out: DocumentChecklistItem[] = [];
   const seen = new Set<string>();
+  // Track which finding_ids already have canonical docs from documentsForFinding.
+  // Module doc specs for the same finding_id are suppressed to prevent duplicates.
+  const seenFindingIds = new Set<string>();
 
   const modeMatches = (modes?: ('ocean' | 'air' | 'truck' | 'rail')[]) =>
     !modes || !transportMode || modes.includes(transportMode);
 
   for (const c of supported) {
     const verified = c.verification_status === 'verified_applicable';
-    for (const d of documentsForFinding(c)) {
+    const canonical = documentsForFinding(c);
+    if (canonical.length > 0 && c.id) seenFindingIds.add(c.id);
+    for (const d of canonical) {
       if (!modeMatches(d.transport_modes)) continue;
       const key = d.document.toLowerCase();
       if (seen.has(key)) continue;
@@ -581,6 +587,7 @@ function buildChecklist(
         responsibility: d.owner === 'carrier' ? 'carrier' : verified ? d.owner : 'conditional',
         doc_status: d.doc_status,
         condition: d.condition,
+        missing_fact: d.missing_fact,
         responsible_party: d.responsible_party,
         finding_id: c.id,
         source: c.source,
@@ -590,10 +597,13 @@ function buildChecklist(
   }
 
   // Append module-engine document specs, de-duplicated against the above.
+  // Skip any module doc spec whose finding_id is already covered by documentsForFinding
+  // to prevent duplicate documents and duplicate obligations with different names/timings.
   if (moduleDocSpecs) {
     const findingStatus = new Map(supported.map((c) => [c.id, c.verification_status]));
     for (const d of moduleDocSpecs) {
       if (!modeMatches(d.transport_modes)) continue;
+      if (d.finding_id && seenFindingIds.has(d.finding_id)) continue;
       const key = d.document.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -605,7 +615,7 @@ function buildChecklist(
         required: isVerified,
         status: isVerified ? 'required' : 'needs_confirmation',
         responsibility: d.owner === 'carrier' ? 'carrier' : isVerified ? d.owner : 'conditional',
-        doc_status: d.doc_status,
+        doc_status: isVerified ? d.doc_status : 'cannot_determine',
         condition: d.condition,
         responsible_party: d.responsible_party,
         finding_id: d.finding_id,
@@ -776,14 +786,28 @@ export function postVerifySync(
 
   const checklist = buildChecklist(supported, moduleDocSpecs, mode);
 
+  // Build the canonical finding_id set: findings whose docs come from documentsForFinding.
+  // Module doc specs for those same finding_ids are excluded to prevent:
+  //   (a) duplicate document names in the checklist, and
+  //   (b) duplicate obligations with different timings that survive deduplication.
+  const coveredByCanonical = new Set(
+    supported
+      .filter((c) => documentsForFinding(c).length > 0)
+      .map((c) => c.id ?? '')
+      .filter(Boolean),
+  );
   const allDocSpecs = [
     ...supported.flatMap((c) => documentsForFinding(c).map((d) => ({ ...d, finding_id: c.id ?? '' }))),
-    ...(moduleDocSpecs ?? []),
+    ...(moduleDocSpecs ?? []).filter((d) => !coveredByCanonical.has(d.finding_id)),
   ];
   const obligations = buildObligations(corrected, allDocSpecs, mode);
 
+  // Only verified findings drive next_actions.
+  // Unconfirmed findings must not carry over pre-downgrade action text
+  // (e.g., "Instruct the supplier to attach fiber content labels" is invalid
+  // while applicability is still unresolved).
   const next_actions = dedupeStrings(
-    supported.map((c) => c.action).filter((a): a is string => !!a),
+    verified.map((c) => c.action).filter((a): a is string => !!a),
   ).slice(0, 6);
 
   const broker_questions = dedupeStrings([

@@ -208,16 +208,10 @@ describe('postVerifySync — propagation to derived fields', () => {
 
 describe('postVerifySync — deduplication', () => {
   it('deduplicates obligations that become duplicates after verification corrections', () => {
-    // Two categories with the same effective citation but different statuses
-    // before verification.  After sync both have mandatory status → one obligation.
     const cat1 = makeCategory('ftc_textile_labeling', 'FTC Textile Fiber Products Identification Act', 'verified_applicable');
-    const cat2: RiskCategory = {
-      ...makeCategory('ftc_textile_labeling_duplicate', 'FTC Textile Fiber Products Identification Act', 'verified_applicable'),
-      source: cat1.source,
-    };
     const finalized = finalizeScan(emptyScan(), [cat1], 'en');
 
-    // Inject a duplicate obligation manually (simulating two module paths).
+    // Inject duplicate obligations manually (simulating two module paths).
     const withDup: ScanResult = {
       ...finalized,
       obligations: [
@@ -228,11 +222,93 @@ describe('postVerifySync — deduplication', () => {
 
     const synced = postVerifySync(withDup, undefined, null);
 
-    // Obligations are rebuilt fresh by postVerifySync, so duplicates from the
-    // injected obligations array do not survive — only the canonical set does.
+    // Obligations are rebuilt fresh by postVerifySync — duplicates do not survive.
     const ids = (synced.obligations ?? []).map((o) => o.obligation_id);
     const uniqueIds = new Set(ids);
     expect(ids.length).toBe(uniqueIds.size);
+  });
+
+  it('suppresses module doc specs for findings already handled by documentsForFinding, preventing duplicate obligations with different timings', () => {
+    const cat = makeCategory('ftc_textile_labeling', 'FTC Textile Fiber Products Identification Act', 'official_unconfirmed');
+    const finalized = finalizeScan(emptyScan(), [cat], 'en');
+
+    // Simulate a module doc spec for the same finding (different name, different timing).
+    const moduleDocSpecs = [{
+      document: 'Fiber content label (TFPIA -- 16 CFR 303)',
+      owner: 'supplier' as const,
+      responsible_party: 'supplier' as const,
+      reason: 'Module generated doc',
+      doc_status: 'before_sale' as const,
+      finding_id: 'ftc_textile_labeling',
+    }];
+
+    const synced = postVerifySync(finalized, moduleDocSpecs, null);
+
+    // Should have exactly ONE obligation for Part 303, not two with different timings.
+    const part303Obligations = (synced.obligations ?? []).filter(
+      (o) => o.legal_citation?.toLowerCase().includes('303') ||
+              o.document_name?.toLowerCase().includes('303'),
+    );
+    expect(part303Obligations.length).toBeLessThanOrEqual(1);
+
+    // Should have exactly ONE document in the checklist for Part 303.
+    const part303Docs = synced.document_checklist.filter(
+      (d) => d.document.toLowerCase().includes('303'),
+    );
+    expect(part303Docs.length).toBe(1);
+
+    // The surviving doc must use the canonical name from documentsForFinding.
+    expect(part303Docs[0].document).toBe('Fiber content label (FTC TFPIA, 16 CFR Part 303)');
+  });
+});
+
+// ── 3b. next_actions only from verified findings ───────────────────────────────
+
+describe('postVerifySync — next_actions gate', () => {
+  it('next_actions excludes action text from official_unconfirmed findings', () => {
+    const verified: RiskCategory = {
+      ...makeCategory('ftc_textile_labeling', 'FTC Textile Fiber Products Identification Act', 'verified_applicable'),
+      action: 'Instruct the supplier to attach compliant fiber content labels before export.',
+    };
+    const finalized = finalizeScan(emptyScan(), [verified], 'en');
+
+    // Before sync, next_actions includes the textile action (finding is verified).
+    expect(finalized.next_actions.some((a) => a.toLowerCase().includes('label'))).toBe(true);
+
+    const downgraded: ScanResult = {
+      ...finalized,
+      risk_categories: finalized.risk_categories.map((c) =>
+        c.id === 'ftc_textile_labeling'
+          ? { ...c, verification_status: 'official_unconfirmed' as const }
+          : c,
+      ),
+    };
+    const synced = postVerifySync(downgraded, undefined, null);
+
+    // After sync, the textile action must not appear (finding is unconfirmed).
+    expect(synced.next_actions.some((a) =>
+      a.toLowerCase().includes('fiber content label') || a.toLowerCase().includes('attach compliant'),
+    )).toBe(false);
+  });
+
+  it('next_actions includes actions from verified findings even when other findings are downgraded', () => {
+    const textile = makeCategory('ftc_textile_labeling', 'FTC Textile Fiber Products Identification Act', 'verified_applicable');
+    const duty = makeCategory('hts_duty', 'HTS Duty Rate', 'verified_applicable');
+    const finalized = finalizeScan(emptyScan(), [textile, duty], 'en');
+
+    // Downgrade only textile; keep duty verified.
+    const partlyDowngraded: ScanResult = {
+      ...finalized,
+      risk_categories: finalized.risk_categories.map((c) =>
+        c.id === 'ftc_textile_labeling'
+          ? { ...c, verification_status: 'official_unconfirmed' as const }
+          : c,
+      ),
+    };
+    const synced = postVerifySync(partlyDowngraded, undefined, null);
+
+    // Duty action (from verified finding) should still appear.
+    expect(synced.next_actions.length).toBeGreaterThan(0);
   });
 });
 
@@ -290,12 +366,15 @@ describe('documentsForFinding — Part 303 / Part 423 separation', () => {
     }
   });
 
-  it('downgraded textile findings produce required_if documents, not before_sale', () => {
+  it('downgraded textile findings produce cannot_determine documents, not before_sale or required_if', () => {
     const cat = makeCategory('ftc_textile_labeling', 'FTC Textile Fiber Products Identification Act', 'official_unconfirmed');
     const docs = documentsForFinding(cat);
 
-    expect(docs[0].doc_status).toBe('required_if');
-    expect(docs[0].condition).toBeTruthy();
+    expect(docs[0].doc_status).toBe('cannot_determine');
+    // missing_fact carries the explanation; condition is not used for cannot_determine
+    expect(docs[0].missing_fact).toBeTruthy();
+    expect(docs[0].doc_status).not.toBe('before_sale');
+    expect(docs[0].doc_status).not.toBe('required_if');
   });
 });
 
