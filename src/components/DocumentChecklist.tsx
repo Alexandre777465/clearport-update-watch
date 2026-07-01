@@ -158,16 +158,32 @@ export function DocumentChecklist({
       t.toLowerCase().includes(doc.document.toLowerCase().slice(0, 8)),
     );
 
-  const requiredItems = [...supplier, ...broker, ...carrier];
-  const missingRequired = requiredItems.filter((d) => !isUploaded(d));
+  const allActive = [...supplier, ...broker, ...carrier, ...conditional];
+  const outstanding = allActive.filter((d) => !isUploaded(d) && deriveDocStatus(d) !== "not_required");
+
+  const customsCount = outstanding.filter((d) => {
+    const s = deriveDocStatus(d);
+    return s === "required_to_clear" || s === "required_if";
+  }).length;
+  const beforeSaleCount = outstanding.filter((d) => deriveDocStatus(d) === "before_sale").length;
+  const usuallyCount = outstanding.filter((d) => deriveDocStatus(d) === "usually_requested").length;
+
+  const subcounts: string[] = [];
+  if (customsCount > 0) subcounts.push(`${customsCount} ${t(lang, "doc_timing_customs")}`);
+  if (beforeSaleCount > 0) subcounts.push(`${beforeSaleCount} ${t(lang, "doc_timing_before_sale")}`);
+  if (usuallyCount > 0) subcounts.push(`${usuallyCount} ${t(lang, "doc_timing_usually_requested")}`);
 
   return (
     <div className="space-y-5">
-      {missingRequired.length > 0 && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          {t(lang, "doc_missing_prefix")} {missingRequired.length}{" "}
-          {t(lang, "doc_missing_suffix")}
+      {outstanding.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span>{t(lang, "doc_outstanding_prefix")} <strong>{outstanding.length}</strong> {t(lang, "doc_outstanding_suffix")}</span>
+          </div>
+          {subcounts.length > 0 && (
+            <p className="mt-1 pl-5 text-amber-700">{subcounts.join(" · ")}</p>
+          )}
         </div>
       )}
 

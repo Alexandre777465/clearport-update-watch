@@ -5,6 +5,7 @@
  * Status vocabulary (customer-facing):
  *   Applies                  — verified_applicable
  *   Does not apply           — not_applicable / no_applicable_rule
+ *   Informational            — informational_no_specific_rule
  *   Within scope             — likely_match (AD/CVD orders)
  *   Cannot determine — missing: [exact fact]  — insufficient_info / official_unconfirmed with missing facts
  *   Official lookup failed   — source_unavailable
@@ -69,6 +70,7 @@ export function coverageCostLabel(status: CoverageStatus, lang: Lang): string {
     case "official_unconfirmed": return t(lang, "imp_cost_cannot_determine");
     case "no_applicable_rule":
     case "not_applicable":      return t(lang, "imp_cost_not_applicable");
+    case "informational_no_specific_rule": return t(lang, "imp_cost_informational");
     case "source_unavailable":  return t(lang, "imp_cost_unavailable");
     default:                    return t(lang, "imp_cost_unknown");
   }
@@ -81,6 +83,7 @@ export function coverageCostClass(status: CoverageStatus): string {
     case "official_unconfirmed": return "text-amber-700";
     case "no_applicable_rule":
     case "not_applicable":      return "text-slate-400";
+    case "informational_no_specific_rule": return "text-slate-500";
     case "source_unavailable":  return "text-red-600";
     default:                    return "text-slate-500";
   }
@@ -205,7 +208,11 @@ export function computeKnownTariffTotal(rows: CostRow[]): { knownPct: number; ha
   for (const row of rows) {
     if (row.ratePct != null) {
       knownPct += row.ratePct;
-    } else if (row.status !== "not_applicable" && row.status !== "no_applicable_rule") {
+    } else if (
+      row.status !== "not_applicable" &&
+      row.status !== "no_applicable_rule" &&
+      row.status !== "informational_no_specific_rule"
+    ) {
       hasUnknown = true;
     }
   }

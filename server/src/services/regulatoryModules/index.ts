@@ -55,6 +55,8 @@ export interface DocSpec {
   doc_status: DocItemStatus;
   condition?: string;
   finding_id: string;   // must match a finding.id in the module result
+  /** Transport modes this document applies to.  Absent = all modes. */
+  transport_modes?: ('ocean' | 'air' | 'truck' | 'rail')[];
 }
 
 // ── Dynamic question ──────────────────────────────────────────────────────────
