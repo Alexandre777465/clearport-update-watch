@@ -477,3 +477,147 @@ describe('postVerifySync — clarification_questions preserved', () => {
     expect(synced.clarification_questions![0].affects_finding_id).toBe('ftc_textile_labeling');
   });
 });
+
+// ── 7. Deduplication by finding id ───────────────────────────────────────────
+
+describe('postVerifySync — dedup by id', () => {
+  it('when two risk_categories share the same id, only the highest-trust version survives', () => {
+    const authoritative = makeCategory(
+      'ftc_textile_labeling',
+      'FTC TFPIA -- Fiber Content Labeling (16 CFR 303)',
+      'official_unconfirmed',
+    );
+    const modelGuess: RiskCategory = {
+      id: 'ftc_textile_labeling',
+      category: 'Textile Labeling (FTC)',
+      level: 'N/A',
+      explanation: 'model guess — no source',
+      action: '',
+      verification_status: 'no_verified_source',
+    };
+
+    const finalized = finalizeScan(emptyScan(), [authoritative], 'en');
+    // Inject the model guess into risk_categories to simulate it slipping through.
+    const withDuplicate: ScanResult = {
+      ...finalized,
+      risk_categories: [...finalized.risk_categories, modelGuess],
+    };
+
+    const synced = postVerifySync(withDuplicate, undefined, null);
+
+    const allWithId = synced.risk_categories.filter((c) => c.id === 'ftc_textile_labeling');
+    // Only one entry for this id must survive.
+    expect(allWithId.length).toBe(1);
+    // The surviving entry is the authoritative one (higher trust).
+    expect(allWithId[0].verification_status).toBe('official_unconfirmed');
+  });
+
+  it('no_verified_source categories whose topic is covered by a sourced finding are removed', () => {
+    const sourced = makeCategory(
+      'ftc_textile_labeling',
+      'FTC TFPIA -- Fiber Content Labeling (16 CFR 303)',
+      'official_unconfirmed',
+    );
+    const unsourcedDup: RiskCategory = {
+      category: 'Textile Labeling (FTC)',
+      level: 'N/A',
+      explanation: 'generic unsourced model guess',
+      action: '',
+      verification_status: 'no_verified_source',
+    };
+
+    const finalized = finalizeScan(emptyScan(), [sourced], 'en');
+    const withDuplicate: ScanResult = {
+      ...finalized,
+      risk_categories: [...finalized.risk_categories, unsourcedDup],
+    };
+
+    const synced = postVerifySync(withDuplicate, undefined, null);
+
+    // 'Textile Labeling (FTC)' is a textile topic covered by the official finding.
+    const guessCat = synced.risk_categories.find(
+      (c) => c.category === 'Textile Labeling (FTC)',
+    );
+    expect(guessCat).toBeUndefined();
+  });
+});
+
+// ── 8. Informational findings: visible, no required docs ──────────────────────
+
+describe('postVerifySync — informational findings', () => {
+  it('not_applicable findings are preserved in risk_categories by postVerifySync', () => {
+    const informational: RiskCategory = {
+      id: 'sports_combat_protective_no_federal',
+      category: 'Sports — adult combat/protective gear',
+      level: 'N/A',
+      explanation: 'No mandatory federal standard for adult boxing gloves.',
+      action: '',
+      verification_status: 'not_applicable',
+    };
+
+    const finalized = finalizeScan(emptyScan(), [informational], 'en');
+    const synced = postVerifySync(finalized, undefined, null);
+
+    const found = synced.risk_categories.find(
+      (c) => c.id === 'sports_combat_protective_no_federal',
+    );
+    expect(found).toBeDefined();
+    expect(found!.verification_status).toBe('not_applicable');
+  });
+
+  it('informational findings do not contribute mandatory obligations', () => {
+    const informational: RiskCategory = {
+      id: 'sports_combat_protective_no_federal',
+      category: 'Sports — adult combat/protective gear',
+      level: 'N/A',
+      explanation: 'No mandatory federal standard for adult boxing gloves.',
+      action: '',
+      verification_status: 'not_applicable',
+    };
+
+    const finalized = finalizeScan(emptyScan(), [informational], 'en');
+    const synced = postVerifySync(finalized, undefined, null);
+
+    const mandatory = (synced.obligations ?? []).filter((o) => o.status === 'mandatory');
+    expect(mandatory.length).toBe(0);
+  });
+
+  it('informational findings do not create required documents', () => {
+    const informational: RiskCategory = {
+      id: 'sports_combat_protective_no_federal',
+      category: 'Sports — adult combat/protective gear',
+      level: 'N/A',
+      explanation: 'No mandatory federal standard.',
+      action: '',
+      verification_status: 'not_applicable',
+    };
+
+    const finalized = finalizeScan(emptyScan(), [informational], 'en');
+    const synced = postVerifySync(finalized, undefined, null);
+
+    const requiredDocs = synced.document_checklist.filter((d) => d.required);
+    expect(requiredDocs.length).toBe(0);
+  });
+
+  it('not_applicable findings are not suppressed by the no_verified_source topic filter', () => {
+    // A sourced finding that covers the 'sports' topic should not suppress
+    // a not_applicable informational finding about sports.
+    const mandatory = makeCategory('cpsia_third_party_testing', 'Children Products CPSIA', 'verified_applicable');
+    const informational: RiskCategory = {
+      id: 'sports_combat_protective_no_federal',
+      category: 'Sports — adult combat/protective gear',
+      level: 'N/A',
+      explanation: 'No mandatory federal standard.',
+      action: '',
+      verification_status: 'not_applicable',
+    };
+
+    const finalized = finalizeScan(emptyScan(), [mandatory, informational], 'en');
+    const synced = postVerifySync(finalized, undefined, null);
+
+    const found = synced.risk_categories.find(
+      (c) => c.id === 'sports_combat_protective_no_federal',
+    );
+    expect(found).toBeDefined();
+  });
+});

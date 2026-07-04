@@ -620,6 +620,7 @@ const DICT = {
   law_status_cannot_determine: { en: "Cannot determine — applicability needs confirmation", zh: "无法确定——适用性需确认" },
   law_status_lookup_failed: { en: "Official lookup failed", zh: "官方查询失败" },
   law_status_not_supported: { en: "Not supported by ClearPort yet", zh: "ClearPort 暂不支持" },
+  law_status_informational: { en: "Informational — no mandatory rule identified", zh: "参考信息——未发现强制性法规" },
   doc_group_carrier: { en: "Provided by carrier", zh: "由承运人提供" },
 
   // ── Compliance clarification step ────────────────────────────────────────

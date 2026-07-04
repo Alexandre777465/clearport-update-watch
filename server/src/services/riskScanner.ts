@@ -771,12 +771,53 @@ export function finalizeScan(
  * Invariant enforced: if verification_status is anything other than
  * verified_applicable, no linked document may be labelled required/mandatory.
  */
+// Verification_status trust order — used to resolve id collisions.
+const TRUST: Record<string, number> = {
+  verified_applicable: 5, official_unconfirmed: 4, not_applicable: 3,
+  insufficient_info: 2, no_verified_source: 1,
+};
+
 export function postVerifySync(
   report: ScanResult,
   moduleDocSpecs: import('./regulatoryModules/index').DocSpec[] | undefined,
   mode: 'ocean' | 'air' | 'truck' | 'rail' | null,
 ): ScanResult {
-  const corrected = report.risk_categories;
+  // Deduplicate risk_categories by id: when the model and a module both emit a
+  // finding with the same id, keep the highest-trust version.  Also remove any
+  // no_verified_source category whose topic is already covered by a sourced finding,
+  // preventing duplicate Law rows from model guesses that slip through the topic filter.
+  const raw = report.risk_categories;
+
+  const byId = new Map<string, RiskCategory>();
+  const noId: RiskCategory[] = [];
+  for (const cat of raw) {
+    if (!cat.id) { noId.push(cat); continue; }
+    const existing = byId.get(cat.id);
+    const trust = TRUST[cat.verification_status ?? ''] ?? 0;
+    if (!existing || trust > (TRUST[existing.verification_status ?? ''] ?? 0)) {
+      byId.set(cat.id, cat);
+    }
+  }
+
+  // Collect topics covered by any sourced (non no_verified_source) finding.
+  const sourcedTopics = new Set<string>();
+  for (const cat of byId.values()) {
+    if ((cat.verification_status ?? '') !== 'no_verified_source') {
+      topicsOf(cat.category).forEach((t) => sourcedTopics.add(t));
+    }
+  }
+
+  // Filter out no_verified_source categories (from noId list) whose topic is
+  // already covered by a sourced finding — these are model guesses that duplicate.
+  const filteredNoId = noId.filter((cat) => {
+    if ((cat.verification_status ?? '') !== 'no_verified_source') return true;
+    const ts = topicsOf(cat.category);
+    return ts.size === 0 || ![...ts].some((t) => sourcedTopics.has(t));
+  });
+
+  const corrected = [...byId.values(), ...filteredNoId].sort(
+    (a, b) => ((TRUST[b.verification_status ?? ''] ?? 0) - (TRUST[a.verification_status ?? ''] ?? 0)),
+  );
 
   const supported = corrected.filter(
     (c) => c.verification_status === 'verified_applicable' || c.verification_status === 'official_unconfirmed',
@@ -838,6 +879,7 @@ export function postVerifySync(
 
   return {
     ...report,
+    risk_categories: corrected,
     document_checklist: checklist,
     obligations,
     next_actions,

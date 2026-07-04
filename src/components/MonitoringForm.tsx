@@ -999,18 +999,23 @@ function CostTableRow({ row, showAmount }: { row: CostRowV2; showAmount: boolean
 function RegulatoryCategoryRow({ cat, lang }: { cat: RiskCategory; lang: Lang }) {
   const isVerified = cat.verification_status === "verified_applicable";
   const isUnconfirmed = cat.verification_status === "official_unconfirmed";
+  const isInformational = cat.verification_status === "not_applicable";
 
   const statusKey: DictKey = isVerified
     ? "law_status_required"
     : isUnconfirmed
       ? "law_status_cannot_determine"
-      : "law_status_not_supported";
+      : isInformational
+        ? "law_status_informational"
+        : "law_status_not_supported";
 
   const statusClass = isVerified
     ? "border-red-200 bg-red-50 text-red-700"
     : isUnconfirmed
       ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-slate-200 bg-slate-50 text-slate-500";
+      : isInformational
+        ? "border-green-200 bg-green-50 text-green-700"
+        : "border-slate-200 bg-slate-50 text-slate-500";
 
   const preSaleKeywords = ["fcc", "cpsia", "cpsc", "marketplace", "amazon", "tiktok", "eu ", "ftc", "labeling"];
   const isPreSale = preSaleKeywords.some((kw) => cat.category.toLowerCase().includes(kw));
@@ -1022,7 +1027,7 @@ function RegulatoryCategoryRow({ cat, lang }: { cat: RiskCategory; lang: Lang })
         <Badge variant="outline" className={`text-xs ${statusClass}`}>
           {t(lang, statusKey)}
         </Badge>
-        {isPreSale && (
+        {isPreSale && !isInformational && (
           <Badge variant="outline" className="border-purple-200 bg-purple-50 text-purple-700 text-xs">
             {t(lang, "sec3_before_sale")}
           </Badge>
@@ -1079,7 +1084,9 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
     "Tariff Risk", "HTS Classification Risk", "Section 301 China Tariff", "AD/CVD Risk",
   ]);
   const regulatoryCategories = riskScan.risk_categories.filter((c) => {
-    if (c.level === "N/A") return false;
+    // Hide N/A findings UNLESS they are informational (not_applicable with a source).
+    // no_verified_source neutralized guesses always have level N/A — hide those.
+    if (c.level === "N/A" && c.verification_status !== "not_applicable") return false;
     if (c.id && (tariffCatIds.has(c.id) || c.id.startsWith("adcvd_"))) return false;
     if (tariffCatNames.has(c.category)) return false;
     return true;

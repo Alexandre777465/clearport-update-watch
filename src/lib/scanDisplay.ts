@@ -383,12 +383,22 @@ export function collectMissingFacts(scan: ProductRiskScan): string[] {
     .filter((c) => c.status === "official_unconfirmed" || c.status === "likely_match" || c.status === "insufficient_info")
     .forEach((c) => (c.missing_facts ?? []).forEach(add));
 
+  // Findings whose fact is already addressed by a structured clarification_question.
+  const clarifiedIds = new Set(
+    (scan.clarification_questions ?? []).map((q) => q.affects_finding_id).filter(Boolean),
+  );
+
   scan.risk_categories
     .filter(
       (c) =>
         c.missing_info &&
         c.verification_status !== "verified_applicable" &&
-        c.verification_status !== "not_applicable",
+        c.verification_status !== "not_applicable" &&
+        // Suppress vague generic text from unsourced model guesses.
+        c.verification_status !== "no_verified_source" &&
+        // Suppress category missing_info when a structured clarification question
+        // already covers that finding — avoid double-showing the same gap.
+        !clarifiedIds.has(c.id ?? ""),
     )
     .forEach((c) => add(c.missing_info!));
 
