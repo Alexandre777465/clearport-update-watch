@@ -1059,6 +1059,37 @@ export const OFFICIAL_RULE_REGISTRY: OfficialRuleRecord[] = [
     timing: 'before_sale',
   },
 
+  // ── FTC TFPIA — Textile component in non-textile-chapter product (16 CFR 303) ─
+  // Fired when a non-textile-HTS product (e.g., sporting goods, bags) contains a
+  // confirmed textile fiber component (polyester lining, cotton padding, etc.).
+  // Uses knownFacts_required to ask targeted component-specific questions:
+  //   textile_lining_function  — warmth/thermal vs. padding/structure only
+  //   textile_lining_detachable — removable vs. permanently attached
+  //   fiber_content_claim_shown — any fiber claim on product/packaging/listing
+  //   textile_fiber_composition — the actual fiber breakdown if known
+  // Passes (verified_applicable) only when lining_function is 'warmth' or 'both'
+  // because purely structural or padding-only components typically fall outside TFPIA scope.
+  {
+    rule_id: 'ftc_textile_component_fiber_identification',
+    finding_id: 'ftc_textile_component_labeling',
+    agency: 'FTC',
+    legal_citation: '15 U.S.C. 70; 16 CFR Part 303',
+    official_url: 'https://www.ftc.gov/business-guidance/resources/threading-your-way-through-labeling-requirements-textile-wool-fur-acts',
+    supported_proposition:
+      'Textile fiber products sold in commerce — including textile components of non-textile goods — must bear labels disclosing fiber content, country of origin, and manufacturer identity when the component qualifies as a "textile fiber product" under the Act.',
+    product_scope:
+      'Non-textile-chapter products (e.g., sporting goods, bags) whose description confirms a textile fiber component such as a lining or padding',
+    scope_conditions: {
+      keywords_any_of: ['polyester', 'cotton', 'nylon', 'silk', 'lining', 'fiber content', 'knit', 'woven', 'fleece', 'canvas'],
+      knownFacts_required: [
+        { key: 'textile_lining_function', values: ['warmth', 'both'] },
+      ],
+    },
+    effective_date: '1960-03-03',
+    legal_status: 'mandatory',
+    timing: 'before_sale',
+  },
+
   // ═══════════════════════════════════════════════════════════════════════════
   // TEST SCENARIO / ADDITIONAL ENTRIES
   // ═══════════════════════════════════════════════════════════════════════════

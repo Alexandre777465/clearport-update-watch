@@ -1301,7 +1301,13 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
                 </li>
               ))}
             </ul>
-          ) : (riskScan.clarification_questions ?? []).length === 0 ? (
+          ) : (riskScan.clarification_questions ?? []).length === 0 &&
+            !riskScan.risk_categories.some(
+              (c) =>
+                c.verification_status === "official_unconfirmed" ||
+                c.verification_status === "insufficient_info",
+            ) &&
+            !riskScan.document_checklist.some((d) => d.doc_status === "cannot_determine") ? (
             <p className="text-sm text-muted-foreground">
               {t(lang, "info_missing_none")}
             </p>

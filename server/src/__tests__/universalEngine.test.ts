@@ -1115,10 +1115,16 @@ describe('Bug 4 — gloves exempt from FTC Care Labeling Rule (16 CFR 423)', () 
       'cowhide leather boxing gloves, PU foam padding, polyester textile lining, adults only',
     );
     const result = evaluateAllModules(input);
-    const tfpiaFinding = result.findings.find((f) => f.id === 'ftc_textile_labeling');
+    // For non-textile-chapter products with a confirmed fiber component, the textiles
+    // module now generates ftc_textile_COMPONENT_labeling (not ftc_textile_labeling).
+    // ftc_textile_labeling is reserved for primary textile products (HTS chapters 50-63).
+    const tfpiaFinding = result.findings.find(
+      (f) => f.id === 'ftc_textile_component_labeling' || f.id === 'ftc_textile_labeling',
+    );
     expect(tfpiaFinding).toBeDefined();
-    // TFPIA applies — polyester lining is a textile component
-    expect(tfpiaFinding!.verification_status).not.toBe('not_applicable');
+    // TFPIA may apply — polyester lining is a textile component, needs scope clarification
+    expect(tfpiaFinding!.id).toBe('ftc_textile_component_labeling');
+    expect(tfpiaFinding!.verification_status).toBe('verified_applicable');
   });
 });
 

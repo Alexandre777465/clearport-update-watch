@@ -317,6 +317,43 @@ const CLARIFICATION_TEMPLATES: Record<string, ClarificationTemplate> = {
       { value: 'false', label: 'No — not a textile product' },
     ],
   },
+  textile_lining_function: {
+    missingInfo: 'Function of the textile component (lining/padding)',
+    whyItMatters: (r) =>
+      `${r} applies to textile fiber products used for warmth or thermal insulation. A component used only for structural padding or shape retention may fall outside the Act's scope.`,
+    options: [
+      { value: 'warmth', label: 'Mainly for warmth / thermal insulation' },
+      { value: 'padding', label: 'Mainly for padding or structural support only — not warmth' },
+      { value: 'both', label: 'Both warmth and structural — serves a thermal purpose' },
+      { value: 'unknown', label: 'Not sure / need to confirm with supplier' },
+    ],
+  },
+  textile_lining_detachable: {
+    missingInfo: 'Whether the textile component is removable or permanently attached',
+    whyItMatters: (r) =>
+      `${r} labeling must be permanently attached for the useful life of the product; a removable component may be labeled separately`,
+    options: [
+      { value: 'removable', label: 'Removable / detachable lining' },
+      { value: 'permanent', label: 'Permanently attached — cannot be removed without damage' },
+      { value: 'unknown', label: 'Not sure — need to confirm with supplier' },
+    ],
+  },
+  fiber_content_claim_shown: {
+    missingInfo: 'Whether any fiber content claim appears on the product, packaging, or online listing',
+    whyItMatters: (r) =>
+      `${r} requires that any fiber content representation — on the product, label, or advertising — be accurate and complete; if a claim exists, a full fiber content disclosure is required`,
+    options: [
+      { value: 'yes', label: 'Yes — fiber content is shown somewhere (product, tag, listing, etc.)' },
+      { value: 'no', label: 'No — no fiber content claim anywhere' },
+      { value: 'unknown', label: 'Not sure — need to check with supplier' },
+    ],
+  },
+  textile_fiber_composition: {
+    missingInfo: 'Fiber composition of the textile component (e.g., "100% Polyester" or "60% Cotton, 40% Polyester")',
+    whyItMatters: (r) =>
+      `${r} requires that labels list each fiber's generic name (e.g., Polyester, Cotton) and its percentage by weight`,
+    options: undefined,
+  },
   battery_type: {
     missingInfo: 'Battery chemistry type (lithium-ion, lithium metal, or other)',
     whyItMatters: (r) => `${r} applies specifically to lithium-ion and lithium metal batteries — alkaline and other battery types are not covered`,
@@ -815,20 +852,30 @@ export function verifyScan(
 
       if (scopeResult.verdict === 'clarify') {
         // Material fact unknown — cannot approve finding; downgrade and ask the user.
+        // Generate questions for ALL missing knownFacts_required entries (not just the first)
+        // so the user sees the complete set in one pass.
         issues.push({
           code: 'CLARIFICATION_REQUIRED',
           severity: 'downgrade',
           affected_id: cat.id,
-          detail: `Fact "${scopeResult.factKey}" is unknown — cannot confirm scope for "${cat.category}" (rule "${rule.rule_id}"); downgraded and clarification question generated`,
+          detail: `Fact "${scopeResult.factKey}" is unknown — cannot confirm scope for "${cat.category}" (rule "${rule.rule_id}"); downgraded and clarification question(s) generated`,
         });
-        // Build and collect the structured question (deduplicate by fact_key + finding_id).
-        const alreadyAsked = clarificationQuestions.some(
-          (q) => q.fact_key === scopeResult.factKey && q.affects_finding_id === cat.id,
-        );
-        if (!alreadyAsked) {
-          clarificationQuestions.push(
-            buildClarificationQuestion(scopeResult.factKey, rule, cat.category, cat.id),
+        // Ask about the triggering fact first, then any remaining missing knownFacts.
+        const keysToAsk = [scopeResult.factKey];
+        for (const { key } of (rule.scope_conditions.knownFacts_required ?? [])) {
+          if (key !== scopeResult.factKey && facts.knownFacts?.[key] === undefined) {
+            keysToAsk.push(key);
+          }
+        }
+        for (const factKey of keysToAsk) {
+          const alreadyAsked = clarificationQuestions.some(
+            (q) => q.fact_key === factKey && q.affects_finding_id === cat.id,
           );
+          if (!alreadyAsked) {
+            clarificationQuestions.push(
+              buildClarificationQuestion(factKey, rule, cat.category, cat.id),
+            );
+          }
         }
         return { ...cat, verification_status: 'official_unconfirmed' as VerificationStatus };
       }

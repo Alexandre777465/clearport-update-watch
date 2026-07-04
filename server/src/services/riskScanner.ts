@@ -535,6 +535,15 @@ export function documentsForFinding(c: RiskCategory): DocSpec[] {
       missing_fact: verified ? undefined : 'Confirm whether any component of the product consists of textile fibers subject to FTC TFPIA (16 CFR Part 303)',
     }];
   }
+  if (id === 'ftc_textile_component_labeling') {
+    return [{
+      document: 'Fiber content label (FTC TFPIA, 16 CFR Part 303)',
+      owner: 'supplier', responsible_party: 'supplier',
+      reason: 'FTC TFPIA may require a fiber content and country-of-origin label on the confirmed textile component of this product.',
+      doc_status: verified ? 'before_sale' : 'cannot_determine',
+      missing_fact: verified ? undefined : 'Confirm: (1) Is the lining used mainly for warmth or thermal insulation? (2) What is its fiber composition? (3) Is fiber content shown on the product, packaging, or online listing?',
+    }];
+  }
   if (id === 'ftc_care_labeling') {
     return [{
       document: 'Care label (FTC 16 CFR Part 423)',
@@ -799,6 +808,30 @@ export function postVerifySync(
     }
   }
 
+  // Remove reg_X database findings whose topic is covered by a canonical module finding
+  // (non-reg_ prefix). The textiles module, for example, generates 'ftc_textile_labeling'
+  // or 'ftc_textile_component_labeling'; any database row 'reg_ftc_textile_labeling'
+  // represents the same regulation and must not appear as a second law row.
+  const canonicalTopics = new Map<string, number>(); // topic → best TRUST level from non-reg findings
+  for (const [id, cat] of byId) {
+    if (!id.startsWith('reg_')) {
+      const trust = TRUST[cat.verification_status ?? ''] ?? 0;
+      for (const t of topicsOf(cat.category)) {
+        if (!canonicalTopics.has(t) || trust > (canonicalTopics.get(t) ?? 0)) {
+          canonicalTopics.set(t, trust);
+        }
+      }
+    }
+  }
+  for (const [id, cat] of byId) {
+    if (id.startsWith('reg_')) {
+      const ts = topicsOf(cat.category);
+      if ([...ts].some((t) => canonicalTopics.has(t))) {
+        byId.delete(id);
+      }
+    }
+  }
+
   // Collect topics covered by any sourced (non no_verified_source) finding.
   const sourcedTopics = new Set<string>();
   for (const cat of byId.values()) {
@@ -807,10 +840,11 @@ export function postVerifySync(
     }
   }
 
-  // Filter out no_verified_source categories (from noId list) whose topic is
-  // already covered by a sourced finding — these are model guesses that duplicate.
+  // Filter out categories from the noId list whose topic is already covered by a
+  // sourced id-based finding (including official_unconfirmed, not just no_verified_source).
   const filteredNoId = noId.filter((cat) => {
-    if ((cat.verification_status ?? '') !== 'no_verified_source') return true;
+    const vs = cat.verification_status ?? '';
+    if (vs === 'verified_applicable' || vs === 'not_applicable') return true;
     const ts = topicsOf(cat.category);
     return ts.size === 0 || ![...ts].some((t) => sourcedTopics.has(t));
   });

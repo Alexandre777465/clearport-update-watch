@@ -142,10 +142,18 @@ export async function evaluateBaselines(
   };
   const moduleResult = evaluateAllModules(moduleInput);
 
+  // Module findings supersede database reg_X rows for the same canonical rule.
+  // A database row with key='ftc_textile_labeling' (stored as id='reg_ftc_textile_labeling')
+  // is removed when the module already provides a canonical finding with id='ftc_textile_labeling'.
+  const moduleIds = new Set(moduleResult.findings.map((f) => f.id).filter(Boolean) as string[]);
+  const filteredBaselinePlusMfn = baselinePlusMfn.filter(
+    (c) => !(c.id?.startsWith('reg_') && moduleIds.has(c.id.slice(4))),
+  );
+
   // Merge module findings — skip any whose id already appears in baseline results.
-  const existingIds = new Set(baselinePlusMfn.map((c) => c.id).filter(Boolean));
+  const existingIds = new Set(filteredBaselinePlusMfn.map((c) => c.id).filter(Boolean));
   const newModuleFindings = moduleResult.findings.filter((f) => !f.id || !existingIds.has(f.id));
-  const categories = [...baselinePlusMfn, ...newModuleFindings];
+  const categories = [...filteredBaselinePlusMfn, ...newModuleFindings];
 
   // Merge coverage — module domains take precedence over DOMAIN_REGISTRY entries.
   const moduleCovKeys = new Set(moduleResult.coverageDomains.map((c) => c.domain_key));

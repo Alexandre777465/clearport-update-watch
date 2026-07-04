@@ -44,6 +44,13 @@ const APPAREL_TEXT_RE =
 
 const WOOL_TEXT_RE = /\bwool\b|cashmere|merino|alpaca|mohair/i;
 
+// Fiber-content keywords that appear in NON-textile-chapter products (sporting goods,
+// toys, bags, etc.) confirming a textile component is present in the description.
+// Deliberately narrower than TEXTILES_TEXT_RE: does not include broad terms like
+// "glove" or "hat" which match the product category, not a fiber component.
+const TEXTILE_COMPONENT_RE =
+  /\b(polyester|cotton|nylon|silk|lining|fiber content|knit|woven|fleece|canvas)\b/i;
+
 // ── Module ────────────────────────────────────────────────────────────────────
 
 export const textilesModule: RegulatoryModule = {
@@ -91,7 +98,8 @@ export const textilesModule: RegulatoryModule = {
       why_relevant: 'The TFPIA requires that textile fiber products bear labels disclosing fiber content, country of origin, and manufacturer identity before they are sold in the United States.',
     };
 
-    if (!isFootwearOnly) {
+    if (isTextileChapter(h) && !isFootwearOnly) {
+      // Primary textile product (HTS chapters 50-63): TFPIA always applies.
       findings.push({
         id: 'ftc_textile_labeling',
         category: 'FTC TFPIA -- Fiber Content Labeling (16 CFR 303)',
@@ -99,7 +107,7 @@ export const textilesModule: RegulatoryModule = {
         explanation: 'Textile fiber products sold in the U.S. must bear a label disclosing the generic names and percentages of fibers used in the product, the country of origin, and the manufacturer/dealer identity (15 U.S.C. 70b; 16 CFR Part 303). Labels must be in English.',
         action: 'Instruct the supplier to attach compliant fiber content labels before export. Labels must list fiber by generic name (e.g., Cotton 60%, Polyester 40%) and identify the country of origin.',
         verification_status: 'verified_applicable',
-        applicability_conditions: 'HTS chapters 50-63 or product text indicates textile fiber product.',
+        applicability_conditions: 'HTS chapters 50-63 — product is a textile fiber product.',
         source: tfpia_source,
       });
 
@@ -120,7 +128,8 @@ export const textilesModule: RegulatoryModule = {
         finding_id: 'ftc_textile_labeling',
         note: 'TFPIA fiber content and country of origin labeling applies to this textile product.',
       });
-    } else {
+
+    } else if (isFootwearOnly) {
       // Footwear with no textile content detected in text -- TFPIA may not apply to all-rubber/plastic footwear
       findings.push({
         id: 'ftc_textile_labeling',
@@ -141,6 +150,41 @@ export const textilesModule: RegulatoryModule = {
         finding_id: 'ftc_textile_labeling',
         note: 'TFPIA applies to textile portions of footwear; confirm whether textile components are present.',
         missing_facts: ['textile_content_in_footwear'],
+      });
+
+    } else if (TEXTILE_COMPONENT_RE.test(productText)) {
+      // Non-textile-chapter product (e.g., sporting goods, bags) whose description
+      // confirms a textile fiber component (polyester lining, cotton padding, etc.).
+      // TFPIA may apply to that component — use a separate finding id so the verifier
+      // can ask product-specific questions rather than the generic "is this textile?"
+      findings.push({
+        id: 'ftc_textile_component_labeling',
+        category: 'FTC TFPIA — Fiber Content Labeling (Textile Component, 16 CFR 303)',
+        level: 'Medium',
+        explanation: 'This product contains a textile fiber component (e.g., a polyester lining or cotton padding). The FTC Textile Fiber Products Identification Act (TFPIA, 16 CFR Part 303) may require a fiber content label disclosing the component\'s fiber name and percentage, country of origin, and manufacturer identity. Applicability depends on whether the component qualifies as a "textile fiber product" under the Act.',
+        action: 'Confirm the fiber composition of each textile component with your supplier. If the component qualifies under TFPIA (e.g., a lining used for warmth), arrange for a compliant fiber content label before export.',
+        verification_status: 'verified_applicable',
+        applicability_conditions: 'Non-textile HTS chapter; product description confirms a textile fiber component such as a lining, padding, or cover.',
+        source: tfpia_source,
+      });
+
+      docSpecs.push({
+        document: 'Fiber content label (TFPIA -- 16 CFR 303)',
+        owner: 'supplier',
+        responsible_party: 'supplier',
+        reason: 'If the textile component qualifies under TFPIA, the supplier must attach a fiber content and country-of-origin label before the product is sold in the United States.',
+        doc_status: 'before_sale',
+        finding_id: 'ftc_textile_component_labeling',
+      });
+
+      coverageDomains.push({
+        domain: 'FTC TFPIA -- Fiber Content Labeling',
+        domain_key: 'ftc_textile_labeling',
+        category: 'product_regulation',
+        status: 'official_unconfirmed',
+        finding_id: 'ftc_textile_component_labeling',
+        note: 'TFPIA may apply to the confirmed textile component; applicability depends on function and fiber composition.',
+        missing_facts: ['textile_lining_function', 'fiber_content_claim_shown'],
       });
     }
 

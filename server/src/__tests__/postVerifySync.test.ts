@@ -621,3 +621,166 @@ describe('postVerifySync — informational findings', () => {
     expect(found).toBeDefined();
   });
 });
+
+// ── 7. Canonical rule identity deduplication (Issue 1) ───────────────────────
+// reg_X database findings must be removed when a canonical module finding
+// covers the same topic, preventing two Law rows for the same regulation.
+
+describe('postVerifySync — canonical identity dedup (reg_ prefix)', () => {
+  it('removes reg_ftc_textile_labeling when ftc_textile_labeling (module) is present', () => {
+    const moduleCanonical = makeCategory(
+      'ftc_textile_labeling',
+      'FTC TFPIA -- Fiber Content Labeling (16 CFR 303)',
+      'official_unconfirmed',
+    );
+    const dbRow: RiskCategory = {
+      id: 'reg_ftc_textile_labeling',
+      category: 'Textile Labeling (FTC)',
+      level: 'High',
+      explanation: 'Database-sourced row for textile labeling.',
+      action: 'Do textile labeling.',
+      verification_status: 'official_unconfirmed',
+    };
+
+    const scan = emptyScan([moduleCanonical, dbRow]);
+    const synced = postVerifySync(scan, undefined, null);
+
+    const canonicalCount = synced.risk_categories.filter(
+      (c) => c.id === 'ftc_textile_labeling' || c.id === 'reg_ftc_textile_labeling',
+    ).length;
+    expect(canonicalCount).toBe(1);
+    // The reg_ row must be the one removed
+    expect(synced.risk_categories.some((c) => c.id === 'reg_ftc_textile_labeling')).toBe(false);
+    expect(synced.risk_categories.some((c) => c.id === 'ftc_textile_labeling')).toBe(true);
+  });
+
+  it('removes reg_ftc_textile_labeling when ftc_textile_component_labeling (module) is present', () => {
+    const componentFinding = makeCategory(
+      'ftc_textile_component_labeling',
+      'FTC TFPIA — Fiber Content Labeling (Textile Component, 16 CFR 303)',
+      'official_unconfirmed',
+    );
+    const dbRow: RiskCategory = {
+      id: 'reg_ftc_textile_labeling',
+      category: 'Textile Labeling (FTC)',
+      level: 'Medium',
+      explanation: 'Database-sourced row.',
+      action: '',
+      verification_status: 'official_unconfirmed',
+    };
+
+    const scan = emptyScan([componentFinding, dbRow]);
+    const synced = postVerifySync(scan, undefined, null);
+
+    // Both cover the 'textile' topic — only the non-reg_ canonical one survives
+    expect(synced.risk_categories.some((c) => c.id === 'reg_ftc_textile_labeling')).toBe(false);
+    expect(synced.risk_categories.some((c) => c.id === 'ftc_textile_component_labeling')).toBe(true);
+  });
+
+  it('does NOT remove reg_ findings when no canonical module finding covers the same topic', () => {
+    // reg_fmvss_brakes has no module equivalent — it should survive
+    const dbRow: RiskCategory = {
+      id: 'reg_fmvss_brakes',
+      category: 'FMVSS Brake Safety',
+      level: 'High',
+      explanation: 'Brake safety regulation.',
+      action: '',
+      verification_status: 'official_unconfirmed',
+    };
+
+    const scan = emptyScan([dbRow]);
+    const synced = postVerifySync(scan, undefined, null);
+
+    expect(synced.risk_categories.some((c) => c.id === 'reg_fmvss_brakes')).toBe(true);
+  });
+});
+
+// ── 8. Official_unconfirmed no-id category suppressed by canonical topic ──────
+// An official_unconfirmed finding without an id (e.g., a surviving model guess)
+// must be removed when a sourced id-based finding covers the same topic.
+
+describe('postVerifySync — official_unconfirmed no-id topic dedup', () => {
+  it('removes a no-id official_unconfirmed category whose topic is covered by a canonical finding', () => {
+    const canonical = makeCategory(
+      'ftc_textile_labeling',
+      'FTC TFPIA -- Fiber Content Labeling (16 CFR 303)',
+      'official_unconfirmed',
+    );
+    const modelGuess: RiskCategory = {
+      // no id — this is what the LLM generates
+      category: 'Textile Labeling (FTC)',
+      level: 'Medium',
+      explanation: 'Model guess about textile labeling.',
+      action: '',
+      verification_status: 'official_unconfirmed',
+    };
+
+    const scan = emptyScan([canonical, modelGuess]);
+    const synced = postVerifySync(scan, undefined, null);
+
+    // The no-id model guess must be removed; canonical survives
+    const textileFindings = synced.risk_categories.filter(
+      (c) =>
+        c.category.toLowerCase().includes('textile') ||
+        c.category.toLowerCase().includes('fiber'),
+    );
+    expect(textileFindings.length).toBe(1);
+    expect(textileFindings[0].id).toBe('ftc_textile_labeling');
+  });
+
+  it('keeps a no-id official_unconfirmed category when no canonical finding covers its topic', () => {
+    const modelGuess: RiskCategory = {
+      category: 'Some Other Unique Regulation',
+      level: 'Low',
+      explanation: 'Unique regulation not covered by any module.',
+      action: '',
+      verification_status: 'official_unconfirmed',
+    };
+
+    const scan = emptyScan([modelGuess]);
+    const synced = postVerifySync(scan, undefined, null);
+
+    expect(
+      synced.risk_categories.some((c) => c.category === 'Some Other Unique Regulation'),
+    ).toBe(true);
+  });
+});
+
+// ── 9. "No material information remains unresolved" gate ────────────────────
+// The UI must not show "nothing unresolved" when official_unconfirmed findings
+// or cannot_determine documents remain.
+
+describe('postVerifySync — unresolved gate for document checklist', () => {
+  it('produces cannot_determine documents when ftc_textile_component_labeling is official_unconfirmed', () => {
+    const textile = makeCategory(
+      'ftc_textile_component_labeling',
+      'FTC TFPIA — Fiber Content Labeling (Textile Component, 16 CFR 303)',
+      'official_unconfirmed',
+    );
+
+    const scan = emptyScan([textile]);
+    const synced = postVerifySync(scan, undefined, null);
+
+    const doc = synced.document_checklist.find(
+      (d) => d.document.toLowerCase().includes('303'),
+    );
+    // Document must exist with cannot_determine status (not required)
+    expect(doc).toBeDefined();
+    expect(doc?.doc_status).toBe('cannot_determine');
+    expect(doc?.required).toBe(false);
+  });
+
+  it('produces no mandatory documents when no finding is verified_applicable', () => {
+    const unconfirmed = makeCategory(
+      'ftc_textile_component_labeling',
+      'FTC TFPIA — Fiber Content Labeling (Textile Component, 16 CFR 303)',
+      'official_unconfirmed',
+    );
+
+    const scan = emptyScan([unconfirmed]);
+    const synced = postVerifySync(scan, undefined, null);
+
+    const required = synced.document_checklist.filter((d) => d.required);
+    expect(required).toHaveLength(0);
+  });
+});
