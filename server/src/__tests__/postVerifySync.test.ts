@@ -941,3 +941,340 @@ describe('clarification answer flow — 10c: exactly one question without any an
     expect(report.clarification_questions![0].fact_key).toBe('fiber_content_claim_shown');
   });
 });
+
+// ── 11. Cross-category clarification loop regression tests ────────────────────
+// Proves the shared clarification engine works universally:
+//   - Only one question at a time
+//   - No raw fact keys exposed
+//   - Answered facts not re-asked
+//   - Report only after loop finishes (verifier stays official_unconfirmed while facts are missing)
+
+// ── 11a. Lithium battery (phmsa_un383) ───────────────────────────────────────
+
+const BATTERY_FINDING: RiskCategory = {
+  id: 'phmsa_un383',
+  category: 'PHMSA — UN 38.3 Lithium Battery Testing',
+  level: 'High',
+  explanation: 'Lithium batteries require UN 38.3 test compliance.',
+  action: 'Obtain test summary from manufacturer.',
+  verification_status: 'verified_applicable',
+  source: {
+    agency: 'PHMSA',
+    name: 'Pipeline and Hazardous Materials Safety Administration',
+    title: '49 CFR 173.185',
+    last_verified_at: '2026-07-01',
+    url: 'https://www.phmsa.dot.gov',
+    why_relevant: 'Product contains a lithium battery.',
+  },
+};
+
+const BATTERY_FACTS = {
+  htsDigits: '8507600020',
+  productText: 'rechargeable lithium ion battery pack',
+  originCountry: 'China',
+  importDate: '2026-07-05',
+};
+
+describe('cross-category clarification — 11a: lithium battery (phmsa_un383)', () => {
+  it('without has_battery attr → asks one readable question for has_battery (not a raw key)', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BATTERY_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BATTERY_FACTS },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions).toHaveLength(1);
+    const q = report.clarification_questions![0];
+    expect(q.fact_key).toBe('has_battery');
+    expect(q.missing_info).toBeTruthy();
+    // Question text must be human-readable — not a raw snake_case key
+    expect(q.missing_info).not.toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(q.affects_finding_id).toBe('phmsa_un383');
+  });
+
+  it('with has_battery=true but no battery_type → asks one readable question for battery_type', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BATTERY_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BATTERY_FACTS, attrs: { has_battery: true } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions).toHaveLength(1);
+    const q = report.clarification_questions![0];
+    expect(q.fact_key).toBe('battery_type');
+    expect(q.missing_info).not.toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(q.affects_finding_id).toBe('phmsa_un383');
+  });
+
+  it('with battery_type=lithium_ion → finding stays verified_applicable, no question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BATTERY_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: {
+        ...BATTERY_FACTS,
+        attrs: { has_battery: true },
+        knownFacts: { battery_type: 'lithium_ion' },
+      },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'phmsa_un383');
+    expect(finding?.verification_status).toBe('verified_applicable');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('with battery_type=alkaline → downgraded to official_unconfirmed, no question asked again', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BATTERY_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: {
+        ...BATTERY_FACTS,
+        attrs: { has_battery: true },
+        knownFacts: { battery_type: 'alkaline' },
+      },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'phmsa_un383');
+    expect(finding?.verification_status).toBe('official_unconfirmed');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+});
+
+// ── 11b. Children's product (cpsia_third_party_testing) ──────────────────────
+
+const CHILDRENS_FINDING: RiskCategory = {
+  id: 'cpsia_third_party_testing',
+  category: "CPSC — CPSIA Third-Party Testing (Children's Products)",
+  level: 'High',
+  explanation: "Children's products must be tested by a CPSC-accredited laboratory.",
+  action: 'Obtain third-party test reports from CPSC-accredited lab.',
+  verification_status: 'verified_applicable',
+  source: {
+    agency: 'CPSC',
+    name: 'Consumer Product Safety Commission',
+    title: '15 U.S.C. 2063; 16 CFR 1107',
+    last_verified_at: '2026-07-01',
+    url: 'https://www.cpsc.gov',
+    why_relevant: 'Product may be intended for children.',
+  },
+};
+
+const CHILDRENS_FACTS = {
+  htsDigits: '9503000090',
+  productText: 'plush stuffed animal toy',
+  originCountry: 'China',
+  importDate: '2026-07-05',
+};
+
+describe('cross-category clarification — 11b: children\'s product (cpsia_third_party_testing)', () => {
+  it('without is_children attr → asks one readable question for is_children', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [CHILDRENS_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...CHILDRENS_FACTS },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions).toHaveLength(1);
+    const q = report.clarification_questions![0];
+    expect(q.fact_key).toBe('is_children');
+    expect(q.missing_info).not.toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(q.affects_finding_id).toBe('cpsia_third_party_testing');
+  });
+
+  it('with is_children=true → finding stays verified_applicable, no question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [CHILDRENS_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...CHILDRENS_FACTS, attrs: { is_children: true } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'cpsia_third_party_testing');
+    expect(finding?.verification_status).toBe('verified_applicable');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('with is_children=false → downgraded to official_unconfirmed, no question asked again', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [CHILDRENS_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...CHILDRENS_FACTS, attrs: { is_children: false } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'cpsia_third_party_testing');
+    expect(finding?.verification_status).toBe('official_unconfirmed');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('after answering is_children, the same question is not asked again on rerun', () => {
+    // Simulate rerun: is_children now answered (true), no clarification should re-fire
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [CHILDRENS_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...CHILDRENS_FACTS, attrs: { is_children: true } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+});
+
+// ── 11c. OTC drug / therapeutic claim (fda_otc_drug) ─────────────────────────
+// fda_otc_drug applies to cosmetics containing OTC drug-active ingredients.
+// scope_conditions: attrs_required:{is_cosmetic:true}, knownFacts_required:[contains_otc_ingredient]
+// This test covers the "missing medical/therapeutic claim" clarification loop.
+
+const OTC_DRUG_FINDING: RiskCategory = {
+  id: 'fda_otc_drug',
+  category: 'FDA — OTC Drug Monograph Compliance (21 CFR Parts 330-358)',
+  level: 'High',
+  explanation: 'Cosmetic product with OTC drug-active ingredient must comply with applicable monograph.',
+  action: 'Verify active ingredient meets OTC monograph requirements.',
+  verification_status: 'verified_applicable',
+  source: {
+    agency: 'FDA',
+    name: 'Food and Drug Administration',
+    title: '21 U.S.C. 355; 21 CFR Parts 330-358',
+    last_verified_at: '2026-07-01',
+    url: 'https://www.fda.gov',
+    why_relevant: 'Product may contain an OTC drug-active ingredient.',
+  },
+};
+
+const OTC_DRUG_FACTS = {
+  htsDigits: '3304990050',
+  productText: 'SPF 50 sunscreen lotion with zinc oxide',
+  originCountry: 'China',
+  importDate: '2026-07-05',
+};
+
+describe('cross-category clarification — 11c: OTC drug / therapeutic claim (fda_otc_drug)', () => {
+  it('without is_cosmetic attr → asks one readable question for is_cosmetic', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [OTC_DRUG_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...OTC_DRUG_FACTS },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions).toHaveLength(1);
+    const q = report.clarification_questions![0];
+    expect(q.fact_key).toBe('is_cosmetic');
+    expect(q.missing_info).not.toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(q.affects_finding_id).toBe('fda_otc_drug');
+  });
+
+  it('with is_cosmetic=true but no contains_otc_ingredient → asks one readable question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [OTC_DRUG_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...OTC_DRUG_FACTS, attrs: { is_cosmetic: true } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions).toHaveLength(1);
+    const q = report.clarification_questions![0];
+    expect(q.fact_key).toBe('contains_otc_ingredient');
+    expect(q.missing_info).not.toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(q.affects_finding_id).toBe('fda_otc_drug');
+  });
+
+  it('with is_cosmetic=true and contains_otc_ingredient=yes_sunscreen → verified_applicable, no question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [OTC_DRUG_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: {
+        ...OTC_DRUG_FACTS,
+        attrs: { is_cosmetic: true },
+        knownFacts: { contains_otc_ingredient: 'yes_sunscreen' },
+      },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'fda_otc_drug');
+    expect(finding?.verification_status).toBe('verified_applicable');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('answered contains_otc_ingredient=no → downgraded, not asked again', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [OTC_DRUG_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: {
+        ...OTC_DRUG_FACTS,
+        attrs: { is_cosmetic: true },
+        knownFacts: { contains_otc_ingredient: 'no' },
+      },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'fda_otc_drug');
+    expect(finding?.verification_status).toBe('official_unconfirmed');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+});
+
+// ── 11d. Transport mode (harbor_maintenance_fee / hmf) ───────────────────────
+
+const HMF_FINDING: RiskCategory = {
+  id: 'hmf',
+  category: 'CBP — Harbor Maintenance Fee (HMF)',
+  level: 'Low',
+  explanation: 'Goods imported via ocean vessel are subject to the Harbor Maintenance Fee.',
+  action: 'Confirm transport mode and pay HMF if applicable.',
+  verification_status: 'verified_applicable',
+  source: {
+    agency: 'CBP',
+    name: 'U.S. Customs and Border Protection',
+    title: '26 U.S.C. 4461-4462',
+    last_verified_at: '2026-07-01',
+    url: 'https://www.cbp.gov',
+    why_relevant: 'Transport mode determines whether HMF applies.',
+  },
+};
+
+const TRANSPORT_FACTS = {
+  htsDigits: '4203218060',
+  productText: 'cowhide leather boxing gloves',
+  originCountry: 'China',
+  importDate: '2026-07-05',
+};
+
+describe('cross-category clarification — 11d: transport mode (harbor_maintenance_fee / hmf)', () => {
+  it('without transportMode → asks one readable question for transport_mode', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [HMF_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...TRANSPORT_FACTS },
+      // transportMode intentionally omitted
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions).toHaveLength(1);
+    const q = report.clarification_questions![0];
+    expect(q.fact_key).toBe('transport_mode');
+    expect(q.missing_info).not.toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(q.affects_finding_id).toBe('hmf');
+  });
+
+  it('with transportMode=ocean → finding stays verified_applicable, no question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [HMF_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...TRANSPORT_FACTS },
+      transportMode: 'ocean',
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'hmf');
+    expect(finding?.verification_status).toBe('verified_applicable');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('with transportMode=air → downgraded to official_unconfirmed, no question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [HMF_FINDING] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...TRANSPORT_FACTS },
+      transportMode: 'air',
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'hmf');
+    expect(finding?.verification_status).toBe('official_unconfirmed');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('after transport_mode is answered, the question is not generated again', () => {
+    // Simulate second run after user selected ocean: no clarification should fire
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [HMF_FINDING] };
+    const first = verifyScan(scan, {
+      productFacts: { ...TRANSPORT_FACTS },
+      transportMode: 'ocean',
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(first.report.clarification_questions ?? []).toHaveLength(0);
+    // Second call (rerun) also produces no question
+    const second = verifyScan(scan, {
+      productFacts: { ...TRANSPORT_FACTS },
+      transportMode: 'ocean',
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(second.report.clarification_questions ?? []).toHaveLength(0);
+  });
+});
