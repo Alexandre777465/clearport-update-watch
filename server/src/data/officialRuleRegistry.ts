@@ -1060,7 +1060,7 @@ export const OFFICIAL_RULE_REGISTRY: OfficialRuleRecord[] = [
   },
 
   // ── FTC TFPIA — Textile component in non-textile-chapter product (16 CFR 303) ─
-  // Fired when a non-textile-HTS product (e.g., sporting goods, bags) contains a
+  // Fired when a non-textile-HTS product (e.g., leather goods ch. 42, bags, sporting goods) contains a
   // confirmed textile fiber component (polyester lining, cotton padding, etc.).
   // Uses knownFacts_required to ask targeted component-specific questions:
   //   textile_lining_function  — warmth/thermal vs. padding/structure only
@@ -1078,7 +1078,7 @@ export const OFFICIAL_RULE_REGISTRY: OfficialRuleRecord[] = [
     supported_proposition:
       'Textile fiber products sold in commerce — including textile components of non-textile goods — must bear labels disclosing fiber content, country of origin, and manufacturer identity when the component qualifies as a "textile fiber product" under the Act.',
     product_scope:
-      'Non-textile-chapter products (e.g., sporting goods, bags) whose description confirms a textile fiber component such as a lining or padding',
+      'Non-textile-chapter products (e.g., leather goods ch. 42, bags, sporting goods) whose description confirms a textile fiber component such as a lining or padding',
     scope_conditions: {
       keywords_any_of: ['polyester', 'cotton', 'nylon', 'silk', 'lining', 'fiber content', 'knit', 'woven', 'fleece', 'canvas'],
       knownFacts_required: [

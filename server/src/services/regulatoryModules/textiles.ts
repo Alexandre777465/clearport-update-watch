@@ -44,8 +44,8 @@ const APPAREL_TEXT_RE =
 
 const WOOL_TEXT_RE = /\bwool\b|cashmere|merino|alpaca|mohair/i;
 
-// Fiber-content keywords that appear in NON-textile-chapter products (sporting goods,
-// toys, bags, etc.) confirming a textile component is present in the description.
+// Fiber-content keywords that appear in NON-textile-chapter products (leather goods
+// ch. 42, bags, sporting goods, etc.) confirming a textile component is present in the description.
 // Deliberately narrower than TEXTILES_TEXT_RE: does not include broad terms like
 // "glove" or "hat" which match the product category, not a fiber component.
 const TEXTILE_COMPONENT_RE =
@@ -153,7 +153,7 @@ export const textilesModule: RegulatoryModule = {
       });
 
     } else if (TEXTILE_COMPONENT_RE.test(productText)) {
-      // Non-textile-chapter product (e.g., sporting goods, bags) whose description
+      // Non-textile-chapter product (e.g., leather goods ch. 42, bags, sporting goods) whose description
       // confirms a textile fiber component (polyester lining, cotton padding, etc.).
       // TFPIA may apply to that component — use a separate finding id so the verifier
       // can ask product-specific questions rather than the generic "is this textile?"

@@ -852,30 +852,21 @@ export function verifyScan(
 
       if (scopeResult.verdict === 'clarify') {
         // Material fact unknown — cannot approve finding; downgrade and ask the user.
-        // Generate questions for ALL missing knownFacts_required entries (not just the first)
-        // so the user sees the complete set in one pass.
+        // Ask only the first missing key returned by checkScope. After the user answers,
+        // the rule is re-evaluated and the next missing fact (if any) is asked then.
         issues.push({
           code: 'CLARIFICATION_REQUIRED',
           severity: 'downgrade',
           affected_id: cat.id,
-          detail: `Fact "${scopeResult.factKey}" is unknown — cannot confirm scope for "${cat.category}" (rule "${rule.rule_id}"); downgraded and clarification question(s) generated`,
+          detail: `Fact "${scopeResult.factKey}" is unknown — cannot confirm scope for "${cat.category}" (rule "${rule.rule_id}"); downgraded and clarification question generated`,
         });
-        // Ask about the triggering fact first, then any remaining missing knownFacts.
-        const keysToAsk = [scopeResult.factKey];
-        for (const { key } of (rule.scope_conditions.knownFacts_required ?? [])) {
-          if (key !== scopeResult.factKey && facts.knownFacts?.[key] === undefined) {
-            keysToAsk.push(key);
-          }
-        }
-        for (const factKey of keysToAsk) {
-          const alreadyAsked = clarificationQuestions.some(
-            (q) => q.fact_key === factKey && q.affects_finding_id === cat.id,
+        const alreadyAsked = clarificationQuestions.some(
+          (q) => q.fact_key === scopeResult.factKey && q.affects_finding_id === cat.id,
+        );
+        if (!alreadyAsked) {
+          clarificationQuestions.push(
+            buildClarificationQuestion(scopeResult.factKey, rule, cat.category, cat.id),
           );
-          if (!alreadyAsked) {
-            clarificationQuestions.push(
-              buildClarificationQuestion(factKey, rule, cat.category, cat.id),
-            );
-          }
         }
         return { ...cat, verification_status: 'official_unconfirmed' as VerificationStatus };
       }

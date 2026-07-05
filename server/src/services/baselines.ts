@@ -112,10 +112,6 @@ export async function evaluateBaselines(
   const adcvdCategories = adcvdFindingsToCategories(adcvdFindings, today);
   const baselinePlusMfn = [...baseCategories, ...adcvdCategories];
 
-  // Build coverage matrix from all checked domains
-  const adcvdCoverage = adcvdFindingsToCoverage(adcvdFindings, adcvdCategories);
-  const baselineCoverage = buildCoverageMatrix(entry, baselinePlusMfn, adcvdCoverage, hts, normalizedHts, regRows);
-
   // Aggregate missing facts from AD/CVD scope analysis
   const adcvdMissingFacts = Array.from(
     new Set(adcvdFindings.flatMap((f) => f.missing_facts)),
@@ -149,6 +145,11 @@ export async function evaluateBaselines(
   const filteredBaselinePlusMfn = baselinePlusMfn.filter(
     (c) => !(c.id?.startsWith('reg_') && moduleIds.has(c.id.slice(4))),
   );
+
+  // Build coverage matrix from filteredBaselinePlusMfn so reg_ duplicates removed above
+  // cannot reappear in the coverage data.
+  const adcvdCoverage = adcvdFindingsToCoverage(adcvdFindings, adcvdCategories);
+  const baselineCoverage = buildCoverageMatrix(entry, filteredBaselinePlusMfn, adcvdCoverage, hts, normalizedHts, regRows);
 
   // Merge module findings — skip any whose id already appears in baseline results.
   const existingIds = new Set(filteredBaselinePlusMfn.map((c) => c.id).filter(Boolean));
