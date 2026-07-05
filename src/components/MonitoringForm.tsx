@@ -1289,11 +1289,13 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       )}
 
       {/* ── Information still missing ─────────────────────────────────────── */}
-      <section>
-        <h3 className="mb-3 font-semibold">{t(lang, "info_missing_title")}</h3>
+      {/* Only render when there is readable content to show. */}
+      {(missingFacts.length > 0 ||
+        (riskScan.clarification_questions ?? []).some((q) => q.missing_info)) && (
+        <section>
+          <h3 className="mb-3 font-semibold">{t(lang, "info_missing_title")}</h3>
 
-        <Card className="p-4">
-          {missingFacts.length > 0 ? (
+          <Card className="p-4">
             <ul className="space-y-1.5">
               {missingFacts.map((fact, i) => (
                 <li key={i} className="flex gap-2 text-sm">
@@ -1301,20 +1303,19 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
                   <span className="text-foreground">{fact}</span>
                 </li>
               ))}
+              {missingFacts.length === 0 &&
+                (riskScan.clarification_questions ?? []).map((q, i) =>
+                  q.missing_info ? (
+                    <li key={i} className="flex gap-2 text-sm">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                      <span className="text-foreground">{q.missing_info}</span>
+                    </li>
+                  ) : null,
+                )}
             </ul>
-          ) : (riskScan.clarification_questions ?? []).length === 0 &&
-            !riskScan.risk_categories.some(
-              (c) =>
-                c.verification_status === "official_unconfirmed" ||
-                c.verification_status === "insufficient_info",
-            ) &&
-            !riskScan.document_checklist.some((d) => d.doc_status === "cannot_determine") ? (
-            <p className="text-sm text-muted-foreground">
-              {t(lang, "info_missing_none")}
-            </p>
-          ) : null}
-        </Card>
-      </section>
+          </Card>
+        </section>
+      )}
 
       {/* ── Next steps (max 3) ────────────────────────────────────────────── */}
       {nextSteps.length > 0 && (

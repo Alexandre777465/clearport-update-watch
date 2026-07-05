@@ -462,13 +462,15 @@ const ANSWER_RULES: Record<string, readonly AnswerRule[]> = {
   // ── Sports answer rules ────────────────────────────────────────────────────
   sports_product_type: [
     { fact: 'is_sports_equipment',     value: 'yes', matchValues: [
-        'bicycle', 'kayak_canoe', 'surfboard_paddleboard', 'climbing_equipment',
+        'bicycle', 'bicycle_helmet', 'kayak_canoe', 'surfboard_paddleboard', 'climbing_equipment',
         'pfd_life_jacket', 'fitness_machine', 'free_weights', 'combat_sports',
         'snow_sports', 'water_sports', 'ball_racket_sports', 'trampoline',
         'protective_gear', 'scuba_snorkel', 'other_sports',
       ]},
     { fact: 'is_sports_equipment',     value: 'no',  matchValues: ['not_sports', 'not_applicable'] },
-    { fact: 'head_protection',         value: 'yes', matchValues: ['bicycle'] },
+    // 'bicycle_helmet' is a dedicated type for a standalone helmet (not a bicycle);
+    // it sets head_protection but NOT is_bicycle — prevents Part 1512 false-positive.
+    { fact: 'head_protection',         value: 'yes', matchValues: ['bicycle', 'bicycle_helmet'] },
     { fact: 'flotation_or_lifesaving', value: 'yes', matchValues: ['pfd_life_jacket', 'kayak_canoe', 'surfboard_paddleboard'] },
     { fact: 'climbing_or_fall_arrest', value: 'yes', matchValues: ['climbing_equipment'] },
     { fact: 'intended_for_water',      value: 'yes', matchValues: ['kayak_canoe', 'surfboard_paddleboard', 'water_sports', 'scuba_snorkel', 'pfd_life_jacket'] },

@@ -62,6 +62,7 @@ export const sportsModule: RegulatoryModule = {
       helpText: 'Determines which mandatory safety standards apply.',
       options: [
         { value: 'bicycle',               label: 'Bicycle (includes e-bike)' },
+        { value: 'bicycle_helmet',        label: 'Bicycle helmet (sold separately, not a bicycle)' },
         { value: 'kayak_canoe',           label: 'Kayak, canoe, or paddleboard' },
         { value: 'surfboard_paddleboard', label: 'Surfboard or stand-up paddleboard' },
         { value: 'climbing_equipment',    label: 'Climbing / fall-arrest equipment' },
@@ -102,13 +103,33 @@ export const sportsModule: RegulatoryModule = {
     const hasSkiHelmet     = helmetType === 'ski_snowboard_helmet';
     const isInflatablePfd  = pfdType === 'type_5';
 
+    // ── Bicycle-helmet-only detection ─────────────────────────────────────────
+    // HTS 6506.x (headgear) or sports_product_type='bicycle_helmet' means the
+    // imported product IS a bicycle helmet — NOT a bicycle that includes a helmet.
+    // In this case Part 1512 (bicycle standard) must not fire; only Part 1203 applies.
+    const isBicycleHelmetOnly =
+      sportType === 'bicycle_helmet' ||
+      input.htsDigits.startsWith('6506');
+
+    // Combined: Part 1203 applies when the helmet is the main product or is
+    // explicitly confirmed as an accessory included with a bicycle.
+    const isBicycleHelmet = hasBicycleHelmet || isBicycleHelmetOnly;
+
+    // Children's product flag — used to choose CPC vs GCC for Part 1203.
+    const isChildrensProduct =
+      input.attrs.is_children === true ||
+      knownFacts['age_range'] === 'under_3' ||
+      knownFacts['age_range'] === 'age_3_to_12';
+
     if (isNotSports) {
       return { findings: [], coverageDomains: [], docSpecs: [], questions };
     }
 
     // ── 1. BICYCLES — 16 CFR Part 1512 (MANDATORY) ────────────────────────────
+    // Guard: skip Part 1512 when the imported product IS a bicycle helmet (not a bicycle).
+    // isBicycleHelmetOnly is true when HTS is 6506.x or sports_product_type='bicycle_helmet'.
 
-    if (isBicycle) {
+    if (isBicycle && !isBicycleHelmetOnly) {
       findings.push({
         id: 'sports_bicycle_cpsc_1512',
         category: 'CPSC — Bicycle Safety Standard (16 CFR Part 1512)',
@@ -156,8 +177,20 @@ export const sportsModule: RegulatoryModule = {
     }
 
     // ── 2. BICYCLE HELMETS — 16 CFR Part 1203 (MANDATORY) ────────────────────
+    // Fires when the product is a bicycle helmet — either as the main product
+    // (isBicycleHelmetOnly) or as an accessory included with a bicycle (hasBicycleHelmet).
+    // For children's products, the importer issues a Children's Product Certificate (CPC)
+    // that covers Part 1203; for adult products, a General Certificate of Conformity (GCC).
 
-    if (hasBicycleHelmet) {
+    if (isBicycleHelmet) {
+      const certType = isChildrensProduct
+        ? 'Children\'s Product Certificate (CPC)'
+        : 'General Certificate of Conformity (GCC)';
+      const certNote = isChildrensProduct
+        ? 'The importer must issue a Children\'s Product Certificate (CPC) — a single CPC covers ' +
+          '16 CFR Part 1203 and all other applicable children\'s-product rules. Do not prepare a separate GCC.'
+        : 'The importer must issue a General Certificate of Conformity (GCC) based on the test report.';
+
       findings.push({
         id: 'sports_bicycle_helmet_cpsc_1203',
         category: 'CPSC — Bicycle Helmet Standard (16 CFR Part 1203)',
@@ -166,10 +199,12 @@ export const sportsModule: RegulatoryModule = {
           '16 CFR Part 1203 is a mandatory federal standard for bicycle helmets. ' +
           'It requires impact attenuation testing, penetration resistance, retention system performance, ' +
           'and peripheral vision requirements. Testing must be performed by a CPSC-accepted laboratory. ' +
-          'The importer must issue a General Certificate of Conformity (GCC).',
+          certNote,
         action:
           'Obtain a third-party test report from a CPSC-accepted laboratory confirming 16 CFR Part 1203 compliance. ' +
-          'Prepare a General Certificate of Conformity. Retain records for five years.',
+          (isChildrensProduct
+            ? 'List 16 CFR Part 1203 on the Children\'s Product Certificate (CPC). Retain records for five years.'
+            : 'Prepare a General Certificate of Conformity (GCC). Retain records for five years.'),
         verification_status: 'verified_applicable',
         source: {
           name: '16 CFR Part 1203',
@@ -182,10 +217,12 @@ export const sportsModule: RegulatoryModule = {
       });
 
       docSpecs.push({
-        document: 'Third-Party Test Report (16 CFR Part 1203) + General Certificate of Conformity',
-        owner: 'supplier',
-        responsible_party: 'laboratory',
-        reason: 'Mandatory CPSC bicycle helmet standard requires CPSC-accepted lab testing and a GCC.',
+        document: `Third-Party Test Report (16 CFR Part 1203) + ${certType}`,
+        owner: isChildrensProduct ? 'importer_broker' : 'supplier',
+        responsible_party: isChildrensProduct ? 'importer' : 'laboratory',
+        reason: isChildrensProduct
+          ? 'Mandatory CPSC bicycle helmet standard requires CPSC-accepted lab testing; the importer issues a CPC covering Part 1203 and all other applicable children\'s-product rules.'
+          : 'Mandatory CPSC bicycle helmet standard requires CPSC-accepted lab testing and a GCC.',
         doc_status: 'required_to_clear',
         finding_id: 'sports_bicycle_helmet_cpsc_1203',
       });

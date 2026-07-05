@@ -464,3 +464,197 @@ describe('Bug 2 & 3 — boxing gloves: no ASTM F2697, not_applicable status', ()
     expect(combatFinding!.explanation).toContain('No completed ASTM boxing glove');
   });
 });
+
+// ── Bicycle helmet product-scope regression tests ────────────────────────────
+// Verifies the three invariants for bicycle helmets:
+//   1. HTS 6506.x → Part 1512 never fires (product is a helmet, not a bicycle)
+//   2. Part 1203 fires for all bicycle helmets regardless of entry path
+//   3. Children's product → CPC language, not GCC
+//   4. ASTM F963 never appears for a protective helmet
+//   5. bicycle_helmet as sports_product_type suppresses Part 1512
+
+describe('Bicycle helmet (HTS 6506.10) — no Part 1512 false-positive', () => {
+  const text = "children's bicycle helmet, polycarbonate shell, EPS foam liner, ages 3-12";
+  const hts = '65061030';
+  const answers = {
+    sports_product_type: 'bicycle',          // broad sports category detected from text
+    sports_helmet_type: 'bicycle_helmet',
+    age_range: 'age_3_to_12',
+    contains_paint_or_surface_coating: 'no',
+  };
+
+  it('HTS 6506.x suppresses Part 1512 (bicycle standard must not fire for a helmet)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const ids = result.findings.map((f) => f.id);
+    expect(ids).not.toContain('sports_bicycle_cpsc_1512');
+  });
+
+  it('Part 1203 fires for bicycle helmet (mandatory CPSC standard)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+
+  it("Part 1203 explanation mentions CPC (not GCC) for a children's helmet", () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(finding?.explanation).toContain("Children's Product Certificate (CPC)");
+    expect(finding?.explanation).not.toContain('General Certificate of Conformity (GCC)');
+  });
+
+  it("Part 1203 docSpec names CPC for a children's helmet", () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(doc?.document).toContain('CPC');
+    expect(doc?.document).not.toContain('GCC');
+  });
+
+  it('ASTM F963 does not appear for a protective bicycle helmet', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const ids = result.findings.map((f) => f.id);
+    expect(ids).not.toContain('cpsc_toy_f963');
+    const docs = result.docSpecs.map((d) => d.document);
+    expect(docs.some((d) => d.includes('F963'))).toBe(false);
+  });
+});
+
+describe('Bicycle helmet via sports_product_type=bicycle_helmet — no Part 1512', () => {
+  const text = 'road cycling helmet, ventilated polycarbonate shell';
+  const hts = '65069990'; // other headgear
+  const answers = {
+    sports_product_type: 'bicycle_helmet',
+    age_range: 'over_12',
+  };
+
+  it('sports_product_type=bicycle_helmet suppresses Part 1512', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const ids = result.findings.map((f) => f.id);
+    expect(ids).not.toContain('sports_bicycle_cpsc_1512');
+  });
+
+  it('Part 1203 fires via bicycle_helmet product type', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+
+  it('adult helmet uses GCC (not CPC)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(finding?.explanation).toContain('General Certificate of Conformity (GCC)');
+    expect(finding?.explanation).not.toContain("Children's Product Certificate (CPC)");
+  });
+});
+
+describe('Bicycle WITH included helmet still produces both Part 1512 and Part 1203', () => {
+  // Scenario 2 compatibility: a bicycle sold WITH a helmet should trigger both standards.
+  const text = '20-inch kids bicycle with included protective bicycle helmet';
+  const hts = '87120060'; // actual bicycle HTS — not 6506
+  const answers = {
+    sports_product_type: 'bicycle',
+    sports_helmet_type: 'bicycle_helmet',
+    age_range: 'age_3_to_12',
+  };
+
+  it('actual bicycle HTS does NOT suppress Part 1512', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_cpsc_1512');
+  });
+
+  it('Part 1203 also fires for the included helmet', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+});
+
+// ── Children's product module — tracking label and F963 regression tests ──────
+
+describe('CPSIA tracking label — required for confirmed children\'s products', () => {
+  const text = "children's bicycle helmet, ages 3-12";
+  const hts = '65061030';
+  const answers = {
+    sports_product_type: 'bicycle_helmet',
+    age_range: 'age_3_to_12',
+    contains_paint_or_surface_coating: 'no',
+  };
+
+  it('tracking label finding appears for confirmed children\'s product', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const ids = result.findings.map((f) => f.id);
+    expect(ids).toContain('cpsia_tracking_label');
+  });
+
+  it('tracking label finding is verified_applicable', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const finding = result.findings.find((f) => f.id === 'cpsia_tracking_label');
+    expect(finding?.verification_status).toBe('verified_applicable');
+  });
+
+  it('tracking label docSpec is required_to_clear', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
+    const doc = result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label');
+    expect(doc).toBeDefined();
+    expect(doc?.doc_status).toBe('required_to_clear');
+  });
+});
+
+describe('ASTM F963 — must not appear for non-toy children\'s products', () => {
+  it('bicycle helmet (age_3_to_12) does not produce F963 finding or docSpec', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '65061030',
+      productText: "children's bicycle helmet ages 3-12",
+      knownFacts: { age_range: 'age_3_to_12', contains_paint_or_surface_coating: 'no' },
+    }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+    expect(result.docSpecs.some((d) => d.document.includes('F963'))).toBe(false);
+  });
+
+  it('children\'s lead pad (not toy, no "toy" in text, not HTS 9503) does not produce F963 docSpec', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '39262090',
+      productText: "children's foam playmat, non-toxic EVA foam, ages 2+",
+      knownFacts: { age_range: 'age_3_to_12', contains_paint_or_surface_coating: 'no' },
+    }));
+    expect(result.docSpecs.some((d) => d.document.includes('F963'))).toBe(false);
+  });
+
+  it('product with "toy" in text DOES produce F963 finding (positive case)', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '95030090',
+      productText: 'plastic toy construction set, ages 3+',
+      knownFacts: { age_range: 'age_3_to_12', contains_paint_or_surface_coating: 'no' },
+    }));
+    expect(result.findings.map((f) => f.id)).toContain('cpsc_toy_f963');
+  });
+});
+
+describe('CPSC eFiling — required when import date on or after 2026-07-08', () => {
+  const childHelmetInput = (importDate: string) => moduleInput({
+    htsDigits: '65061030',
+    productText: "children's bicycle helmet, ages 3-12",
+    knownFacts: { age_range: 'age_3_to_12', contains_paint_or_surface_coating: 'no' },
+    importDate,
+  });
+
+  it('eFiling docSpec present when importDate >= 2026-07-08', () => {
+    const result = evaluateAllModules(childHelmetInput('2026-07-08'));
+    const efilingDoc = result.docSpecs.find((d) => d.document.includes('eFiling'));
+    expect(efilingDoc).toBeDefined();
+    expect(efilingDoc?.doc_status).toBe('required_to_clear');
+  });
+
+  it('eFiling docSpec absent when importDate < 2026-07-08', () => {
+    const result = evaluateAllModules(childHelmetInput('2026-07-05'));
+    const efilingDoc = result.docSpecs.find((d) => d.document.includes('eFiling'));
+    expect(efilingDoc).toBeUndefined();
+  });
+
+  it('eFiling docSpec absent for adult products (not childrenConfirmed)', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '65061030',
+      productText: 'adult bicycle helmet',
+      knownFacts: { age_range: 'over_12' },
+      importDate: '2026-07-10',
+    }));
+    const efilingDoc = result.docSpecs.find((d) => d.document.includes('eFiling'));
+    expect(efilingDoc).toBeUndefined();
+  });
+});

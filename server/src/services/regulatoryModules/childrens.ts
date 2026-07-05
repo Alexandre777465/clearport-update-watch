@@ -200,6 +200,9 @@ export const childrensModule: RegulatoryModule = {
 
     // ── ASTM F963 Toy Safety ──────────────────────────────────────────────────
 
+    // ASTM F963 fires only when the product is confirmed as a toy by HTS (9503) or
+    // product text ("toy"). A protective or sports product for children is NOT a toy
+    // by default — do not emit F963 merely because the product is a children's item.
     if (isToy) {
       findings.push({
         id: 'cpsc_toy_f963',
@@ -226,17 +229,6 @@ export const childrensModule: RegulatoryModule = {
         responsible_party: 'supplier',
         reason: 'CPSIA Section 106 mandates ASTM F963 compliance; the test report from a CPSC-accepted laboratory must be on file before importation.',
         doc_status: 'required_to_clear',
-        finding_id: 'cpsc_toy_f963',
-      });
-    } else if (childrenConfirmed || (!childrenDefinitelyNot && !ageRange)) {
-      // Product is a children's item but we cannot confirm toy status from HTS/text
-      docSpecs.push({
-        document: 'ASTM F963 test report',
-        owner: 'supplier',
-        responsible_party: 'supplier',
-        reason: 'If this product is a toy under CPSIA Section 106, ASTM F963 test reports are required before importation.',
-        doc_status: 'required_if',
-        condition: 'product is a toy (HTS 9503 or marketed as toy)',
         finding_id: 'cpsc_toy_f963',
       });
     }
@@ -306,6 +298,68 @@ export const childrensModule: RegulatoryModule = {
         verification_status: 'insufficient_info',
         missing_info: 'Intended age range and whether the product has any paint or surface coating.',
         source: lead_source,
+      });
+    }
+
+    // ── CPSIA Tracking Label (15 U.S.C. 2063(a)(5)) ──────────────────────────
+    // Required for all children's products manufactured after August 14, 2009.
+    // The permanent mark must appear on the product and, where practicable, on packaging.
+
+    if (childrenConfirmed) {
+      findings.push({
+        id: 'cpsia_tracking_label',
+        category: 'CPSIA -- Tracking Label (15 U.S.C. 2063(a)(5))',
+        level: 'High',
+        explanation:
+          'Children\'s products must bear a permanent tracking label on the product and, where practicable, on its packaging. ' +
+          'The label must identify: (1) the manufacturer or private labeler name; (2) the location and date of manufacture; ' +
+          '(3) cohort information (e.g., batch or run number, or other identifying characteristic); ' +
+          'and (4) any other information that enables the manufacturer or the CPSC to ascertain the specific source of the product. ' +
+          'This requirement applies to all children\'s products manufactured after August 14, 2009.',
+        action:
+          'Confirm with the manufacturer that a permanent tracking label appears on the product and outer packaging. ' +
+          'The label must be legible and must survive normal use of the product.',
+        verification_status: 'verified_applicable',
+        applicability_conditions: 'All children\'s products manufactured after August 14, 2009.',
+        source: {
+          agency: 'CPSC',
+          name: '15 U.S.C. 2063(a)(5) -- CPSIA Tracking Label',
+          title: 'CPSIA Section 14(a)(5) — Tracking Label Requirement',
+          cfr_citation: '16 CFR Part 1130',
+          last_verified_at: '2025-08-01',
+          url: 'https://www.cpsc.gov/Business--Manufacturing/Business-Education/Business-Guidance/Tracking-Labels',
+          why_relevant: 'CPSIA Section 14(a)(5) mandates permanent tracking labels on all children\'s products.',
+        },
+      });
+
+      docSpecs.push({
+        document: 'CPSIA tracking label (on product and packaging)',
+        owner: 'supplier',
+        responsible_party: 'supplier',
+        reason: 'CPSIA Section 14(a)(5) requires permanent tracking labels on children\'s products and, where practicable, packaging.',
+        doc_status: 'required_to_clear',
+        finding_id: 'cpsia_tracking_label',
+      });
+    }
+
+    // ── CPSC Certificate eFiling ──────────────────────────────────────────────
+    // Effective 2026-07-08: CPSC requires electronic filing of the Certificate of Compliance
+    // (CPC or GCC) through CPSC's eFiling portal (16 CFR Part 1110) at or before entry.
+
+    const EFILING_EFFECTIVE_DATE = '2026-07-08';
+    const efilingRequired = childrenConfirmed && input.importDate >= EFILING_EFFECTIVE_DATE;
+
+    if (efilingRequired) {
+      docSpecs.push({
+        document: 'CPSC Certificate of Compliance eFiling (16 CFR Part 1110)',
+        owner: 'importer_broker',
+        responsible_party: 'importer',
+        reason:
+          'CPSC requires electronic filing of the Certificate of Compliance (CPC) through the CPSC eFiling portal ' +
+          'at or before the time of entry for shipments on or after ' + EFILING_EFFECTIVE_DATE + '. ' +
+          'The eFiling must reference the applicable rules, test laboratory, and CPC data.',
+        doc_status: 'required_to_clear',
+        finding_id: 'cpsia_cpc',
       });
     }
 
