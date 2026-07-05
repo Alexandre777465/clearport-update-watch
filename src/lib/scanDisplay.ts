@@ -377,11 +377,19 @@ export function collectMissingFacts(scan: ProductRiskScan): string[] {
     if (!seen.has(key)) { seen.add(key); result.push(s.trim()); }
   };
 
-  (scan.missing_facts ?? []).forEach(add);
+  // Fact keys already surfaced as structured clarification questions with human-readable text.
+  const clarificationFactKeys = new Set(
+    (scan.clarification_questions ?? []).map((q) => q.fact_key),
+  );
+  // Raw internal key: snake_case with no spaces = an internal identifier, not user-readable.
+  const isRawKey = (s: string) => /^[a-z][a-z0-9_]*$/.test(s.trim()) && !s.trim().includes(" ");
+  const shouldInclude = (s: string) => !clarificationFactKeys.has(s.trim()) && !isRawKey(s);
+
+  (scan.missing_facts ?? []).filter(shouldInclude).forEach(add);
 
   (scan.coverage_matrix ?? [])
     .filter((c) => c.status === "official_unconfirmed" || c.status === "likely_match" || c.status === "insufficient_info")
-    .forEach((c) => (c.missing_facts ?? []).forEach(add));
+    .forEach((c) => (c.missing_facts ?? []).filter(shouldInclude).forEach(add));
 
   // Findings whose fact is already addressed by a structured clarification_question.
   const clarifiedIds = new Set(

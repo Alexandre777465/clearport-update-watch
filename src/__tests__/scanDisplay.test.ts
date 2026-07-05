@@ -759,3 +759,73 @@ describe("Bug-7 acceptance — boxing gloves HTS 4203.21.8060 from China, $50,00
     expect(s122?.ratePct).toBe(10);
   });
 });
+
+// ── collectMissingFacts — raw-key filtering ───────────────────────────────────
+// Internal fact keys (snake_case identifiers) must never appear in the UI.
+// They are implementation details surfaced in the coverage-domain missing_facts
+// arrays before the human-readable clarification template system existed.
+
+describe("collectMissingFacts — raw internal key filtering", () => {
+  const rawKeyScan: ProductRiskScan = {
+    ...BOXING_GLOVES_SCAN,
+    missing_facts: ["textile_lining_function", "fiber_content_claim_shown"],
+    coverage_matrix: [
+      {
+        domain: "FTC Textile Labeling",
+        domain_key: "ftc_textile_labeling",
+        category: "product_regulation",
+        status: "official_unconfirmed",
+        missing_facts: ["textile_lining_function", "fiber_content_claim_shown"],
+      },
+    ],
+  };
+
+  it("raw snake_case key 'textile_lining_function' is NOT returned", () => {
+    const facts = collectMissingFacts(rawKeyScan);
+    expect(facts).not.toContain("textile_lining_function");
+  });
+
+  it("raw snake_case key 'fiber_content_claim_shown' is NOT returned", () => {
+    const facts = collectMissingFacts(rawKeyScan);
+    expect(facts).not.toContain("fiber_content_claim_shown");
+  });
+
+  it("human-readable missing facts (with spaces) ARE returned", () => {
+    const humanReadableScan: ProductRiskScan = {
+      ...BOXING_GLOVES_SCAN,
+      missing_facts: ["Is the lining mainly for warmth or thermal insulation?"],
+    };
+    const facts = collectMissingFacts(humanReadableScan);
+    expect(facts).toContain("Is the lining mainly for warmth or thermal insulation?");
+  });
+
+  it("facts that match clarification_questions fact_key are suppressed even if human-readable", () => {
+    const mixedScan: ProductRiskScan = {
+      ...BOXING_GLOVES_SCAN,
+      missing_facts: ["lining_purpose"],
+      clarification_questions: [
+        {
+          fact_key: "lining_purpose",
+          missing_info: "Function of the lining",
+          why_it_matters: "Determines if TFPIA applies",
+          affects_finding_id: "ftc_textile_component_labeling",
+          affects_category: "FTC TFPIA",
+          options: [{ value: "warmth", label: "Warmth" }],
+        },
+      ],
+    };
+    const facts = collectMissingFacts(mixedScan);
+    // The raw key matching a clarification question fact_key should be suppressed
+    expect(facts).not.toContain("lining_purpose");
+  });
+
+  it("generic string 'any fact key' with mixed case is not treated as a raw key", () => {
+    // Multi-word strings are not raw keys
+    const scanWithMixed: ProductRiskScan = {
+      ...BOXING_GLOVES_SCAN,
+      missing_facts: ["Producer or manufacturer name"],
+    };
+    const facts = collectMissingFacts(scanWithMixed);
+    expect(facts).toContain("Producer or manufacturer name");
+  });
+});

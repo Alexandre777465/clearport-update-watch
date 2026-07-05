@@ -177,6 +177,13 @@ export const textilesModule: RegulatoryModule = {
         finding_id: 'ftc_textile_component_labeling',
       });
 
+      const componentMissingFacts: string[] = [];
+      if (!input.knownFacts?.textile_lining_function) {
+        componentMissingFacts.push('Is the lining mainly for warmth or thermal insulation?');
+      }
+      if (!input.knownFacts?.fiber_content_claim_shown) {
+        componentMissingFacts.push('Are any fiber-content claims shown on the product or packaging?');
+      }
       coverageDomains.push({
         domain: 'FTC TFPIA -- Fiber Content Labeling',
         domain_key: 'ftc_textile_labeling',
@@ -184,7 +191,7 @@ export const textilesModule: RegulatoryModule = {
         status: 'official_unconfirmed',
         finding_id: 'ftc_textile_component_labeling',
         note: 'TFPIA may apply to the confirmed textile component; applicability depends on function and fiber composition.',
-        missing_facts: ['textile_lining_function', 'fiber_content_claim_shown'],
+        missing_facts: componentMissingFacts,
       });
     }
 

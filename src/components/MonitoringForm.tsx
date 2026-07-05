@@ -18,6 +18,7 @@ import {
   type ProductAttributes,
   type DocumentChecklistItem,
   type RiskCategory,
+  type ClarificationQuestion,
   API_URL,
 } from "@/lib/api";
 import { RiskScanCard } from "@/components/RiskScanCard";
@@ -386,6 +387,12 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   // Async-scan failure state + the knownFacts to retry with.
   const [scanError, setScanError] = useState<string | null>(null);
   const [retryKnownFacts, setRetryKnownFacts] = useState<Record<string, string> | null>(null);
+  // Post-scan clarification: one question at a time before showing the final report.
+  const [postScanQ, setPostScanQ] = useState<{
+    question: ClarificationQuestion;
+    accumulatedFacts: Record<string, string>;
+    skipConfirmed: ConfirmedState;
+  } | null>(null);
 
   // Detect which regulatory modules apply as the user types — drives question list.
   // Passing attrs ensures that false booleans (e.g. is_electronic=false) suppress
@@ -425,6 +432,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     setRetryKnownFacts(facts);
     setPendingInferred(null);
     setShowClarification(false);
+    setPostScanQ(null);
     setScanError(null);
     setLoadingStage("saving");
 
@@ -476,7 +484,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         window.dispatchEvent(new CustomEvent("clearport:entry", { detail: result.id }));
       }
 
-      setConfirmed({
+      const confirmedState: ConfirmedState = {
         email: form.email.trim(),
         productName: form.productName.trim(),
         description: form.description.trim(),
@@ -494,7 +502,17 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         isLocal: result.scan_status === "local",
         emailEnabled: result.email_enabled,
         entryId: result.id,
-      });
+      };
+
+      // If the verifier generated clarification questions, pause and ask the first
+      // one interactively before showing the final report.
+      const firstQ = (riskScan.clarification_questions ?? [])[0];
+      if (firstQ) {
+        setPostScanQ({ question: firstQ, accumulatedFacts: facts, skipConfirmed: confirmedState });
+        return;
+      }
+
+      setConfirmed(confirmedState);
     } catch {
       setScanError(t(lang, "err_save"));
     } finally {
@@ -528,6 +546,26 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
 
   if (loadingStage) {
     return <ScanningState stage={loadingStage} productName={form.productName} />;
+  }
+
+  if (postScanQ) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <PostScanClarificationStep
+          question={postScanQ.question}
+          onAnswer={(value) => {
+            const newFacts = { ...postScanQ.accumulatedFacts, [postScanQ.question.fact_key]: value };
+            setPostScanQ(null);
+            void runScan(attrs, newFacts);
+          }}
+          onSkip={() => {
+            const pending = postScanQ.skipConfirmed;
+            setPostScanQ(null);
+            setConfirmed(pending);
+          }}
+        />
+      </div>
+    );
   }
 
   if (confirmed) {
@@ -1254,43 +1292,6 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       <section>
         <h3 className="mb-3 font-semibold">{t(lang, "info_missing_title")}</h3>
 
-        {/* Structured clarification questions from the verifier */}
-        {(riskScan.clarification_questions ?? []).length > 0 && (
-          <div className="mb-3 space-y-3">
-            {(riskScan.clarification_questions ?? []).map((q, i) => (
-              <Card key={i} className="border-amber-200 bg-amber-50/60 p-4">
-                <div className="space-y-1.5 text-sm">
-                  <p className="font-semibold text-amber-900">
-                    {t(lang, "clarif_missing_info")} {q.missing_info}
-                  </p>
-                  <p className="text-amber-800">
-                    <span className="font-medium">{t(lang, "clarif_why_matters")} </span>
-                    {q.why_it_matters}
-                  </p>
-                  <p className="text-amber-800">
-                    <span className="font-medium">{t(lang, "clarif_affects")} </span>
-                    {q.affects_category}
-                  </p>
-                  {q.options && q.options.length > 0 && (
-                    <div className="mt-2">
-                      <p className="font-medium text-amber-900 mb-1">
-                        {t(lang, "clarif_resubmit")}
-                      </p>
-                      <ul className="space-y-0.5 pl-3">
-                        {q.options.map((opt) => (
-                          <li key={opt.value} className="text-amber-800">
-                            · {opt.label}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-
         <Card className="p-4">
           {missingFacts.length > 0 ? (
             <ul className="space-y-1.5">
@@ -1454,6 +1455,62 @@ const MODULE_LABELS: Record<string, string> = {
   chemicals: "Chemicals / EPA",
   furniture: "Furniture / EPA TSCA",
 };
+
+// ── Post-scan clarification step ─────────────────────────────────────────────
+// Shown after the scan completes when the verifier identifies one decisive missing
+// fact. Blocks the final report until the user answers (or skips).
+
+function PostScanClarificationStep({
+  question,
+  onAnswer,
+  onSkip,
+}: {
+  question: ClarificationQuestion;
+  onAnswer: (value: string) => void;
+  onSkip: () => void;
+}) {
+  const lang = useLang();
+  const [selected, setSelected] = useState<string>("");
+
+  return (
+    <Card className="p-6 sm:p-8 space-y-5">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+          {t(lang, "postscan_q_heading")}
+        </p>
+        <p className="text-base font-semibold text-foreground">{question.missing_info}</p>
+        <p className="mt-1.5 text-sm text-muted-foreground">{question.why_it_matters}</p>
+      </div>
+
+      {question.options && question.options.length > 0 && (
+        <RadioGroup value={selected} onValueChange={setSelected} className="flex flex-col gap-2">
+          {question.options.map((opt) => (
+            <label
+              key={opt.value}
+              className={`flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors ${
+                selected === opt.value
+                  ? "border-primary bg-primary/5 text-foreground"
+                  : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
+              }`}
+            >
+              <RadioGroupItem value={opt.value} className="shrink-0" />
+              {opt.label}
+            </label>
+          ))}
+        </RadioGroup>
+      )}
+
+      <div className="flex gap-2 pt-1">
+        <Button onClick={() => selected && onAnswer(selected)} disabled={!selected} className="flex-1">
+          {t(lang, "postscan_q_continue")}
+        </Button>
+        <Button variant="outline" onClick={onSkip} className="shrink-0">
+          {t(lang, "postscan_q_skip")}
+        </Button>
+      </div>
+    </Card>
+  );
+}
 
 // ── Dynamic clarification step ────────────────────────────────────────────────
 

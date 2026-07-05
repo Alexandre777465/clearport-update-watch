@@ -8,6 +8,7 @@
  *   4. Part 303 (fiber content) and Part 423 (care label) are always separate documents
  *   5. Informational findings (not_applicable) stay visible in risk_categories
  *   6. postVerifySync preserves clarification_questions added by the verifier
+ *  10. Clarification answer flow — answers reach verifier, one question at a time
  */
 
 import { test, it, expect, describe } from 'bun:test';
@@ -17,7 +18,9 @@ import {
   documentsForFinding,
   type ScanResult,
 } from '../services/riskScanner';
+import { verifyScan } from '../services/reportVerifier';
 import type { RiskCategory } from '../types';
+import { OFFICIAL_RULE_REGISTRY } from '../data/officialRuleRegistry';
 
 // ── Minimal scan scaffolding ──────────────────────────────────────────────────
 
@@ -782,5 +785,159 @@ describe('postVerifySync — unresolved gate for document checklist', () => {
 
     const required = synced.document_checklist.filter((d) => d.required);
     expect(required).toHaveLength(0);
+  });
+});
+
+// ── 10. Clarification answer flow ─────────────────────────────────────────────
+// Verifies the four invariants for the post-scan clarification workflow:
+//   a. A structured answer in knownFacts reaches the verifier and is evaluated
+//   b. An answered fact that satisfies the rule keeps the finding verified
+//   c. An answered fact that fails the rule downgrades, never asks again
+//   d. Without any answer, exactly one clarification question is generated (not multiple)
+
+// Boxing gloves test fixture — ftc_textile_component_labeling verified_applicable.
+const BOXING_GLOVES_TEXTILE: RiskCategory = {
+  id: 'ftc_textile_component_labeling',
+  category: 'FTC TFPIA — Fiber Content Labeling (Textile Component, 16 CFR 303)',
+  level: 'Medium',
+  explanation: 'This product contains a textile fiber component.',
+  action: 'Confirm fiber composition with supplier.',
+  verification_status: 'verified_applicable',
+  source: {
+    agency: 'FTC',
+    name: 'Federal Trade Commission',
+    title: '15 U.S.C. 70; 16 CFR Part 303',
+    last_verified_at: '2026-07-01',
+    url: 'https://www.ftc.gov',
+    why_relevant: 'Confirmed textile component in product description.',
+  },
+};
+
+const BOXING_GLOVES_FACTS = {
+  htsDigits: '4203218060',
+  productText: 'cowhide leather boxing gloves with polyester lining',
+  originCountry: 'China',
+  importDate: '2026-07-05',
+};
+
+describe('clarification answer flow — 10a: knownFacts reaches verifier', () => {
+  it('textile_lining_function=warmth satisfies knownFacts_required → finding stays verified_applicable, no clarification question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BOXING_GLOVES_TEXTILE] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BOXING_GLOVES_FACTS, knownFacts: { textile_lining_function: 'warmth' } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'ftc_textile_component_labeling');
+    expect(finding?.verification_status).toBe('verified_applicable');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('textile_lining_function=both also satisfies the rule', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BOXING_GLOVES_TEXTILE] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BOXING_GLOVES_FACTS, knownFacts: { textile_lining_function: 'both' } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'ftc_textile_component_labeling');
+    expect(finding?.verification_status).toBe('verified_applicable');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+});
+
+describe('clarification answer flow — 10b: answered fact that fails downgrades, no repeat question', () => {
+  it('textile_lining_function=padding fails scope → downgraded to official_unconfirmed, no clarification question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BOXING_GLOVES_TEXTILE] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BOXING_GLOVES_FACTS, knownFacts: { textile_lining_function: 'padding' } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'ftc_textile_component_labeling');
+    expect(finding?.verification_status).toBe('official_unconfirmed');
+    // Fact was answered (even though it fails) — do NOT ask again
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+
+  it('textile_lining_function=unknown fails scope → downgraded, no repeat question', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BOXING_GLOVES_TEXTILE] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BOXING_GLOVES_FACTS, knownFacts: { textile_lining_function: 'unknown' } },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    const finding = report.risk_categories.find((c) => c.id === 'ftc_textile_component_labeling');
+    expect(finding?.verification_status).toBe('official_unconfirmed');
+    expect(report.clarification_questions ?? []).toHaveLength(0);
+  });
+});
+
+describe('clarification answer flow — 10c: exactly one question without any answer', () => {
+  it('without knownFacts, verifyScan generates exactly one clarification question for textile_lining_function', () => {
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BOXING_GLOVES_TEXTILE] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BOXING_GLOVES_FACTS, knownFacts: {} },
+      ruleRegistry: OFFICIAL_RULE_REGISTRY,
+    });
+    expect(report.clarification_questions).toHaveLength(1);
+    expect(report.clarification_questions![0].fact_key).toBe('textile_lining_function');
+    expect(report.clarification_questions![0].affects_finding_id).toBe('ftc_textile_component_labeling');
+  });
+
+  it('exactly one question is generated even when the rule has multiple knownFacts_required entries', () => {
+    // Add a second knownFacts_required entry to verify single-question behavior holds
+    const twoFactRule = OFFICIAL_RULE_REGISTRY.find((r) => r.finding_id === 'ftc_textile_component_labeling');
+    if (!twoFactRule) return; // guard — rule must exist
+    const extendedRule = {
+      ...twoFactRule,
+      scope_conditions: {
+        ...twoFactRule.scope_conditions,
+        knownFacts_required: [
+          { key: 'textile_lining_function', values: ['warmth', 'both'] },
+          { key: 'fiber_content_claim_shown', values: ['yes'] },
+        ],
+      },
+    };
+    const customRegistry = [
+      ...OFFICIAL_RULE_REGISTRY.filter((r) => r.finding_id !== 'ftc_textile_component_labeling'),
+      extendedRule,
+    ];
+
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BOXING_GLOVES_TEXTILE] };
+    const { report } = verifyScan(scan, {
+      productFacts: { ...BOXING_GLOVES_FACTS, knownFacts: {} },
+      ruleRegistry: customRegistry,
+    });
+    // Must ask only the first missing key, not both at once
+    expect(report.clarification_questions).toHaveLength(1);
+    expect(report.clarification_questions![0].fact_key).toBe('textile_lining_function');
+  });
+
+  it('after first answer, second missing key is asked (progressive disclosure)', () => {
+    const twoFactRule = OFFICIAL_RULE_REGISTRY.find((r) => r.finding_id === 'ftc_textile_component_labeling');
+    if (!twoFactRule) return;
+    const extendedRule = {
+      ...twoFactRule,
+      scope_conditions: {
+        ...twoFactRule.scope_conditions,
+        knownFacts_required: [
+          { key: 'textile_lining_function', values: ['warmth', 'both'] },
+          { key: 'fiber_content_claim_shown', values: ['yes'] },
+        ],
+      },
+    };
+    const customRegistry = [
+      ...OFFICIAL_RULE_REGISTRY.filter((r) => r.finding_id !== 'ftc_textile_component_labeling'),
+      extendedRule,
+    ];
+
+    const scan: ScanResult = { ...emptyScan(), risk_categories: [BOXING_GLOVES_TEXTILE] };
+    const { report } = verifyScan(scan, {
+      productFacts: {
+        ...BOXING_GLOVES_FACTS,
+        knownFacts: { textile_lining_function: 'warmth' }, // first answered
+      },
+      ruleRegistry: customRegistry,
+    });
+    // First fact satisfied; second fact still missing → ask fiber_content_claim_shown
+    expect(report.clarification_questions).toHaveLength(1);
+    expect(report.clarification_questions![0].fact_key).toBe('fiber_content_claim_shown');
   });
 });
