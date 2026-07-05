@@ -21,7 +21,16 @@ const CHILDRENS_HTS_PREFIXES = ['9501', '9502', '9503', '9504', '9505'];
 const CHILDRENS_TEXT_RE =
   /\b(toy|doll|game|children|child|kids|infant|toddler|juvenile|baby|nursery|playpen|stroller|crib)\b/i;
 
-const TOY_TEXT_RE = /\btoy\b/i;
+// ── Toy classification regexes ────────────────────────────────────────────────
+// Positive: "toy" not immediately followed by a regulatory/function word.
+const TOY_TEXT_POSITIVE_RE =
+  /\btoy\b(?!\s*(?:standard|safety|test(?:ing)?|compliance|regulation|certif(?:ify|ication)?|function))/i;
+
+// Negative: explicit denial phrases that override keyword detection.
+// "no toy function", "not a toy", "toy function" (describing a category, not a product),
+// "non-toy", "not intended for play", "protective equipment only".
+const TOY_TEXT_NEGATIVE_RE =
+  /\bnot\s+(?:a\s+)?(?:toy|plaything)\b|\bno\s+toy\s+function\b|\btoy\s+function\b|\bnon[- ]?toy\b|\bnot\s+intended\s+(?:for|as)\s+(?:a\s+)?(?:play|toy)\b|\bprotective\s+equipment\s+only\b/i;
 
 // ── Module ────────────────────────────────────────────────────────────────────
 
@@ -76,7 +85,26 @@ export const childrensModule: RegulatoryModule = {
     const ageRange    = knownFacts['age_range'];
     const hasCoating  = knownFacts['contains_paint_or_surface_coating'];
     const isChildren  = attrs.is_children === true;
-    const isToy       = h.startsWith('9503') || TOY_TEXT_RE.test(productText);
+
+    // ── Toy classification ────────────────────────────────────────────────────
+    // Positive signals (any one is sufficient when not denied):
+    //   - is_toy = 'yes' structured answer
+    //   - HTS heading 9503 (toys)
+    //   - "toy" in text not followed by a regulatory/functional word
+    // Negative signals (any one suppresses toy even when "toy" appears in text):
+    //   - is_toy = 'no', or non-toy product type (bicycle_helmet, etc.)
+    //   - "toy function", "no toy function", "not a toy", "non-toy", etc.
+    const isToyDenied =
+      knownFacts['is_toy'] === 'no' ||
+      knownFacts['sports_product_type'] === 'bicycle_helmet' ||
+      knownFacts['sports_helmet_type'] === 'bicycle_helmet' ||
+      TOY_TEXT_NEGATIVE_RE.test(productText);
+
+    const isToy =
+      !isToyDenied &&
+      (knownFacts['is_toy'] === 'yes' ||
+        h.startsWith('9503') ||
+        (TOY_TEXT_POSITIVE_RE.test(productText) && !TOY_TEXT_NEGATIVE_RE.test(productText)));
 
     // "children's product confirmed" when attrs flag, or age range under 12
     const childrenConfirmed =
@@ -211,7 +239,7 @@ export const childrensModule: RegulatoryModule = {
         explanation: 'ASTM F963 (Standard Consumer Safety Specification for Toy Safety) is mandatory for toys in the U.S. under CPSIA Section 106 (16 CFR Part 1250). The toy must meet all applicable requirements including mechanical/physical properties, flammability, electrical safety, heavy elements, and age-grade labeling.',
         action: 'Obtain ASTM F963 test reports from the manufacturer covering all applicable provisions. Confirm the toy bears required age-grading labeling.',
         verification_status: 'verified_applicable',
-        applicability_conditions: 'HTS heading 9503 or product text contains the word "toy".',
+        applicability_conditions: 'HTS heading 9503, is_toy=yes, or product text positively identifies product as a toy (without negation).',
         source: {
           agency: 'CPSC',
           name: '16 CFR Part 1250 / ASTM F963',

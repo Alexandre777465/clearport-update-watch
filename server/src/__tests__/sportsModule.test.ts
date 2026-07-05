@@ -658,3 +658,151 @@ describe('CPSC eFiling — required when import date on or after 2026-07-08', ()
     expect(efilingDoc).toBeUndefined();
   });
 });
+
+// ── Toy classification — negation and positive-signal regression tests ─────────
+// These guard the four invariants:
+//   1. "no toy function" (negation in a list) → isToy = false
+//   2. "not a toy" → isToy = false
+//   3. bicycle_helmet product type → isToy = false
+//   4. "toy" in text WITHOUT negation → isToy = true (positive case preserved)
+//   5. HTS 9503 → isToy = true regardless of text
+
+describe('Toy detection — negation: "no toy function" in description', () => {
+  // This is the exact live description that produced the false-positive.
+  const EXACT_LIVE_DESCRIPTION =
+    "children's bicycle helmet, polycarbonate shell, EPS foam liner, ages 3-12. " +
+    'No electronics, batteries, lights, magnets, liquids, medical claims, toy function, or workplace use.';
+  const hts = '65061030'; // HTS 6506.10.3045 prefix
+  const answers = {
+    sports_product_type: 'bicycle',
+    sports_helmet_type: 'bicycle_helmet',
+    age_range: 'age_3_to_12',
+    contains_paint_or_surface_coating: 'no',
+  };
+
+  it('exact live description — ASTM F963 finding must not appear', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+
+  it('exact live description — F963 docSpec must not appear', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    expect(result.docSpecs.some((d) => d.document.includes('F963'))).toBe(false);
+  });
+
+  it('exact live description — Part 1203 still fires (required)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+
+  it('exact live description — Part 1512 must not fire (HTS 6506, not a bicycle)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    expect(result.findings.map((f) => f.id)).not.toContain('sports_bicycle_cpsc_1512');
+  });
+
+  it('exact live description — CPC appears (not GCC)', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(doc?.document).toContain('CPC');
+    expect(doc?.document).not.toContain('GCC');
+  });
+
+  it('exact live description — CPSIA third-party testing appears', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    expect(mandatoryFindingIds(result)).toContain('cpsia_third_party_testing');
+  });
+
+  it('exact live description — lead requirement appears', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    const leadFinding = result.findings.find((f) => f.id === 'cpsia_lead');
+    expect(leadFinding).toBeDefined();
+    expect(leadFinding?.verification_status).toBe('verified_applicable');
+  });
+
+  it('exact live description — tracking label appears', () => {
+    const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
+    expect(result.findings.map((f) => f.id)).toContain('cpsia_tracking_label');
+  });
+});
+
+describe('Toy detection — universal negation patterns', () => {
+  const baseInput = (productText: string, knownFacts: Record<string, string> = {}) =>
+    moduleInput({ htsDigits: '65061030', productText, knownFacts });
+
+  it('"not a toy" suppresses F963', () => {
+    const result = evaluateAllModules(baseInput("children's protective gear, not a toy, ages 3-12", { age_range: 'age_3_to_12' }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+
+  it('"toy function" alone suppresses F963 (without explicit "no")', () => {
+    const result = evaluateAllModules(baseInput("children's helmet with no toy function, protective use only", { age_range: 'age_3_to_12' }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+
+  it('"non-toy" suppresses F963', () => {
+    const result = evaluateAllModules(baseInput("non-toy children's product, shin guard for kids", { age_range: 'age_3_to_12' }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+
+  it('"protective equipment only" suppresses F963', () => {
+    const result = evaluateAllModules(baseInput("protective equipment only, children's elbow pads", { age_range: 'age_3_to_12' }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+
+  it('is_toy=no knownFact suppresses F963 even for HTS 9503 product', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '95030090',
+      productText: 'children product',
+      knownFacts: { age_range: 'age_3_to_12', is_toy: 'no' },
+    }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+
+  it('bicycle_helmet sports_product_type suppresses F963 even when "toy" in text', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '65061030',
+      productText: "children's bicycle helmet — not a toy product",
+      knownFacts: { sports_product_type: 'bicycle_helmet', age_range: 'age_3_to_12' },
+    }));
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+});
+
+describe('Toy detection — positive signals preserved', () => {
+  it('"remote controlled toy" (no HTS 9503) still activates F963', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '95030090',
+      productText: 'remote controlled toy car, battery operated',
+      knownFacts: { age_range: 'age_3_to_12' },
+    }));
+    expect(result.findings.map((f) => f.id)).toContain('cpsc_toy_f963');
+  });
+
+  it('HTS 9503 alone activates F963 even with plain product text', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '95030090',
+      productText: 'children plastic building set',
+      knownFacts: { age_range: 'age_3_to_12' },
+    }));
+    expect(result.findings.map((f) => f.id)).toContain('cpsc_toy_f963');
+  });
+
+  it('is_toy=yes activates F963 without HTS 9503 or "toy" in text', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '65061030',
+      productText: "children's play product",
+      knownFacts: { age_range: 'age_3_to_12', is_toy: 'yes' },
+    }));
+    expect(result.findings.map((f) => f.id)).toContain('cpsc_toy_f963');
+  });
+
+  it('"toy" in regulatory context ("ASTM F963 Toy Safety") does not activate F963 via text alone', () => {
+    const result = evaluateAllModules(moduleInput({
+      htsDigits: '65061030',
+      productText: "children's product — check ASTM F963 Toy Safety Standard compliance",
+      knownFacts: { age_range: 'age_3_to_12' },
+    }));
+    // "Toy Safety" is excluded by the positive RE lookahead, and there's no HTS 9503 or is_toy=yes
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+});
