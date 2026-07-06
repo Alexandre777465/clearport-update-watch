@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "sdk_version": "0.20.0",
+  "path": "/mcp",
+  "auth": {
+    "type": "none"
+  },
+  "mcp": {
+    "server": {
+      "name": "clearport-mcp",
+      "version": "0.1.0",
+      "title": "ClearPort MCP"
+    },
+    "tools": [
+      {
+        "name": "about_clearport",
+        "title": "About ClearPort",
+        "description": "Return a short overview of ClearPort — a U.S. trade compliance monitoring service that alerts importers to HTS, tariff, and regulatory changes affecting their products.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_regulatory_modules",
+        "title": "List regulatory modules",
+        "description": "List the regulatory modules ClearPort evaluates against monitored products, with a short description of the U.S. rules each module covers.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
