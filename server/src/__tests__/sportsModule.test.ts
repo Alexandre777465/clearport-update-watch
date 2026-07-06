@@ -806,3 +806,157 @@ describe('Toy detection — positive signals preserved', () => {
     expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
   });
 });
+
+// ── Adult bicycle helmet — document checklist regression tests ────────────────
+// Verifies that is_children=false produces GCC (not CPC) and excludes all
+// children's-specific documents: CPSIA third-party test reports, CPC, tracking label.
+
+describe('Adult bicycle helmet (is_children=false, age_range=over_12) — no children\'s docs', () => {
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '65061030',
+    productText: 'adult bicycle helmet, polycarbonate shell, EPS foam liner, ages 13 and up',
+    attrs: { is_children: false },
+    knownFacts: {
+      sports_product_type: 'bicycle_helmet',
+      age_range: 'over_12',
+    },
+    importDate: '2026-07-10',
+  }));
+
+  it('Part 1203 fires (mandatory CPSC standard)', () => {
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+
+  it('Part 1203 docSpec uses GCC, not CPC', () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(doc?.document).toContain('GCC');
+    expect(doc?.document).not.toContain('CPC');
+  });
+
+  it('no CPC docSpec anywhere', () => {
+    const cpcDocs = result.docSpecs.filter((d) => d.document.includes('Children\'s Product Certificate'));
+    expect(cpcDocs).toHaveLength(0);
+  });
+
+  it('no CPSIA third-party test report docSpec', () => {
+    const cpsiaDoc = result.docSpecs.find((d) => d.document.includes('CPSIA'));
+    expect(cpsiaDoc).toBeUndefined();
+  });
+
+  it('no tracking label docSpec', () => {
+    const trackingDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label');
+    expect(trackingDoc).toBeUndefined();
+  });
+
+  it('no eFiling docSpec (adult product)', () => {
+    const efilingDoc = result.docSpecs.find((d) => d.document.includes('eFiling'));
+    expect(efilingDoc).toBeUndefined();
+  });
+
+  it('no ASTM F963 finding', () => {
+    expect(result.findings.map((f) => f.id)).not.toContain('cpsc_toy_f963');
+  });
+
+  it('no Part 1512 finding (product is helmet, not bicycle)', () => {
+    expect(result.findings.map((f) => f.id)).not.toContain('sports_bicycle_cpsc_1512');
+  });
+});
+
+describe('Adult bicycle helmet (is_children=false only, no age_range knownFact) — no children\'s docs', () => {
+  // This is the specific live-system scenario: is_children=false in attrs but no explicit
+  // age_range structured answer. The is_children=false attr must be sufficient to suppress all
+  // children's-product documents.
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '65061030',
+    productText: 'adult bicycle helmet, polycarbonate shell, EPS foam liner',
+    attrs: { is_children: false },
+    knownFacts: {
+      sports_product_type: 'bicycle_helmet',
+      // age_range deliberately omitted — only attrs.is_children=false is set
+    },
+  }));
+
+  it('no CPC docSpec when only is_children=false (no age_range answer)', () => {
+    expect(result.docSpecs.filter((d) => d.document.includes('Children\'s Product Certificate'))).toHaveLength(0);
+  });
+
+  it('no CPSIA third-party test report docSpec when only is_children=false', () => {
+    expect(result.docSpecs.find((d) => d.document.includes('CPSIA'))).toBeUndefined();
+  });
+
+  it('no tracking label docSpec when only is_children=false', () => {
+    expect(result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label')).toBeUndefined();
+  });
+});
+
+describe('Adult bicycle helmet: is_children=false overrides stale age_3_to_12 answer', () => {
+  // Defensive test: if a stale knownFact age_range=age_3_to_12 exists but attrs.is_children=false,
+  // the attr must win and suppress all children's documents.
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '65061030',
+    productText: 'adult bicycle helmet, polycarbonate shell',
+    attrs: { is_children: false },
+    knownFacts: {
+      sports_product_type: 'bicycle_helmet',
+      age_range: 'age_3_to_12',  // stale / incorrect answer
+    },
+  }));
+
+  it('is_children=false overrides stale age_3_to_12: no CPC docSpec', () => {
+    expect(result.docSpecs.filter((d) => d.document.includes('Children\'s Product Certificate'))).toHaveLength(0);
+  });
+
+  it('is_children=false overrides stale age_3_to_12: no CPSIA third-party docSpec', () => {
+    expect(result.docSpecs.find((d) => d.document.includes('CPSIA'))).toBeUndefined();
+  });
+
+  it('is_children=false overrides stale age_3_to_12: Part 1203 docSpec uses GCC not CPC', () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(doc?.document).toContain('GCC');
+    expect(doc?.document).not.toContain('CPC');
+  });
+});
+
+describe("Children's bicycle helmet (is_children=true) — CPC and tracking label preserved", () => {
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '65061030',
+    productText: "children's bicycle helmet, polycarbonate shell, EPS foam liner, ages 3-12",
+    attrs: { is_children: true },
+    knownFacts: {
+      sports_product_type: 'bicycle_helmet',
+      age_range: 'age_3_to_12',
+      contains_paint_or_surface_coating: 'no',
+    },
+    importDate: '2026-07-10',
+  }));
+
+  it("Part 1203 fires for children's helmet", () => {
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+
+  it("Part 1203 docSpec uses CPC for children's helmet", () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(doc?.document).toContain('CPC');
+    expect(doc?.document).not.toContain('GCC');
+  });
+
+  it("CPC docSpec present for children's helmet", () => {
+    const cpcDoc = result.docSpecs.find((d) => d.document.includes("Children's Product Certificate"));
+    expect(cpcDoc).toBeDefined();
+  });
+
+  it("CPSIA third-party test report docSpec present for children's helmet", () => {
+    const cpsiaDoc = result.docSpecs.find((d) => d.document.includes('CPSIA'));
+    expect(cpsiaDoc).toBeDefined();
+  });
+
+  it("tracking label docSpec present for children's helmet", () => {
+    const trackingDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label');
+    expect(trackingDoc).toBeDefined();
+  });
+
+  it("eFiling docSpec present for children's helmet on or after 2026-07-08", () => {
+    const efilingDoc = result.docSpecs.find((d) => d.document.includes('eFiling'));
+    expect(efilingDoc).toBeDefined();
+  });
+});

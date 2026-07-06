@@ -86,6 +86,10 @@ export const childrensModule: RegulatoryModule = {
     const hasCoating  = knownFacts['contains_paint_or_surface_coating'];
     const isChildren  = attrs.is_children === true;
 
+    // attrs.is_children === false is a definitive "not a children's product" signal.
+    // It overrides any age_range knownFact (which may be stale from a prior answer).
+    const notChildrenOverride = attrs.is_children === false;
+
     // ── Toy classification ────────────────────────────────────────────────────
     // Positive signals (any one is sufficient when not denied):
     //   - is_toy = 'yes' structured answer
@@ -106,13 +110,21 @@ export const childrensModule: RegulatoryModule = {
         h.startsWith('9503') ||
         (TOY_TEXT_POSITIVE_RE.test(productText) && !TOY_TEXT_NEGATIVE_RE.test(productText)));
 
-    // "children's product confirmed" when attrs flag, or age range under 12
+    // "children's product confirmed" — only when not overridden by is_children=false
     const childrenConfirmed =
-      isChildren ||
-      ageRange === 'under_3' ||
-      ageRange === 'age_3_to_12';
+      !notChildrenOverride &&
+      (isChildren ||
+        ageRange === 'under_3' ||
+        ageRange === 'age_3_to_12');
 
-    const childrenDefinitelyNot = ageRange === 'over_12';
+    // "definitely not children" — covers all explicit adult/non-children age values
+    // and the authoritative is_children=false attribute
+    const childrenDefinitelyNot =
+      notChildrenOverride ||
+      ageRange === 'over_12' ||
+      ageRange === 'not_for_children' ||
+      ageRange === 'adults_only' ||
+      ageRange === 'not_applicable';
 
     // ── Sources ───────────────────────────────────────────────────────────────
 

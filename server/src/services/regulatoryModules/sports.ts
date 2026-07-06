@@ -116,10 +116,12 @@ export const sportsModule: RegulatoryModule = {
     const isBicycleHelmet = hasBicycleHelmet || isBicycleHelmetOnly;
 
     // Children's product flag — used to choose CPC vs GCC for Part 1203.
+    // attrs.is_children === false is a definitive override: even if a stale age_range
+    // answer says 'age_3_to_12', an explicit "not children" attribute wins.
     const isChildrensProduct =
       input.attrs.is_children === true ||
-      knownFacts['age_range'] === 'under_3' ||
-      knownFacts['age_range'] === 'age_3_to_12';
+      (input.attrs.is_children !== false &&
+        (knownFacts['age_range'] === 'under_3' || knownFacts['age_range'] === 'age_3_to_12'));
 
     if (isNotSports) {
       return { findings: [], coverageDomains: [], docSpecs: [], questions };
