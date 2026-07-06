@@ -107,8 +107,11 @@ export async function evaluateBaselines(
   const regRows = (regRowsResult.data ?? []) as unknown as RegulatoryBaselineRow[];
   const value = typeof estimatedValueUsd === 'number' && estimatedValueUsd > 0 ? estimatedValueUsd : null;
   const today = new Date().toISOString().slice(0, 10);
+  // Derive product text early so it can be passed to assembleBaselines (used for
+  // civil-aircraft evidence detection in the Section 122 surcharge check).
+  const productText = `${entry.product_name} ${entry.product_description ?? ''}`.trim();
 
-  const baseCategories = assembleBaselines(entry, value, hts, regRows, today, knownFacts);
+  const baseCategories = assembleBaselines(entry, value, hts, regRows, today, knownFacts, productText);
   const adcvdCategories = adcvdFindingsToCategories(adcvdFindings, today);
   const baselinePlusMfn = [...baseCategories, ...adcvdCategories];
 
@@ -116,9 +119,6 @@ export async function evaluateBaselines(
   const adcvdMissingFacts = Array.from(
     new Set(adcvdFindings.flatMap((f) => f.missing_facts)),
   );
-
-  // Universal regulatory module engine — evaluates all 10 category modules.
-  const productText = `${entry.product_name} ${entry.product_description ?? ''}`;
   const moduleInput: ModuleInput = {
     htsDigits: normalizedHts,
     productText,
@@ -186,6 +186,7 @@ export function assembleBaselines(
   regRows: RegulatoryBaselineRow[],
   today: string = new Date().toISOString().slice(0, 10),
   knownFacts: Record<string, string> = {},
+  productText = '',
 ): RiskCategory[] {
   const out: RiskCategory[] = [];
 
@@ -498,7 +499,10 @@ export function assembleBaselines(
     // resolved when the importer has provided that information.
     {
       const htsForS122 = hts?.requested ?? normalizeHts(entry.hts_code ?? '');
-      const s122 = checkSection122Surcharge(htsForS122, entry.origin_country, today, knownFacts);
+      // productText is used to detect aircraft-specific keywords and avoid a false
+      // "cannot determine" for ordinary consumer goods in aircraft-eligible headings.
+      const s122ProductText = productText || `${entry.product_name ?? ''} ${entry.product_description ?? ''}`.trim();
+      const s122 = checkSection122Surcharge(htsForS122, entry.origin_country, today, knownFacts, SECTION_122_SURCHARGE, s122ProductText);
       const s122Source = {
         agency: 'USTR / CBP',
         name: 'Office of the United States Trade Representative / U.S. Customs and Border Protection',
@@ -723,7 +727,7 @@ const DOMAIN_REGISTRY: Array<{
       if (c?.verification_status === 'verified_applicable')
         return { status: 'verified_applicable', note: `Applies — +${SECTION_122_SURCHARGE.rate_pct}% (${SECTION_122_SURCHARGE.chapter99_provision}, active through ${SECTION_122_SURCHARGE.expiry_date})` };
       if (c?.verification_status === 'insufficient_info')
-        return { status: 'insufficient_info', note: c.missing_info ?? 'Civil aircraft use certification required to resolve Section 122 exemption', missing: [c.missing_info ?? 'civil_aircraft_use certification'] };
+        return { status: 'insufficient_info', note: c.missing_info ?? 'Civil aircraft use certification required to resolve Section 122 exemption', missing: [c.missing_info ?? 'Is this product certified for civil aircraft use? (Provide FAA Form 8130-3 or EASA Form 1 if yes.)'] };
       if (c?.verification_status === 'not_applicable')
         return { status: 'not_applicable', note: c.explanation?.slice(0, 120) ?? 'Exempt from Section 122 surcharge' };
       // No card was pushed — surcharge was not in the active date window

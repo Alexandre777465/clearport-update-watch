@@ -569,14 +569,30 @@ export function computeMpf(enteredValueUsd: number, importDate: string): {
 //   3. Conditional civil-aircraft exemption — goods of civil-aircraft-eligible
 //      HTS headings that are certified for civil aircraft use under U.S. Note 1,
 //      Subchapter XX, Chapter 98 of the HTSUS are exempt.  The exemption is
-//      conditional: it applies ONLY when the importer holds and presents a
-//      qualifying FAA/EASA certification.  If certification status is unknown,
-//      the result is "Cannot determine — missing: civil_aircraft_use certification".
+//      conditional: it applies ONLY when the importer holds a qualifying FAA/EASA
+//      certification.  It is ONLY asked about when there is positive evidence the
+//      product is for civil aircraft use.  Consumer goods (speakers, cables, motors)
+//      in aircraft-eligible headings are not queried — the surcharge applies.
 //   4. Origin-based FTA exemptions — goods from USMCA countries (Canada, Mexico)
 //      and CAFTA-DR countries (Costa Rica, El Salvador, Guatemala, Honduras,
 //      Nicaragua, Dominican Republic) are exempt under their respective FTAs.
 //
 // Last verified: 2026-06-28.
+
+/**
+ * Positive-evidence regex for civil aircraft use in a product description.
+ *
+ * The civil-aircraft exemption (U.S. Note 1, Subchapter XX, Chapter 98 HTSUS)
+ * is narrow: it requires an actual FAA Form 8130-3 or EASA Form 1 airworthiness
+ * release.  Consumer electronics, cables, and motors that happen to fall under
+ * an aircraft-eligible HTS heading (e.g., 8518 loudspeakers, 8544 wiring) will
+ * never hold such a certification.  This regex is tested against the product
+ * description; a match signals that the question is worth asking.
+ *
+ * Ordinary consumer phrases ("Bluetooth speaker", "household wiring") do NOT match.
+ */
+const AIRCRAFT_POSITIVE_RE =
+  /\b(?:civil\s+aircraft|aircraft\s+(?:engine|part[s]?|component|system|cabin|cockpit|avionics?|wiring|harness|panel|grade)|avionics?|airworthiness|cockpit|FAA[\s-]8130|EASA[\s-]Form[\s-]1|flight\s+simulator|airborne\s+(?:equipment|system)|for\s+civil\s+aviation|civil\s+aviation\s+use|aircraft[\s-]grade)\b/i;
 
 /** Classification for a Section 122 exemption entry. */
 export type Section122ExemptionType =
@@ -787,16 +803,21 @@ export interface Section122Result {
  *   3. CAFTA-DR origin exemption
  *   4. Unconditional HTS exemptions (pharmaceutical, medical, petroleum)
  *   5. Section 232 no-stacking (auto-parts, steel/aluminum)
- *   6. Conditional civil-aircraft exemption — returns cannot_determine when
- *      HTS is civil-aircraft-eligible but `knownFacts.civil_aircraft_use` is absent
+ *   6. Conditional civil-aircraft exemption — only asked when there is positive
+ *      evidence the product is for civil aircraft use (aircraft keywords in
+ *      productText, or knownFacts.is_aircraft='yes', or
+ *      knownFacts.civil_aircraft_use='yes').  Consumer goods in aircraft-eligible
+ *      headings (e.g. Bluetooth speakers in 8518) do not trigger the question.
  *   7. Applicable (no exemption found)
  *
  * @param normalizedHts   Digit-only HTS code (any length; matched by prefix)
  * @param originCountry   Origin country as submitted (free text; lowercased internally)
  * @param importDate      ISO import date (e.g. "2026-06-28")
  * @param knownFacts      Optional fact map — supply `civil_aircraft_use: 'yes'|'no'`
- *                        to resolve the conditional civil-aircraft exemption
+ *                        or `is_aircraft: 'yes'` to influence the civil-aircraft check
  * @param surcharge       Surcharge definition (defaults to production constant)
+ * @param productText     Optional product name + description — used to detect positive
+ *                        civil-aircraft evidence when civil_aircraft_use is absent
  */
 export function checkSection122Surcharge(
   normalizedHts: string,
@@ -804,6 +825,7 @@ export function checkSection122Surcharge(
   importDate: string,
   knownFacts: Record<string, string> = {},
   surcharge: Section122Coverage = SECTION_122_SURCHARGE,
+  productText = '',
 ): Section122Result {
   const src = `${surcharge.authority}; HTSUS ${surcharge.chapter99_provision}; ${surcharge.fr_reference}`;
 
@@ -888,9 +910,16 @@ export function checkSection122Surcharge(
 
   // ── 6. Conditional civil-aircraft exemption ───────────────────────────────
   // This exemption requires that the goods are certified for civil aircraft use
-  // under U.S. Note 1, Subchapter XX, Chapter 98 of the HTSUS.  Without that
-  // certification, the surcharge applies.  If certification status is unknown,
-  // the result is cannot_determine.
+  // under U.S. Note 1, Subchapter XX, Chapter 98 of the HTSUS.
+  //
+  // Important: the question is ONLY asked when there is positive evidence the
+  // product could be for civil aircraft use.  Ordinary consumer goods (Bluetooth
+  // speakers, household cables, consumer motors) that happen to fall under an
+  // aircraft-eligible heading must not trigger a "cannot determine" — they do
+  // not qualify for the exemption and the surcharge applies normally.
+  //
+  // Positive evidence = civil_aircraft_use='yes', is_aircraft='yes', or
+  // aircraft-specific keywords in the product description (AIRCRAFT_POSITIVE_RE).
   const isCivilAircraftEligible = surcharge.civil_aircraft_eligible_prefixes.some((p) =>
     normalizedHts.startsWith(p),
   );
@@ -906,16 +935,27 @@ export function checkSection122Surcharge(
       };
     }
     if (!civilUse) {
-      return {
-        applies: 'cannot_determine',
-        reason: 'cannot_determine',
-        rate_pct: null,
-        note: `HTS ${normalizedHts} is in a civil-aircraft-eligible heading. The Section 122 exemption for civil aircraft use (U.S. Note 1, Subchapter XX, Chapter 98) may apply — but only if the goods are certified for civil aircraft use. Cannot determine — missing: civil_aircraft_use certification status (answer 'yes' if the goods hold an FAA Form 8130-3 or equivalent EASA Form 1 civil airworthiness release).`,
-        source_ref: `${src}; U.S. Note 1, Subchapter XX, Chapter 98 HTSUS`,
-        missing_condition: 'civil_aircraft_use certification (FAA Form 8130-3 or EASA Form 1)',
-      };
+      // Only ask about civil-aircraft certification when there is positive evidence
+      // the product is for civil aircraft use — either from knownFacts or the product
+      // description.  Without such evidence, assume consumer / non-aircraft use and
+      // apply the surcharge normally.
+      const hasAircraftEvidence =
+        knownFacts['is_aircraft'] === 'yes' ||
+        AIRCRAFT_POSITIVE_RE.test(productText);
+      if (hasAircraftEvidence) {
+        return {
+          applies: 'cannot_determine',
+          reason: 'cannot_determine',
+          rate_pct: null,
+          note: `HTS ${normalizedHts} is in a civil-aircraft-eligible heading. The Section 122 exemption for civil aircraft use (U.S. Note 1, Subchapter XX, Chapter 98) may apply — but only if the goods hold an FAA Form 8130-3 or equivalent EASA Form 1 civil airworthiness release. Confirm whether the product is certified for civil aircraft use.`,
+          source_ref: `${src}; U.S. Note 1, Subchapter XX, Chapter 98 HTSUS`,
+          missing_condition: 'Is this product certified for civil aircraft use? (Provide FAA Form 8130-3 or EASA Form 1 if yes.)',
+        };
+      }
+      // No aircraft evidence → consumer or non-aircraft product → surcharge applies.
+      // Fall through to step 7.
     }
-    // civilUse === 'no' or any other non-'yes' value: exemption does not apply; fall through
+    // civilUse === 'no' or no aircraft evidence: exemption does not apply; fall through
   }
 
   // ── 7. Applicable ─────────────────────────────────────────────────────────

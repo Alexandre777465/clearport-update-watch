@@ -22,6 +22,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   checkSection232Auto,
   checkSection301Exclusion,
+  checkSection122Surcharge,
   SECTION_232_AUTO,
   SECTION_301_RATES,
   SECTION_301_LIST3_EXCLUSIONS,
@@ -564,5 +565,204 @@ describe('lookupBrakeDrumCvdRate — C-570-175', () => {
   it('no manufacturer/exporter returns all-others rate', () => {
     const r = lookupBrakeDrumCvdRate(null, null);
     expect(r.rate_pct).toBe(11.94);
+  });
+});
+
+// ── Section 122 civil-aircraft exemption ──────────────────────────────────────
+// The civil-aircraft exemption must NOT trigger "cannot_determine" for ordinary
+// consumer goods (Bluetooth speakers, household cables, motors) even when their
+// HTS heading is in the civil_aircraft_eligible_prefixes list.  The question is
+// only asked when there is positive evidence the product is for civil aircraft use.
+
+const S122_IMPORT_DATE = '2026-07-05'; // within Feb 24–Jul 23 active window
+
+describe('checkSection122Surcharge — HTS 8518 (civil-aircraft-eligible heading)', () => {
+  // ── Consumer products (no aircraft evidence) ──────────────────────────────
+
+  it('Bluetooth speaker — no productText → applies (NOT cannot_determine)', () => {
+    const r = checkSection122Surcharge('85182100', 'China', S122_IMPORT_DATE);
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+    expect(r.rate_pct).toBe(10);
+  });
+
+  it('Bluetooth speaker — with consumer productText → applies', () => {
+    const r = checkSection122Surcharge(
+      '85182100', 'China', S122_IMPORT_DATE, {},
+      undefined,
+      'Portable Bluetooth speaker, general consumer audio use, no aircraft use',
+    );
+    expect(r.applies).toBe(true);
+    expect(r.rate_pct).toBe(10);
+  });
+
+  it('consumer loudspeaker — productText with "speaker" only → applies', () => {
+    const r = checkSection122Surcharge(
+      '85182100', 'China', S122_IMPORT_DATE, {},
+      undefined,
+      'Portable speaker with Bluetooth, household use',
+    );
+    expect(r.applies).toBe(true);
+  });
+
+  it('missing civil_aircraft_use in knownFacts + no productText → applies (default not aircraft)', () => {
+    const r = checkSection122Surcharge('85182100', 'China', S122_IMPORT_DATE, {});
+    expect(r.applies).toBe(true);
+    expect(r.applies).not.toBe('cannot_determine');
+  });
+
+  it('result note does not expose raw internal key civil_aircraft_use', () => {
+    const r = checkSection122Surcharge('85182100', 'China', S122_IMPORT_DATE);
+    expect(r.note).not.toMatch(/civil_aircraft_use(?!\s*certification\?)/);
+  });
+
+  // ── Aircraft-specific products (positive evidence) ────────────────────────
+
+  it('cockpit audio system — productText with aircraft keyword → cannot_determine', () => {
+    const r = checkSection122Surcharge(
+      '85182100', 'China', S122_IMPORT_DATE, {},
+      undefined,
+      'Cockpit audio panel for civil aircraft, avionics grade',
+    );
+    expect(r.applies).toBe('cannot_determine');
+    expect(r.missing_condition).toContain('FAA Form 8130-3');
+    expect(r.missing_condition).not.toMatch(/\bcivil_aircraft_use\b/);
+  });
+
+  it('avionics amplifier — productText → cannot_determine', () => {
+    const r = checkSection122Surcharge(
+      '85182100', 'China', S122_IMPORT_DATE, {},
+      undefined,
+      'In-flight entertainment system amplifier, avionics grade, for civil aviation use',
+    );
+    expect(r.applies).toBe('cannot_determine');
+  });
+
+  it('is_aircraft=yes in knownFacts (no productText) → cannot_determine', () => {
+    const r = checkSection122Surcharge(
+      '85182100', 'China', S122_IMPORT_DATE,
+      { is_aircraft: 'yes' },
+    );
+    expect(r.applies).toBe('cannot_determine');
+  });
+
+  // ── Explicit fact answers ─────────────────────────────────────────────────
+
+  it('civil_aircraft_use=yes → exempt', () => {
+    const r = checkSection122Surcharge(
+      '85182100', 'China', S122_IMPORT_DATE,
+      { civil_aircraft_use: 'yes' },
+    );
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('hts_exempt');
+    expect(r.note).toContain('FAA');
+  });
+
+  it('civil_aircraft_use=no → applies', () => {
+    const r = checkSection122Surcharge(
+      '85182100', 'China', S122_IMPORT_DATE,
+      { civil_aircraft_use: 'no' },
+    );
+    expect(r.applies).toBe(true);
+    expect(r.rate_pct).toBe(10);
+  });
+});
+
+describe('checkSection122Surcharge — non-aircraft-eligible HTS (8708 not in civil list)', () => {
+  it('auto-parts HTS (8708) in Section 232 → not stacked (already_s232_auto)', () => {
+    const r = checkSection122Surcharge('8708305020', 'China', S122_IMPORT_DATE);
+    expect(r.applies).toBe(false);
+    expect(r.reason).toBe('already_s232_auto');
+  });
+
+  it('footwear HTS (6402) → applies without any aircraft check', () => {
+    const r = checkSection122Surcharge('6402991500', 'China', S122_IMPORT_DATE);
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+  });
+});
+
+// ── Bluetooth speaker acceptance test via assembleBaselines ───────────────────
+// Entry date 2026-07-05, HTS 8518.21.0000, China → US, ocean, lithium-ion
+// battery installed inside (UN 3481), general consumer audio use.
+//
+// Required: Section 301 at 7.5%, Section 122 at 10% (NOT cannot_determine).
+// Forbidden: civil_aircraft_use in any missing_info or explanation text.
+
+describe('Bluetooth speaker (HTS 8518.21) — assembleBaselines acceptance', () => {
+  const SPEAKER_ENTRY: WatchlistEntry = {
+    id: 'test-speaker-1',
+    user_id: 'test-user',
+    product_name: 'Portable Bluetooth speaker',
+    product_description:
+      'Portable Bluetooth speaker, general consumer audio use, not children\'s product, ' +
+      'not toy, not medical, not aircraft-related. Lithium-ion battery installed inside ' +
+      'equipment, UN 3481.',
+    hts_code: '8518.21.0000',
+    origin_country: 'China',
+    destination_country: 'US',
+    status: 'active',
+    is_children: false,
+    has_battery: true,
+    is_electronic: true,
+    is_textile: false,
+    is_cosmetic: false,
+    is_food_contact: false,
+    is_supplement: false,
+    created_at: '2026-06-01T00:00:00Z',
+    updated_at: '2026-06-01T00:00:00Z',
+  };
+
+  const MOCK_HTS_8518: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'exact',
+    requested: '85182100',
+    hts8: '85182100',
+    matched_htsno: '8518.21.0000',
+    description: 'Single loudspeakers, mounted in their enclosures',
+    mfn_text_rate: 'Free',
+    mfn_ad_valorem_pct: 0,
+    section301_ref: '9903.88.15',
+    candidates: [],
+    source_url: 'https://hts.usitc.gov/?query=8518.21.0000',
+    note: null,
+  };
+
+  const cats = assembleBaselines(SPEAKER_ENTRY, 50_000, MOCK_HTS_8518, [], '2026-07-05');
+
+  it('Section 122 finding is present and verified_applicable', () => {
+    const s122 = cats.find((c) => c.id === 'section_122_surcharge');
+    expect(s122).toBeDefined();
+    expect(s122?.verification_status).toBe('verified_applicable');
+    expect(s122?.verified_rate_pct).toBe(10);
+  });
+
+  it('Section 122 finding is NOT insufficient_info', () => {
+    const s122 = cats.find((c) => c.id === 'section_122_surcharge');
+    expect(s122?.verification_status).not.toBe('insufficient_info');
+  });
+
+  it('Section 122 explanation does not mention civil_aircraft_use', () => {
+    const s122 = cats.find((c) => c.id === 'section_122_surcharge');
+    expect(s122?.explanation).not.toMatch(/civil_aircraft_use/i);
+    expect(s122?.missing_info).toBeUndefined();
+  });
+
+  it('Section 301 finding is present at 7.5%', () => {
+    const s301 = cats.find((c) => c.id === 'hts_section301');
+    expect(s301).toBeDefined();
+    expect(s301?.verification_status).toBe('verified_applicable');
+    expect(s301?.verified_rate_pct).toBe(7.5);
+  });
+
+  it('MFN base tariff is 0% (HTS 8518.21 is duty-free)', () => {
+    const mfn = cats.find((c) => c.id === 'hts_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn?.verified_rate_pct).toBe(0);
+  });
+
+  it('no finding has civil_aircraft_use in missing_info', () => {
+    for (const cat of cats) {
+      expect(cat.missing_info ?? '').not.toMatch(/civil_aircraft_use/);
+    }
   });
 });

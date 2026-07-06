@@ -917,7 +917,9 @@ describe('checkSection122Surcharge — date window', () => {
 });
 
 describe('checkSection122Surcharge — ordinary vs aircraft loudspeaker (HTS 8518.21)', () => {
-  // 8518 is civil-aircraft-eligible; the outcome depends on knownFacts.
+  // 8518 is civil-aircraft-eligible; the outcome depends on knownFacts and productText.
+  // Consumer goods with no aircraft evidence default to "surcharge applies" — the
+  // civil-aircraft question is only asked when there is positive aircraft evidence.
 
   it('ordinary household Bluetooth speaker (civil_aircraft_use: no) → applicable', () => {
     const r = checkSection122Surcharge('8518210000', 'China', '2026-06-28', { civil_aircraft_use: 'no' });
@@ -936,12 +938,25 @@ describe('checkSection122Surcharge — ordinary vs aircraft loudspeaker (HTS 851
     expect(r.note).toContain('civil aircraft');
   });
 
-  it('unknown civil-aircraft status → cannot_determine with missing_condition', () => {
+  it('no knownFacts, no productText → surcharge applies (default consumer product, NOT cannot_determine)', () => {
+    // Without positive aircraft evidence, assume consumer use and apply the surcharge.
     const r = checkSection122Surcharge('8518210000', 'China', '2026-06-28');
+    expect(r.applies).toBe(true);
+    expect(r.reason).toBe('applicable');
+    expect(r.rate_pct).toBe(10);
+  });
+
+  it('no knownFacts, aircraft productText → cannot_determine with missing_condition', () => {
+    const r = checkSection122Surcharge(
+      '8518210000', 'China', '2026-06-28', {},
+      undefined,
+      'Cockpit audio system for civil aircraft, avionics grade',
+    );
     expect(r.applies).toBe('cannot_determine');
     expect(r.reason).toBe('cannot_determine');
     expect(r.missing_condition).toBeTruthy();
-    expect(r.note).toContain('Cannot determine');
+    // missing_condition must be human-readable, not a raw key
+    expect(r.missing_condition).not.toMatch(/^civil_aircraft_use$/);
   });
 });
 
