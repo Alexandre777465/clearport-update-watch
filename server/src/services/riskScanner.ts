@@ -394,6 +394,12 @@ export function documentsForFinding(c: RiskCategory): DocSpec[] {
   // generic CPSC documents derived from the topic map.
   if (id.startsWith('sports_')) return [];
 
+  // All CPSIA module findings carry their own docSpecs (tracking label, test report, CPC, lead).
+  // Return [] so the module docSpecs are used directly and seenFindingIds does not block them.
+  // cpsia_lead in particular would otherwise emit duplicate test-report/CPC entries via the
+  // 'children' topic, since lead compliance is verified through the same CPSIA test reports.
+  if (id.startsWith('cpsia_')) return [];
+
   if (id === 'cbp_entry') {
     return [
       {

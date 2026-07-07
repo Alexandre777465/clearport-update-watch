@@ -501,11 +501,14 @@ describe('Bicycle helmet (HTS 6506.10) — no Part 1512 false-positive', () => {
     expect(finding?.explanation).not.toContain('General Certificate of Conformity (GCC)');
   });
 
-  it("Part 1203 docSpec names CPC for a children's helmet", () => {
+  it("Part 1203 docSpec is a test report (no embedded CPC) — CPC comes from children's module separately", () => {
     const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
     const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
-    expect(doc?.document).toContain('CPC');
+    // Sports module emits only the test report; children's module emits the CPC separately.
+    expect(doc?.document).toContain('1203');
     expect(doc?.document).not.toContain('GCC');
+    const cpcDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_cpc');
+    expect(cpcDoc).toBeDefined();
   });
 
   it('ASTM F963 does not appear for a protective bicycle helmet', () => {
@@ -700,11 +703,13 @@ describe('Toy detection — negation: "no toy function" in description', () => {
     expect(result.findings.map((f) => f.id)).not.toContain('sports_bicycle_cpsc_1512');
   });
 
-  it('exact live description — CPC appears (not GCC)', () => {
+  it('exact live description — test report is Part 1203 only (no embedded CPC); CPC comes from children module', () => {
     const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: EXACT_LIVE_DESCRIPTION, knownFacts: answers }));
     const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
-    expect(doc?.document).toContain('CPC');
+    expect(doc?.document).toContain('1203');
     expect(doc?.document).not.toContain('GCC');
+    const cpcDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_cpc');
+    expect(cpcDoc).toBeDefined();
   });
 
   it('exact live description — CPSIA third-party testing appears', () => {
@@ -934,20 +939,28 @@ describe("Children's bicycle helmet (is_children=true) — CPC and tracking labe
     expect(mandatoryFindingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
   });
 
-  it("Part 1203 docSpec uses CPC for children's helmet", () => {
+  it("Part 1203 docSpec is test-report-only (no embedded CPC) for children's helmet", () => {
     const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
-    expect(doc?.document).toContain('CPC');
+    expect(doc?.document).toContain('1203');
     expect(doc?.document).not.toContain('GCC');
+    // CPC must not be embedded — it comes from the children's module as a separate entry.
+    expect(doc?.document).not.toContain('CPC');
   });
 
-  it("CPC docSpec present for children's helmet", () => {
-    const cpcDoc = result.docSpecs.find((d) => d.document.includes("Children's Product Certificate"));
+  it("CPC docSpec present for children's helmet (from children's module)", () => {
+    const cpcDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_cpc');
     expect(cpcDoc).toBeDefined();
+    expect(cpcDoc?.document).toContain("Children's Product Certificate");
   });
 
-  it("CPSIA third-party test report docSpec present for children's helmet", () => {
-    const cpsiaDoc = result.docSpecs.find((d) => d.document.includes('CPSIA'));
-    expect(cpsiaDoc).toBeDefined();
+  it("No duplicate test-report docSpecs — only one test report entry (Part 1203) for children's helmet", () => {
+    // When sports_product_type is set, the children's module suppresses its generic CPSIA test-report
+    // docSpec; the sports module's Part 1203 docSpec is the sole test-report entry.
+    const testReportDocs = result.docSpecs.filter((d) =>
+      d.document.includes('Test Report') || d.document.includes('test report'),
+    );
+    expect(testReportDocs).toHaveLength(1);
+    expect(testReportDocs[0].document).toContain('1203');
   });
 
   it("tracking label docSpec present for children's helmet", () => {

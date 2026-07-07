@@ -218,12 +218,16 @@ export const sportsModule: RegulatoryModule = {
         },
       });
 
+      // For children's products the CPC is emitted by the childrens module — emit only the
+      // test report here so there is no duplicate CPC entry in the checklist.
       docSpecs.push({
-        document: `Third-Party Test Report (16 CFR Part 1203) + ${certType}`,
-        owner: isChildrensProduct ? 'importer_broker' : 'supplier',
-        responsible_party: isChildrensProduct ? 'importer' : 'laboratory',
+        document: isChildrensProduct
+          ? 'Third-Party Test Report (16 CFR Part 1203)'
+          : `Third-Party Test Report (16 CFR Part 1203) + ${certType}`,
+        owner: 'supplier',
+        responsible_party: 'laboratory',
         reason: isChildrensProduct
-          ? 'Mandatory CPSC bicycle helmet standard requires CPSC-accepted lab testing; the importer issues a CPC covering Part 1203 and all other applicable children\'s-product rules.'
+          ? 'Mandatory CPSC bicycle helmet standard requires testing by a CPSC-accepted lab. The CPC listing Part 1203 is issued by the importer.'
           : 'Mandatory CPSC bicycle helmet standard requires CPSC-accepted lab testing and a GCC.',
         doc_status: 'required_to_clear',
         finding_id: 'sports_bicycle_helmet_cpsc_1203',

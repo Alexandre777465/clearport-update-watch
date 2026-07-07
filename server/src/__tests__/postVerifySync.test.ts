@@ -1434,26 +1434,29 @@ describe("postVerifySync — children's bicycle helmet document checklist (prese
   );
   const syncedChild = postVerifySync(finalizedChild, childModuleResult.docSpecs, null);
 
-  it("children's helmet: Part 1203 test report + CPC present in checklist", () => {
+  it("children's helmet: Part 1203 test report present in checklist (test-report-only, no embedded CPC)", () => {
     const helmetDoc = syncedChild.document_checklist.find((d) =>
       d.document.includes('1203'),
     );
     expect(helmetDoc).toBeDefined();
-    expect(helmetDoc?.document).toContain('CPC');
+    // CPC is emitted separately by the children's module — it must NOT be embedded in the test-report entry.
     expect(helmetDoc?.document).not.toContain('GCC');
   });
 
-  it("children's helmet: CPSIA third-party test report present", () => {
-    const cpsiaDoc = syncedChild.document_checklist.find((d) =>
-      d.document.includes('CPSIA'),
-    );
-    expect(cpsiaDoc).toBeDefined();
-  });
-
-  it("children's helmet: CPC document present", () => {
+  it("children's helmet: CPC document present in checklist (from children's module)", () => {
     const cpcDoc = syncedChild.document_checklist.find((d) =>
       d.document.includes("Children's Product Certificate"),
     );
     expect(cpcDoc).toBeDefined();
+  });
+
+  it("children's helmet: no duplicate test-report entries in checklist", () => {
+    // Only the Part 1203 test report should appear; the generic CPSIA test-report is suppressed
+    // when sports_product_type is set.
+    const testReportDocs = syncedChild.document_checklist.filter((d) =>
+      d.document.includes('Test Report') || d.document.includes('test report'),
+    );
+    expect(testReportDocs).toHaveLength(1);
+    expect(testReportDocs[0].document).toContain('1203');
   });
 });

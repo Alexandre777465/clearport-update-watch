@@ -161,14 +161,20 @@ export const childrensModule: RegulatoryModule = {
         source: { ...cpsia_source_base, title: 'CPSIA Section 102 -- Third-Party Testing for Children\'s Products' },
       });
 
-      docSpecs.push({
-        document: 'CPSC-accredited third-party test reports (CPSIA)',
-        owner: 'supplier',
-        responsible_party: 'supplier',
-        reason: 'CPSIA Section 102 requires that children\'s products be tested by a CPSC-accepted third-party laboratory before importation.',
-        doc_status: 'required_to_clear',
-        finding_id: 'cpsia_third_party_testing',
-      });
+      // Suppress the generic CPSIA test-report docSpec when the sports module is providing
+      // a product-specific test report (e.g. Part 1203 for bicycle helmets, Part 1512 for
+      // bicycles). The sports module's docSpec is more precise and covers the same requirement.
+      const hasSportsTestReport = !!knownFacts['sports_product_type'];
+      if (!hasSportsTestReport) {
+        docSpecs.push({
+          document: 'CPSC-accredited third-party test reports (CPSIA)',
+          owner: 'supplier',
+          responsible_party: 'supplier',
+          reason: 'CPSIA Section 102 requires that children\'s products be tested by a CPSC-accepted third-party laboratory before importation.',
+          doc_status: 'required_to_clear',
+          finding_id: 'cpsia_third_party_testing',
+        });
+      }
     } else {
       // age_range unknown and attrs.is_children = false
       findings.push({
