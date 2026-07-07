@@ -350,7 +350,9 @@ function topicsOf(name: string): Set<string> {
   if (/section 301|\b301\b/.test(n)) t.add('s301');
   if (/ad\/?cvd|antidumping|countervailing/.test(n)) t.add('adcvd');
   if (/section 232|steel|aluminum/.test(n)) t.add('s232');
-  if (/cpsia|children|cpsc/.test(n)) t.add('children');
+  // 'cpsia' (the law) and '\bchildren\b' → children topic.
+  // 'cpsc' alone does NOT: CPSC covers bicycles, helmets, furniture, etc. — not exclusively children's products.
+  if (/cpsia|\bchildren\b/.test(n)) t.add('children');
   if (/food.?contact/.test(n)) t.add('fda_food');
   if (/cosmetic/.test(n)) t.add('fda_cosmetic');
   if (/supplement|dietary/.test(n)) t.add('fda_supplement');
@@ -386,6 +388,11 @@ type DocSpec = {
 export function documentsForFinding(c: RiskCategory): DocSpec[] {
   const id = c.id ?? '';
   const verified = c.verification_status === 'verified_applicable';
+
+  // Sports module findings carry their own docSpecs (GCC or CPC depending on product age).
+  // Return [] so the module docSpec is used directly rather than overriding it with
+  // generic CPSC documents derived from the topic map.
+  if (id.startsWith('sports_')) return [];
 
   if (id === 'cbp_entry') {
     return [

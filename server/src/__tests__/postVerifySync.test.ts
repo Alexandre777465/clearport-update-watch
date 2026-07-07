@@ -1278,3 +1278,182 @@ describe('cross-category clarification — 11d: transport mode (harbor_maintenan
     expect(second.report.clarification_questions ?? []).toHaveLength(0);
   });
 });
+
+// ── Adult bicycle helmet — document checklist at the postVerifySync / report layer ──
+// These tests guard the invariant that CPSC-based sports findings (Part 1203, Part 1512)
+// never produce CPC/CPSIA documents in the final report document checklist.
+//
+// Root cause: topicsOf() previously mapped any category containing "cpsc" to the
+// 'children' topic, causing documentsForFinding() to emit CPC/CPSIA for the
+// bicycle-helmet standard finding.  Fixed by restricting the 'children' topic
+// trigger to 'cpsia' and the word 'children' only.
+
+import { evaluateAllModules } from '../services/regulatoryModules/index';
+import type { ModuleInput } from '../services/regulatoryModules/index';
+
+function makeAdultHelmetModuleInput(overrides: Partial<ModuleInput> = {}): ModuleInput {
+  return {
+    htsDigits: '65061030',
+    productText: 'adult bicycle helmet, polycarbonate shell, EPS foam liner, ages 13 and up',
+    attrs: { is_children: false },
+    originCountry: 'CN',
+    importDate: '2026-07-10',
+    knownFacts: {
+      sports_product_type: 'bicycle_helmet',
+      age_range: 'over_12',
+    },
+    ...overrides,
+  };
+}
+
+function makeChildrenHelmetModuleInput(): ModuleInput {
+  return {
+    htsDigits: '65061030',
+    productText: "children's bicycle helmet, polycarbonate shell, EPS foam liner, ages 3-12",
+    attrs: { is_children: true },
+    originCountry: 'CN',
+    importDate: '2026-07-10',
+    knownFacts: {
+      sports_product_type: 'bicycle_helmet',
+      age_range: 'age_3_to_12',
+      contains_paint_or_surface_coating: 'no',
+    },
+  };
+}
+
+describe('documentsForFinding — sports findings never emit CPC/CPSIA', () => {
+  it('sports_bicycle_helmet_cpsc_1203 (verified) returns [] — docs come from module', () => {
+    const c: RiskCategory = {
+      id: 'sports_bicycle_helmet_cpsc_1203',
+      category: 'CPSC — Bicycle Helmet Standard (16 CFR Part 1203)',
+      level: 'High',
+      explanation: 'Mandatory bicycle helmet standard.',
+      action: 'Test and certify.',
+      verification_status: 'verified_applicable',
+      source: { name: '16 CFR Part 1203', url: 'https://ecfr.gov/', agency: 'CPSC' },
+    };
+    const docs = documentsForFinding(c);
+    expect(docs).toHaveLength(0);
+    expect(docs.some((d) => d.document.includes('CPC'))).toBe(false);
+    expect(docs.some((d) => d.document.includes('CPSIA'))).toBe(false);
+  });
+
+  it('sports_bicycle_cpsc_1512 (verified) returns [] — docs come from module', () => {
+    const c: RiskCategory = {
+      id: 'sports_bicycle_cpsc_1512',
+      category: 'CPSC — Bicycle Safety Standard (16 CFR Part 1512)',
+      level: 'High',
+      explanation: 'Mandatory bicycle standard.',
+      action: 'Test and certify.',
+      verification_status: 'verified_applicable',
+      source: { name: '16 CFR Part 1512', url: 'https://ecfr.gov/', agency: 'CPSC' },
+    };
+    const docs = documentsForFinding(c);
+    expect(docs).toHaveLength(0);
+  });
+});
+
+describe('postVerifySync — adult bicycle helmet document checklist (final-report layer)', () => {
+  // Build the full module output for the adult helmet, then drive it through
+  // finalizeScan → postVerifySync to confirm no children's docs appear.
+
+  const adultModuleResult = evaluateAllModules(makeAdultHelmetModuleInput());
+
+  // The sports module's Part 1203 finding becomes the baseline.
+  const part1203Finding: RiskCategory = {
+    id: 'sports_bicycle_helmet_cpsc_1203',
+    category: 'CPSC — Bicycle Helmet Standard (16 CFR Part 1203)',
+    level: 'High',
+    explanation: '16 CFR Part 1203 mandatory standard.',
+    action: 'Obtain GCC.',
+    verification_status: 'verified_applicable',
+    source: { name: '16 CFR Part 1203', url: 'https://ecfr.gov/1203', agency: 'CPSC' },
+  };
+
+  const finalizedAdult = finalizeScan(
+    emptyScan(),
+    [part1203Finding, ...adultModuleResult.findings],
+    'en',
+    undefined,
+    undefined,
+    adultModuleResult.docSpecs,
+  );
+  const syncedAdult = postVerifySync(finalizedAdult, adultModuleResult.docSpecs, null);
+
+  it('adult helmet: no CPC document in final checklist', () => {
+    const cpcItems = syncedAdult.document_checklist.filter((d) =>
+      d.document.includes("Children's Product Certificate") || d.document.includes('CPC'),
+    );
+    expect(cpcItems).toHaveLength(0);
+  });
+
+  it('adult helmet: no CPSIA third-party test report in final checklist', () => {
+    const cpsiaItems = syncedAdult.document_checklist.filter((d) =>
+      d.document.includes('CPSIA'),
+    );
+    expect(cpsiaItems).toHaveLength(0);
+  });
+
+  it('adult helmet: no tracking label in final checklist', () => {
+    const trackingItems = syncedAdult.document_checklist.filter((d) =>
+      d.document.toLowerCase().includes('tracking label'),
+    );
+    expect(trackingItems).toHaveLength(0);
+  });
+
+  it('adult helmet: Part 1203 test report + GCC present in checklist', () => {
+    const helmetDoc = syncedAdult.document_checklist.find((d) =>
+      d.document.includes('1203'),
+    );
+    expect(helmetDoc).toBeDefined();
+    expect(helmetDoc?.document).toContain('GCC');
+    expect(helmetDoc?.document).not.toContain('CPC');
+  });
+});
+
+describe("postVerifySync — children's bicycle helmet document checklist (preserved)", () => {
+  const childModuleResult = evaluateAllModules(makeChildrenHelmetModuleInput());
+
+  const part1203ChildFinding: RiskCategory = {
+    id: 'sports_bicycle_helmet_cpsc_1203',
+    category: 'CPSC — Bicycle Helmet Standard (16 CFR Part 1203)',
+    level: 'High',
+    explanation: '16 CFR Part 1203 — CPC path for children.',
+    action: 'Issue CPC covering Part 1203.',
+    verification_status: 'verified_applicable',
+    source: { name: '16 CFR Part 1203', url: 'https://ecfr.gov/1203', agency: 'CPSC' },
+  };
+
+  const finalizedChild = finalizeScan(
+    emptyScan(),
+    [part1203ChildFinding, ...childModuleResult.findings],
+    'en',
+    undefined,
+    undefined,
+    childModuleResult.docSpecs,
+  );
+  const syncedChild = postVerifySync(finalizedChild, childModuleResult.docSpecs, null);
+
+  it("children's helmet: Part 1203 test report + CPC present in checklist", () => {
+    const helmetDoc = syncedChild.document_checklist.find((d) =>
+      d.document.includes('1203'),
+    );
+    expect(helmetDoc).toBeDefined();
+    expect(helmetDoc?.document).toContain('CPC');
+    expect(helmetDoc?.document).not.toContain('GCC');
+  });
+
+  it("children's helmet: CPSIA third-party test report present", () => {
+    const cpsiaDoc = syncedChild.document_checklist.find((d) =>
+      d.document.includes('CPSIA'),
+    );
+    expect(cpsiaDoc).toBeDefined();
+  });
+
+  it("children's helmet: CPC document present", () => {
+    const cpcDoc = syncedChild.document_checklist.find((d) =>
+      d.document.includes("Children's Product Certificate"),
+    );
+    expect(cpcDoc).toBeDefined();
+  });
+});
