@@ -1227,7 +1227,7 @@ describe('Test 24: Registry coverage — every mandatory finding_id has a regist
     'cbp_entry', 'hts_duty', 'mpf', 'hmf',
     'hts_section301', 'section_122_surcharge', 'section_232_auto',
     // Children's products
-    'cpsia_third_party_testing', 'cpsia_cpc', 'cpsia_lead', 'cpsc_toy_f963',
+    'cpsia_third_party_testing', 'cpsia_cpc', 'cpsia_lead', 'cpsia_tracking_label', 'cpsc_toy_f963',
     // Batteries
     'phmsa_un383', 'phmsa_dot_class', 'phmsa_soc_air',
     // Electronics
@@ -1462,5 +1462,60 @@ describe('Test 27: Supplied import date controls rule expiry and surcharge windo
       productFacts: { importDate: '2026-06-30' }, // after 2025-12-31
     });
     expect(hasCode(issues, 'SCOPE_CONDITION_UNMET')).toBe(true);
+  });
+});
+
+// ── Test 26: cpsia_tracking_label stays verified_applicable through verifyScan ──
+// Regression: before the registry entry was added, L0 (RULE_NOT_IN_REGISTRY)
+// downgraded cpsia_tracking_label to official_unconfirmed, causing the
+// checklist item to show "Cannot determine" instead of "Required".
+
+describe('Test 26: cpsia_tracking_label — stays verified_applicable after verifyScan for confirmed children\'s product', () => {
+  const trackingLabelFinding: RiskCategory = {
+    id: 'cpsia_tracking_label',
+    category: 'CPSIA -- Tracking Label (15 U.S.C. 2063(a)(5))',
+    level: 'High',
+    explanation: 'Permanent tracking label required on product and packaging.',
+    action: 'Confirm tracking label is affixed.',
+    verification_status: 'verified_applicable',
+    source: {
+      agency: 'CPSC',
+      name: '15 U.S.C. 2063(a)(5)',
+      url: 'https://www.cpsc.gov/Business--Manufacturing/Business-Education/Business-Guidance/Tracking-Labels',
+    },
+  };
+
+  const scan: ScanResult = {
+    overall_risk: 'High',
+    overall_summary: 'Children\'s bicycle helmet with tracking label.',
+    risk_categories: [trackingLabelFinding],
+    document_checklist: [],
+    obligations: [],
+    next_actions: [],
+    broker_questions: [],
+    supplier_questions: [],
+    readiness_score: 60,
+  };
+
+  test('cpsia_tracking_label is NOT downgraded — stays verified_applicable', () => {
+    const { report, issues } = verifyScan(scan, {
+      productFacts: {
+        attrs: { is_children: true },
+        importDate: '2026-07-10',
+      },
+    });
+    const corrected = report.risk_categories.find((c) => c.id === 'cpsia_tracking_label');
+    expect(corrected?.verification_status).toBe('verified_applicable');
+    expect(issues.some((i) => i.affected_id === 'cpsia_tracking_label' && i.severity === 'downgrade')).toBe(false);
+  });
+
+  test('cpsia_tracking_label is downgraded when is_children=false (not a children\'s product)', () => {
+    const { issues } = verifyScan(scan, {
+      productFacts: {
+        attrs: { is_children: false },
+        importDate: '2026-07-10',
+      },
+    });
+    expect(issues.some((i) => i.affected_id === 'cpsia_tracking_label' && i.severity === 'downgrade')).toBe(true);
   });
 });

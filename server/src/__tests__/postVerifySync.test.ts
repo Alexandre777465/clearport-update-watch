@@ -1459,4 +1459,28 @@ describe("postVerifySync — children's bicycle helmet document checklist (prese
     expect(testReportDocs).toHaveLength(1);
     expect(testReportDocs[0].document).toContain('1203');
   });
+
+  it("children's helmet: tracking label is Required (doc_status='before_sale'), not cannot_determine", () => {
+    const trackingDoc = syncedChild.document_checklist.find((d) =>
+      d.finding_id === 'cpsia_tracking_label',
+    );
+    expect(trackingDoc).toBeDefined();
+    expect(trackingDoc?.required).toBe(true);
+    expect(trackingDoc?.doc_status).toBe('before_sale');
+    expect(trackingDoc?.doc_status).not.toBe('cannot_determine');
+  });
+
+  it("children's helmet: checklist count breakdown sums to total outstanding", () => {
+    // The banner shows `outstanding.length` total; subcounts (customs + before_sale + usually_requested)
+    // must account for every outstanding item so the breakdown never mismatches the total.
+    const outstanding = syncedChild.document_checklist.filter(
+      (d) => d.doc_status !== 'not_required' && d.doc_status !== 'cannot_determine',
+    );
+    const customsCount = outstanding.filter(
+      (d) => d.doc_status === 'required_to_clear' || d.doc_status === 'required_if',
+    ).length;
+    const beforeSaleCount = outstanding.filter((d) => d.doc_status === 'before_sale').length;
+    const usuallyCount = outstanding.filter((d) => d.doc_status === 'usually_requested').length;
+    expect(customsCount + beforeSaleCount + usuallyCount).toBe(outstanding.length);
+  });
 });

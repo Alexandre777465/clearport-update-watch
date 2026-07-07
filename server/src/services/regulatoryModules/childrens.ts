@@ -383,7 +383,7 @@ export const childrensModule: RegulatoryModule = {
         owner: 'supplier',
         responsible_party: 'supplier',
         reason: 'CPSIA Section 14(a)(5) requires permanent tracking labels on children\'s products and, where practicable, packaging.',
-        doc_status: 'required_to_clear',
+        doc_status: 'before_sale',
         finding_id: 'cpsia_tracking_label',
       });
     }

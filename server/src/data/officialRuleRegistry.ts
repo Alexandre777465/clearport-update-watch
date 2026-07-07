@@ -294,6 +294,24 @@ export const OFFICIAL_RULE_REGISTRY: OfficialRuleRecord[] = [
     timing: 'customs_clearance',
   },
 
+  // ── CPSIA Tracking Label ─────────────────────────────────────────────────
+  {
+    rule_id: 'cpsia_tracking_label',
+    finding_id: 'cpsia_tracking_label',
+    agency: 'CPSC',
+    legal_citation: '15 U.S.C. 2063(a)(5); CPSIA Section 103',
+    official_url: 'https://www.cpsc.gov/Business--Manufacturing/Business-Education/Tracking-Labels',
+    supported_proposition:
+      "Children's products manufactured after August 14, 2009 must bear a permanent tracking label on the product and, where practicable, on the packaging, identifying the manufacturer or private labeler, location and date of manufacture, and cohort/batch information.",
+    product_scope: "Children's products (for children 12 and under) manufactured after August 14, 2009",
+    scope_conditions: {
+      applicable_age: 'children_only',
+    },
+    effective_date: '2009-08-14',
+    legal_status: 'mandatory',
+    timing: 'before_sale',
+  },
+
   // ── CPSC Toy Safety (16 CFR 1250 / ASTM F963) ────────────────────────────
   {
     rule_id: 'cpsc_toy_f963',

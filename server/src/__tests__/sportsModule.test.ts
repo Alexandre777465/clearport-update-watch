@@ -591,11 +591,11 @@ describe('CPSIA tracking label — required for confirmed children\'s products',
     expect(finding?.verification_status).toBe('verified_applicable');
   });
 
-  it('tracking label docSpec is required_to_clear', () => {
+  it("tracking label docSpec is 'before_sale' (label must be on product, checked at customs)", () => {
     const result = evaluateAllModules(moduleInput({ htsDigits: hts, productText: text, knownFacts: answers }));
     const doc = result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label');
     expect(doc).toBeDefined();
-    expect(doc?.doc_status).toBe('required_to_clear');
+    expect(doc?.doc_status).toBe('before_sale');
   });
 });
 
