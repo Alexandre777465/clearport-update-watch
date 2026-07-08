@@ -132,29 +132,83 @@ export const sportsModule: RegulatoryModule = {
     // isBicycleHelmetOnly is true when HTS is 6506.x or sports_product_type='bicycle_helmet'.
 
     if (isBicycle && !isBicycleHelmetOnly) {
-      findings.push({
-        id: 'sports_bicycle_cpsc_1512',
-        category: 'CPSC — Bicycle Safety Standard (16 CFR Part 1512)',
-        level: 'High',
-        explanation:
-          'Bicycles intended for use by persons under age 16 must comply with 16 CFR Part 1512 (CPSC). ' +
-          'This mandatory federal standard covers brakes, reflectors, sharp edges, protrusions, ' +
-          'handlebar requirements, and structural integrity. ' +
-          'Importers must issue a General Certificate of Conformity (GCC) based on third-party testing ' +
-          'by a CPSC-accepted laboratory.',
-        action:
-          'Obtain a third-party test report from a CPSC-accepted laboratory confirming 16 CFR Part 1512 compliance. ' +
-          'Issue a General Certificate of Conformity (GCC). File with CBP and retain records for five years.',
-        verification_status: 'verified_applicable',
-        source: {
-          name: '16 CFR Part 1512',
-          title: '16 CFR Part 1512 — Requirements for Bicycles',
-          agency: 'CPSC',
-          url: 'https://www.ecfr.gov/current/title-16/chapter-II/subchapter-B/part-1512',
-          last_verified_at: '2025-08-01',
-          why_relevant: 'Mandatory federal standard for bicycle safety; applies to all bicycles for persons under 16.',
-        },
+      const bicycleType = knownFacts['sports_bicycle_type'];
+      const isTrackBike   = bicycleType === 'track';
+      const isOneOfAKind  = bicycleType === 'one_of_a_kind';
+      const isSidewalk    = bicycleType === 'sidewalk';
+      const isExempt      = isTrackBike || isOneOfAKind;
+
+      questions.push({
+        key: 'sports_bicycle_type',
+        module: 'sports',
+        question: 'What type of bicycle is this?',
+        helpText:
+          'Track bicycles and one-of-a-kind bicycles are excluded from 16 CFR Part 1512. ' +
+          'Sidewalk bicycles (wheelbase ≤ 25 in) have modified requirements.',
+        options: [
+          { value: 'standard',      label: 'Standard, road, mountain, or BMX bicycle' },
+          { value: 'sidewalk',      label: 'Sidewalk bicycle (wheelbase 25 inches or less)' },
+          { value: 'track',         label: 'Track bicycle (no brakes, designed for velodrome/track)' },
+          { value: 'one_of_a_kind', label: 'One-of-a-kind custom bicycle' },
+          { value: 'unknown',       label: "I don't know" },
+        ],
       });
+
+      const part1512Source = {
+        name: '16 CFR Part 1512',
+        title: '16 CFR Part 1512 — Requirements for Bicycles',
+        agency: 'CPSC',
+        url: 'https://www.ecfr.gov/current/title-16/chapter-II/subchapter-B/part-1512',
+        last_verified_at: '2025-08-01',
+        why_relevant: 'Mandatory federal safety standard for bicycles sold in the United States.',
+      };
+
+      if (isExempt) {
+        const exemptType = isTrackBike ? 'track bicycles' : 'one-of-a-kind bicycles';
+        findings.push({
+          id: 'sports_bicycle_cpsc_1512',
+          category: 'CPSC — Bicycle Safety Standard (16 CFR Part 1512)',
+          level: 'N/A',
+          explanation:
+            `16 CFR Part 1512 excludes ${exemptType} from its requirements (16 CFR 1512.2). ` +
+            'No third-party test report or General Certificate of Conformity under Part 1512 is required for this type of bicycle.',
+          action:
+            `Retain documentation confirming this bicycle qualifies as a ${isTrackBike ? 'track bicycle' : 'one-of-a-kind bicycle'} ` +
+            'under the definitions in 16 CFR 1512.2. No Part 1512 GCC is required.',
+          verification_status: 'not_applicable',
+          source: part1512Source,
+        });
+      } else {
+        const sidewalkNote = isSidewalk
+          ? ' Sidewalk bicycles (wheelbase ≤ 25 inches) have modified requirements under Part 1512 — some sections apply differently.'
+          : '';
+        findings.push({
+          id: 'sports_bicycle_cpsc_1512',
+          category: 'CPSC — Bicycle Safety Standard (16 CFR Part 1512)',
+          level: 'High',
+          explanation:
+            'Bicycles covered by 16 CFR Part 1512 must meet CPSC safety requirements for brakes, reflectors, ' +
+            'protrusions, structural integrity, wheels, tires, steering, labeling, and related mechanical safety items. ' +
+            'Track bicycles and one-of-a-kind bicycles are excluded; sidewalk bicycles have modified requirements.' +
+            sidewalkNote +
+            ' Importers must issue a General Certificate of Conformity (GCC) based on third-party testing ' +
+            'by a CPSC-accepted laboratory.',
+          action:
+            'Obtain a third-party test report from a CPSC-accepted laboratory confirming 16 CFR Part 1512 compliance. ' +
+            'Issue a General Certificate of Conformity (GCC). File with CBP and retain records for five years.',
+          verification_status: 'verified_applicable',
+          source: part1512Source,
+        });
+
+        docSpecs.push({
+          document: 'Third-Party Test Report (16 CFR Part 1512) + General Certificate of Conformity',
+          owner: 'supplier',
+          responsible_party: 'laboratory',
+          reason: 'Mandatory CPSC bicycle safety standard requires testing by a CPSC-accepted lab and a GCC.',
+          doc_status: 'required_to_clear',
+          finding_id: 'sports_bicycle_cpsc_1512',
+        });
+      }
 
       questions.push({
         key: 'sports_helmet_type',
@@ -166,15 +220,6 @@ export const sportsModule: RegulatoryModule = {
           { value: 'no_helmet',      label: 'No — helmet not included' },
           { value: 'unknown',        label: "I don't know" },
         ],
-      });
-
-      docSpecs.push({
-        document: 'Third-Party Test Report (16 CFR Part 1512) + General Certificate of Conformity',
-        owner: 'supplier',
-        responsible_party: 'laboratory',
-        reason: 'Mandatory CPSC bicycle safety standard requires testing by a CPSC-accepted lab and a GCC.',
-        doc_status: 'required_to_clear',
-        finding_id: 'sports_bicycle_cpsc_1512',
       });
     }
 

@@ -973,3 +973,175 @@ describe("Children's bicycle helmet (is_children=true) — CPC and tracking labe
     expect(efilingDoc).toBeDefined();
   });
 });
+
+// ── 16 CFR Part 1512 bicycle type regression tests ───────────────────────────
+// These tests guard the corrected Part 1512 wording and the bicycle-type
+// question (track/one-of-a-kind exclusions, sidewalk modified requirements).
+
+describe('Adult mountain bicycle (sports_bicycle_type=standard) — Part 1512 + GCC, corrected wording', () => {
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '87120035',
+    productText: '26-inch aluminum alloy mountain bicycle, 21-speed derailleur, disc brakes, adult use',
+    attrs: { is_children: false },
+    knownFacts: {
+      sports_product_type: 'bicycle',
+      sports_bicycle_type: 'standard',
+      sports_helmet_type: 'no_helmet',
+      age_range: 'over_12',
+    },
+    importDate: '2026-07-10',
+  }));
+
+  it('Part 1512 fires as verified_applicable', () => {
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_cpsc_1512');
+  });
+
+  it('Part 1512 explanation does not contain "under age 16" language', () => {
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_cpsc_1512');
+    expect(finding?.explanation).not.toContain('under age 16');
+    expect(finding?.explanation).not.toContain('persons under');
+  });
+
+  it('Part 1512 explanation mentions exclusions and scope', () => {
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_cpsc_1512');
+    const text = finding?.explanation?.toLowerCase() ?? '';
+    expect(text).toContain('track bicycle');
+    expect(text).toContain('one-of-a-kind bicycle');
+    expect(text).toContain('sidewalk bicycle');
+  });
+
+  it('GCC docSpec is present (no CPC)', () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_cpsc_1512');
+    expect(doc).toBeDefined();
+    expect(doc?.document).toContain('General Certificate of Conformity');
+    expect(doc?.document).not.toContain('CPC');
+  });
+
+  it('no CPSIA CPC or third-party testing docSpec for adult bicycle', () => {
+    const cpcDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_cpc');
+    expect(cpcDoc).toBeUndefined();
+    const cpsiaTesting = result.docSpecs.find((d) => d.finding_id === 'cpsia_third_party_testing');
+    expect(cpsiaTesting).toBeUndefined();
+  });
+
+  it('no CPSIA tracking label for adult bicycle', () => {
+    const trackingDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label');
+    expect(trackingDoc).toBeUndefined();
+  });
+});
+
+describe("Children's bicycle (is_children=true) — Part 1512 + GCC from sports, CPC/CPSIA from children's module", () => {
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '87120060',
+    productText: "children's 20-inch bicycle, ages 3-12",
+    attrs: { is_children: true },
+    knownFacts: {
+      sports_product_type: 'bicycle',
+      sports_bicycle_type: 'standard',
+      sports_helmet_type: 'no_helmet',
+      age_range: 'age_3_to_12',
+      contains_paint_or_surface_coating: 'no',
+    },
+    importDate: '2026-07-10',
+  }));
+
+  it('Part 1512 fires for children\'s bicycle', () => {
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_cpsc_1512');
+  });
+
+  it('GCC docSpec present (sports module handles the certificate for Part 1512)', () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_cpsc_1512');
+    expect(doc?.document).toContain('General Certificate of Conformity');
+  });
+
+  it('CPSIA CPC docSpec present (children module adds CPC for child-targeted product)', () => {
+    const cpcDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_cpc');
+    expect(cpcDoc).toBeDefined();
+  });
+
+  it('CPSIA tracking label present for children\'s bicycle', () => {
+    const trackingDoc = result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label');
+    expect(trackingDoc).toBeDefined();
+  });
+});
+
+describe('Sidewalk bicycle (sports_bicycle_type=sidewalk) — Part 1512 applies with modified-requirements note', () => {
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '87120050',
+    productText: 'small sidewalk bicycle, 12-inch wheels, training wheels',
+    knownFacts: {
+      sports_product_type: 'bicycle',
+      sports_bicycle_type: 'sidewalk',
+      sports_helmet_type: 'no_helmet',
+    },
+    importDate: '2026-07-10',
+  }));
+
+  it('Part 1512 fires as verified_applicable for sidewalk bicycle', () => {
+    expect(mandatoryFindingIds(result)).toContain('sports_bicycle_cpsc_1512');
+  });
+
+  it('Part 1512 explanation mentions sidewalk modified requirements', () => {
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_cpsc_1512');
+    expect(finding?.explanation).toContain('sidewalk');
+    expect(finding?.explanation?.toLowerCase()).toContain('modified');
+  });
+
+  it('GCC docSpec present for sidewalk bicycle', () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_cpsc_1512');
+    expect(doc).toBeDefined();
+    expect(doc?.document).toContain('General Certificate of Conformity');
+  });
+});
+
+describe('Track bicycle (sports_bicycle_type=track) — Part 1512 not_applicable', () => {
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '87120050',
+    productText: 'fixed-gear track bicycle, no brakes, velodrome racing',
+    knownFacts: {
+      sports_product_type: 'bicycle',
+      sports_bicycle_type: 'track',
+      sports_helmet_type: 'no_helmet',
+    },
+    importDate: '2026-07-10',
+  }));
+
+  it('Part 1512 finding fires as not_applicable for track bicycle', () => {
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_cpsc_1512');
+    expect(finding).toBeDefined();
+    expect(finding?.verification_status).toBe('not_applicable');
+  });
+
+  it('no GCC docSpec for track bicycle (excluded from Part 1512)', () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_cpsc_1512');
+    expect(doc).toBeUndefined();
+  });
+
+  it('Part 1512 explanation mentions track bicycle exclusion', () => {
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_cpsc_1512');
+    expect(finding?.explanation).toContain('track bicycle');
+  });
+});
+
+describe('One-of-a-kind bicycle (sports_bicycle_type=one_of_a_kind) — Part 1512 not_applicable', () => {
+  const result = evaluateAllModules(moduleInput({
+    htsDigits: '87120050',
+    productText: 'custom hand-built one-of-a-kind bicycle, artisan frame',
+    knownFacts: {
+      sports_product_type: 'bicycle',
+      sports_bicycle_type: 'one_of_a_kind',
+      sports_helmet_type: 'no_helmet',
+    },
+    importDate: '2026-07-10',
+  }));
+
+  it('Part 1512 finding is not_applicable for one-of-a-kind bicycle', () => {
+    const finding = result.findings.find((f) => f.id === 'sports_bicycle_cpsc_1512');
+    expect(finding?.verification_status).toBe('not_applicable');
+  });
+
+  it('no GCC docSpec for one-of-a-kind bicycle', () => {
+    const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_cpsc_1512');
+    expect(doc).toBeUndefined();
+  });
+});
