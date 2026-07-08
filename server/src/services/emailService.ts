@@ -195,7 +195,25 @@ async function sendEmail(opts: {
 
 // ── Watchlist alerts (auth-free email monitoring) ──────────────────────────────
 
-export async function sendWatchlistAlerts(): Promise<void> {
+export interface WatchlistAlertStats {
+  checked_entries: number;
+  matched_entries: number;
+  emails_sent: number;
+  emails_failed: number;
+  skipped_no_match: number;
+  skipped_email_disabled: number;
+}
+
+export async function sendWatchlistAlerts(): Promise<WatchlistAlertStats> {
+  const stats: WatchlistAlertStats = {
+    checked_entries: 0,
+    matched_entries: 0,
+    emails_sent: 0,
+    emails_failed: 0,
+    skipped_no_match: 0,
+    skipped_email_disabled: 0,
+  };
+
   // Find entries not alerted in the last 6 days (daily cron runs daily, 1-day buffer)
   const cutoff = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -205,24 +223,43 @@ export async function sendWatchlistAlerts(): Promise<void> {
     .or(`last_alerted_at.is.null,last_alerted_at.lt.${cutoff}`)
     .limit(200);
 
-  if (!entries?.length) return;
+  if (!entries?.length) return stats;
 
+  stats.checked_entries = entries.length;
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   for (const entry of entries as WatchlistEntry[]) {
     try {
-      await sendWatchlistEntryAlert(entry, since);
+      const result = await sendWatchlistEntryAlert(entry, since);
+      stats.matched_entries += result.matched ? 1 : 0;
+      stats.emails_sent += result.sent ? 1 : 0;
+      stats.emails_failed += result.failed ? 1 : 0;
+      stats.skipped_no_match += result.noMatch ? 1 : 0;
+      stats.skipped_email_disabled += result.emailDisabled ? 1 : 0;
     } catch (err: any) {
       console.error(`[watchlist] Alert failed for ${entry.email}:`, err.message);
+      stats.emails_failed += 1;
     }
   }
+
+  return stats;
 }
 
-async function sendWatchlistEntryAlert(entry: WatchlistEntry, since: string): Promise<void> {
+interface EntryAlertResult {
+  matched: boolean;
+  sent: boolean;
+  failed: boolean;
+  noMatch: boolean;
+  emailDisabled: boolean;
+}
+
+async function sendWatchlistEntryAlert(entry: WatchlistEntry, since: string): Promise<EntryAlertResult> {
+  const none: EntryAlertResult = { matched: false, sent: false, failed: false, noMatch: false, emailDisabled: false };
+
   // Alerts require an HTS code — match the same way the report does (no
   // origin-only matching, which produced irrelevant alerts).
   const digits = (entry.hts_code ?? '').replace(/[^0-9]/g, '');
-  if (digits.length < 4) return;
+  if (digits.length < 4) return { ...none, noMatch: true };
 
   const { data: candidates } = await db
     .from('source_documents')
@@ -235,20 +272,23 @@ async function sendWatchlistEntryAlert(entry: WatchlistEntry, since: string): Pr
   const matched = (candidates ?? []).filter(
     (d: any) => Array.isArray(d.affected_hts_codes) && d.affected_hts_codes.some((c: string) => htsCodesRelated(c, entry.hts_code!)),
   );
-  if (!matched.length) return;
+  if (!matched.length) return { ...none, noMatch: true };
 
-  // Per-event dedup: drop documents already logged for this entry.
+  // Per-event dedup: only skip documents that were successfully sent.
+  // Failed rows stay visible for debugging but do NOT block a retry.
   const { data: already } = await db
     .from('watchlist_alert_log')
     .select('source_document_id')
-    .eq('watchlist_entry_id', entry.id);
+    .eq('watchlist_entry_id', entry.id)
+    .eq('status', 'sent');
   const sentIds = new Set((already ?? []).map((r: any) => r.source_document_id));
   const fresh = matched.filter((d: any) => !sentIds.has(d.id));
-  if (!fresh.length) return;
+  if (!fresh.length) return { ...none, matched: true };
 
   if (!emailEnabled()) {
     console.log(`[watchlist] (email disabled) would send ${fresh.length} matched update(s) to ${entry.email} for "${entry.product_name}"`);
-    return; // do NOT mark as sent while disabled, so they go out once enabled
+    // do NOT mark as sent while disabled, so they go out once enabled
+    return { ...none, matched: true, emailDisabled: true };
   }
 
   const count = fresh.length;
@@ -265,15 +305,21 @@ async function sendWatchlistEntryAlert(entry: WatchlistEntry, since: string): Pr
     console.error(`[watchlist] Alert send failed for ${entry.email}:`, error);
   }
 
-  // Log each document so it is never re-sent (and failures are visible).
+  // Upsert each document row so retrying a failed send updates status → 'sent'
+  // rather than hitting the unique constraint (watchlist_entry_id, source_document_id).
   const rows = fresh.map((d: any) => ({
     watchlist_entry_id: entry.id, source_document_id: d.id, email: entry.email,
     kind: 'alert', status, error_message: error,
   }));
-  await db.from('watchlist_alert_log').insert(rows).then(() => {}, () => {});
+  await db.from('watchlist_alert_log')
+    .upsert(rows, { onConflict: 'watchlist_entry_id,source_document_id' })
+    .then(() => {}, () => {});
+
   if (status === 'sent') {
     await db.from('watchlist_entries').update({ last_alerted_at: new Date().toISOString() }).eq('id', entry.id);
+    return { ...none, matched: true, sent: true };
   }
+  return { ...none, matched: true, failed: true };
 }
 
 function buildWatchlistEmailHtml(entry: WatchlistEntry, docs: any[]): string {

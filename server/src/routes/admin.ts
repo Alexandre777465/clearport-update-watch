@@ -7,9 +7,11 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
+import { Resend } from 'resend';
 import { db } from '../db/client';
 import { checkFeed } from '../services/feedFetcher';
 import { processUnprocessedDocuments } from '../services/summarizer';
+import { sendWatchlistAlerts } from '../services/emailService';
 import type { SourceFeed } from '../types';
 
 const router = Router();
@@ -100,6 +102,47 @@ router.post('/refresh', requireAdmin, async (_req, res) => {
     sources,
     documents_summarized,
   });
+});
+
+// POST /api/admin/send-watchlist-alerts
+// Manually triggers the watchlist alert cron logic and returns dispatch stats.
+router.post('/send-watchlist-alerts', requireAdmin, async (_req, res) => {
+  try {
+    const stats = await sendWatchlistAlerts();
+    return res.json({ triggered_at: new Date().toISOString(), ...stats });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? 'unknown error' });
+  }
+});
+
+// POST /api/admin/test-email
+// Sends a plain diagnostic email to verify the Resend integration is wired up.
+// Body: { "to": "email@example.com" }
+router.post('/test-email', requireAdmin, async (req, res) => {
+  const to = req.body?.to;
+  if (typeof to !== 'string' || !to.includes('@')) {
+    return res.status(400).json({ error: 'Body must include a valid "to" email address.' });
+  }
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'RESEND_API_KEY is not set — email is not configured.' });
+  }
+
+  const from = `${process.env.RESEND_FROM_NAME ?? 'ClearPort Alerts'} <${process.env.RESEND_FROM_EMAIL ?? 'alerts@clearport.io'}>`;
+  const resend = new Resend(apiKey);
+
+  try {
+    await resend.emails.send({
+      from,
+      to,
+      subject: '[ClearPort] Email delivery test',
+      html: `<p>This is a test email from ClearPort admin. If you received it, the Resend integration is working correctly.</p><p style="font-size:12px;color:#888;">Sent at ${new Date().toISOString()}</p>`,
+    });
+    return res.json({ sent: true, to, sent_at: new Date().toISOString() });
+  } catch (err: any) {
+    return res.status(502).json({ sent: false, error: err?.message ?? 'send failed' });
+  }
 });
 
 export const adminRouter = router;
