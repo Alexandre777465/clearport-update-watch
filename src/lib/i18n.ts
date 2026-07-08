@@ -297,7 +297,7 @@ const DICT = {
   scan_scanning_for: { en: "Scanning import risks for", zh: "正在扫描进口风险：" },
   scan_scanning_sub: {
     en: "Checking tariff exposure, compliance requirements, and documentation needs.",
-    zh: "正在检查关税风险、合规要求和文件需求。",
+    zh: "正在检查关税风险、合规要求及文件需求；中文报告正在生成，请稍候……",
   },
 
   // Scan error states
@@ -632,6 +632,34 @@ const DICT = {
 
   // ── Tariff / cost section ─────────────────────────────────────────────────
   known_customs_charges: { en: "Known customs charges:", zh: "已知关税费用：" },
+
+  // ── Form: freight / insurance / shipping / parties ───────────────────────
+  form_freight: { en: "Freight (USD)", zh: "运费（美元）" },
+  form_insurance: { en: "Insurance (USD)", zh: "保险费（美元）" },
+  form_optional: { en: "optional", zh: "选填" },
+  form_shipping_method: { en: "Shipping method", zh: "运输方式" },
+  form_mode_ocean: { en: "Ocean", zh: "海运" },
+  form_mode_air: { en: "Air", zh: "空运" },
+  form_mode_truck: { en: "Truck", zh: "卡车运输" },
+  form_mode_rail: { en: "Rail", zh: "铁路运输" },
+  form_hmf_help: {
+    en: "Used to determine Harbor Maintenance Fee (HMF applies to ocean only)",
+    zh: "用于判断是否适用港口维护费（HMF 仅适用于海运）",
+  },
+  form_manufacturer: { en: "Manufacturer", zh: "制造商" },
+  form_exporter: { en: "Exporter", zh: "出口商" },
+  form_company_ph: { en: "Company name or Unknown", zh: "公司名称或未知" },
+  form_adcvd_help: {
+    en: "Required for exact AD/CVD rates — leave blank or enter Unknown if not yet known",
+    zh: "用于准确判断 AD/CVD 税率；如暂不清楚，可留空或填写未知",
+  },
+
+  // ── Section 1: cost total failure reasons ────────────────────────────────
+  sec1_cannot_adcvd: {
+    en: "Exact AD/CVD rate requires manufacturer and exporter name",
+    zh: "精确的 AD/CVD 税率需要制造商和出口商名称",
+  },
+  sec1_cannot_value: { en: "Customs value not provided", zh: "未提供关税价值" },
 
   // ── Misc ─────────────────────────────────────────────────────────────────
   banner_saved: { en: "Product saved for monitoring.", zh: "产品已保存以进行监测。" },

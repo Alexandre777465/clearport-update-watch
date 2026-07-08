@@ -802,8 +802,8 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="cp-freight">
-                Freight (USD){" "}
-                <span className="text-xs text-muted-foreground">(optional)</span>
+                {t(lang, "form_freight")}{" "}
+                <span className="text-xs text-muted-foreground">({t(lang, "form_optional")})</span>
               </Label>
               <Input
                 id="cp-freight"
@@ -816,8 +816,8 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
             </div>
             <div>
               <Label htmlFor="cp-insurance">
-                Insurance (USD){" "}
-                <span className="text-xs text-muted-foreground">(optional)</span>
+                {t(lang, "form_insurance")}{" "}
+                <span className="text-xs text-muted-foreground">({t(lang, "form_optional")})</span>
               </Label>
               <Input
                 id="cp-insurance"
@@ -833,8 +833,8 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           {/* Transport mode */}
           <div>
             <Label>
-              Shipping method{" "}
-              <span className="text-xs text-muted-foreground">(optional)</span>
+              {t(lang, "form_shipping_method")}{" "}
+              <span className="text-xs text-muted-foreground">({t(lang, "form_optional")})</span>
             </Label>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {(["ocean", "air", "truck", "rail"] as const).map((mode) => (
@@ -853,12 +853,12 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
                       : "border-border bg-background text-muted-foreground hover:border-foreground"
                   }`}
                 >
-                  {mode}
+                  {t(lang, `form_mode_${mode}` as DictKey)}
                 </button>
               ))}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Used to determine Harbor Maintenance Fee (HMF applies to ocean only)
+              {t(lang, "form_hmf_help")}
             </p>
           </div>
 
@@ -866,33 +866,33 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="cp-manufacturer">
-                Manufacturer{" "}
-                <span className="text-xs text-muted-foreground">(optional)</span>
+                {t(lang, "form_manufacturer")}{" "}
+                <span className="text-xs text-muted-foreground">({t(lang, "form_optional")})</span>
               </Label>
               <Input
                 id="cp-manufacturer"
                 value={form.manufacturerName}
                 onChange={set("manufacturerName")}
-                placeholder="Company name or Unknown"
+                placeholder={t(lang, "form_company_ph")}
                 className="mt-1.5"
               />
             </div>
             <div>
               <Label htmlFor="cp-exporter">
-                Exporter{" "}
-                <span className="text-xs text-muted-foreground">(optional)</span>
+                {t(lang, "form_exporter")}{" "}
+                <span className="text-xs text-muted-foreground">({t(lang, "form_optional")})</span>
               </Label>
               <Input
                 id="cp-exporter"
                 value={form.exporterName}
                 onChange={set("exporterName")}
-                placeholder="Company name or Unknown"
+                placeholder={t(lang, "form_company_ph")}
                 className="mt-1.5"
               />
             </div>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Required for exact AD/CVD rates — leave blank or enter Unknown if not yet known
+            {t(lang, "form_adcvd_help")}
           </p>
 
           {/* Route */}
@@ -1111,9 +1111,9 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
       ? knownTariffDollar + mpf.amount + (hmfAmount ?? 0)
       : null;
   const cannotTotalReason = hasUnknown
-    ? "Exact AD/CVD rate requires manufacturer and exporter name"
+    ? t(lang, "sec1_cannot_adcvd")
     : !customsValueUsd
-      ? "Customs value not provided"
+      ? t(lang, "sec1_cannot_value")
       : null;
 
   // Section 3: non-tariff regulatory findings

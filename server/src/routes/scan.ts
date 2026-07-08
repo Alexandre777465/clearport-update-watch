@@ -76,6 +76,12 @@ router.get('/:entryId', async (req, res) => {
   }
 
   if (scan) {
+    // If translation is still running for a zh scan, keep the frontend in the
+    // polling loop so it never shows the English report as the final result.
+    // A 'failed' translation falls through to return the English scan as-is.
+    if (scan.translation_status === 'pending') {
+      return res.json({ status: 'pending' });
+    }
     return res.json({ status: 'ready', scan });
   }
 
