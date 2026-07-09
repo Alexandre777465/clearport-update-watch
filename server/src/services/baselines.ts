@@ -8,6 +8,7 @@
 import { db } from '../db/client';
 import type { WatchlistEntry, RiskCategory, RiskLevel, CoverageItem, CoverageStatus } from '../types';
 import { lookupHtsBaseline, normalizeHts, formatHts, type HtsLookupResult } from './htsBaseline';
+import { normalizeProductTextForDetection } from './chineseNormalization';
 import { screenAdcvd, adcvdFindingsToCategories, adcvdFindingsToCoverage } from './adcvdScanner';
 import {
   SECTION_232_AUTO,
@@ -109,7 +110,8 @@ export async function evaluateBaselines(
   const today = new Date().toISOString().slice(0, 10);
   // Derive product text early so it can be passed to assembleBaselines (used for
   // civil-aircraft evidence detection in the Section 122 surcharge check).
-  const productText = `${entry.product_name} ${entry.product_description ?? ''}`.trim();
+  const rawProductText = `${entry.product_name} ${entry.product_description ?? ''}`.trim();
+  const productText = normalizeProductTextForDetection(rawProductText);
 
   const baseCategories = assembleBaselines(entry, value, hts, regRows, today, knownFacts, productText);
   const adcvdCategories = adcvdFindingsToCategories(adcvdFindings, today);

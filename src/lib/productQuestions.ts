@@ -9,6 +9,7 @@
  */
 
 import { extractFacts, activateFromFacts, MODULE_MANIFESTS } from "./factEngine";
+import { normalizeProductTextForDetection } from "./chineseNormalization";
 
 export type ModuleId =
   | "automotive"
@@ -54,7 +55,7 @@ export function detectModules(
   _attrs: ProductAttrs = {},  // kept for API compat; factEngine supersedes this
   knownFacts: Record<string, string> = {},
 ): Set<ModuleId> {
-  const facts = extractFacts(htsDigits, productText, knownFacts);
+  const facts = extractFacts(htsDigits, normalizeProductTextForDetection(productText), knownFacts);
   const active = activateFromFacts(facts, MODULE_MANIFESTS);
   return new Set(active as ModuleId[]);
 }
