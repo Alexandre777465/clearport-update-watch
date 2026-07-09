@@ -174,6 +174,36 @@ describe("English mode — form labels unchanged", () => {
   });
 });
 
+// ── Translation status banner keys ───────────────────────────────────────────
+
+describe("Chinese translation status banners", () => {
+  test("translation_pending_banner has Chinese text", () => {
+    const zh = t("zh", "translation_pending_banner");
+    expect(zh).toContain("中文版本正在生成");
+    expect(zh).toContain("请稍候");
+    expect(zh).not.toBe(t("en", "translation_pending_banner"));
+  });
+
+  test("translation_failed_banner has Chinese warning text", () => {
+    const zh = t("zh", "translation_failed_banner");
+    expect(zh).toContain("中文翻译");
+    expect(zh).toContain("英文报告");
+    expect(zh).not.toBe(t("en", "translation_failed_banner"));
+  });
+
+  test("translation_pending_banner en is readable English", () => {
+    const en = t("en", "translation_pending_banner");
+    expect(en).toContain("Chinese version");
+    expect(en).toContain("being generated");
+  });
+
+  test("translation_failed_banner en is readable English", () => {
+    const en = t("en", "translation_failed_banner");
+    expect(en).toContain("Chinese translation");
+    expect(en).toContain("English report");
+  });
+});
+
 // ── t() fallback behaviour ────────────────────────────────────────────────────
 
 describe("t() fallback behaviour", () => {

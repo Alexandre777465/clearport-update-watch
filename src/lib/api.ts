@@ -525,29 +525,40 @@ export async function submitWatchlistEntry(data: {
   };
 }
 
+export type TranslationStatus = "pending" | "ready" | "failed" | null;
+
 // Polls a single scan-status read.
 export async function fetchScanResult(entryId: string): Promise<{
   status: ScanStatus;
   scan: ProductRiskScan | null;
+  translation_status: TranslationStatus;
   error?: string;
 }> {
   const res = await fetchWithTimeout(`${API_URL}/api/public/scan/${entryId}`, {}, 20_000);
   if (!res.ok) {
-    return { status: "pending", scan: null };
+    return { status: "pending", scan: null, translation_status: null };
   }
   const json = (await res.json()) as {
     status: ScanStatus;
     scan?: ProductRiskScan;
+    translation_status?: TranslationStatus;
     error?: string;
   };
-  return { status: json.status, scan: json.scan ?? null, error: json.error };
+  return {
+    status: json.status,
+    scan: json.scan ?? null,
+    translation_status: json.translation_status ?? null,
+    error: json.error,
+  };
 }
 
 // Polls until the scan is ready/failed or the budget is exhausted.
+// Returns translation_status so the caller can decide whether to start
+// a background translation poll (when translation_status === 'pending').
 export async function pollScanResult(
   entryId: string,
   opts: { intervalMs?: number; timeoutMs?: number } = {},
-): Promise<{ status: ScanStatus; scan: ProductRiskScan | null; error?: string }> {
+): Promise<{ status: ScanStatus; scan: ProductRiskScan | null; translation_status: TranslationStatus; error?: string }> {
   const intervalMs = opts.intervalMs ?? 3_000;
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const deadline = Date.now() + timeoutMs;
@@ -559,11 +570,35 @@ export async function pollScanResult(
     const r = await fetchScanResult(entryId).catch(() => ({
       status: "pending" as ScanStatus,
       scan: null,
+      translation_status: null as TranslationStatus,
     }));
     if (r.status === "ready" || r.status === "failed") return r;
     await new Promise((res) => setTimeout(res, intervalMs));
   }
-  return { status: "pending", scan: null, error: "timeout" };
+  return { status: "pending", scan: null, translation_status: null, error: "timeout" };
+}
+
+// Polls until the Chinese translation finishes (or fails/times out).
+// Call this after pollScanResult returns translation_status === 'pending'.
+// The returned scan will have Chinese text on success, English text on failure.
+export async function pollTranslationResult(
+  entryId: string,
+  opts: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<{ scan: ProductRiskScan | null; failed: boolean }> {
+  const intervalMs = opts.intervalMs ?? 3_000;
+  const timeoutMs = opts.timeoutMs ?? 90_000;
+  const deadline = Date.now() + timeoutMs;
+
+  await new Promise((r) => setTimeout(r, 3_000));
+
+  while (Date.now() < deadline) {
+    const r = await fetchScanResult(entryId).catch(() => null);
+    if (r && r.status === "ready" && r.scan && r.translation_status !== "pending") {
+      return { scan: r.scan, failed: r.translation_status === "failed" };
+    }
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  return { scan: null, failed: true };
 }
 
 // ── ClearPort Assistant (product-grounded) ───────────────────────────────────

@@ -47,9 +47,14 @@ router.get('/:entryId/context', async (req, res) => {
 
 // GET /api/public/scan/:entryId
 // Status-aware so the frontend can poll an async scan:
-//   { status: 'ready',   scan }   — scan completed and saved
-//   { status: 'pending' }         — still running
-//   { status: 'failed',  error }  — scan errored
+//   { status: 'ready', scan, translation_status }  — scan done; translation_status is
+//     null (not needed), 'pending' (zh translation still running), 'ready', or 'failed'.
+//   { status: 'pending' }                           — scan not yet generated
+//   { status: 'failed',  error }                    — scan generation failed
+//
+// When translation_status is 'pending', the scan field contains the English scan.
+// The frontend should display it immediately with a "translating…" notice and
+// keep polling until translation_status changes to 'ready' or 'failed'.
 router.get('/:entryId', async (req, res) => {
   const { entryId } = req.params;
 
@@ -76,13 +81,11 @@ router.get('/:entryId', async (req, res) => {
   }
 
   if (scan) {
-    // If translation is still running for a zh scan, keep the frontend in the
-    // polling loop so it never shows the English report as the final result.
-    // A 'failed' translation falls through to return the English scan as-is.
-    if (scan.translation_status === 'pending') {
-      return res.json({ status: 'pending' });
-    }
-    return res.json({ status: 'ready', scan });
+    return res.json({
+      status: 'ready',
+      scan,
+      translation_status: scan.translation_status ?? null,
+    });
   }
 
   const status = entry.scan_status === 'failed' ? 'failed' : 'pending';

@@ -13,6 +13,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   submitWatchlistEntry,
   pollScanResult,
+  pollTranslationResult,
   type WatchlistPreviewDoc,
   type ProductRiskScan,
   type ProductAttributes,
@@ -387,6 +388,8 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   // Async-scan failure state + the knownFacts to retry with.
   const [scanError, setScanError] = useState<string | null>(null);
   const [retryKnownFacts, setRetryKnownFacts] = useState<Record<string, string> | null>(null);
+  // Chinese translation: 'idle' = not needed / done, 'pending' = running, 'failed' = gave up.
+  const [translationStatus, setTranslationStatus] = useState<"idle" | "pending" | "failed">("idle");
   // Post-scan clarification: one question at a time before showing the final report.
   const [postScanQ, setPostScanQ] = useState<{
     question: ClarificationQuestion;
@@ -434,6 +437,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
     setShowClarification(false);
     setPostScanQ(null);
     setScanError(null);
+    setTranslationStatus("idle");
     setLoadingStage("saving");
 
     try {
@@ -457,6 +461,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
       });
 
       let riskScan: ProductRiskScan;
+      let needsTranslationPoll = false;
 
       if (result.scan_status === "local") {
         // No backend — generate the mock scan client-side.
@@ -467,6 +472,9 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         const polled = await pollScanResult(result.id);
         if (polled.status === "ready" && polled.scan) {
           riskScan = polled.scan;
+          // If the Chinese translation is still running, we show the English
+          // scan immediately and continue polling in the background.
+          needsTranslationPoll = polled.translation_status === "pending";
         } else {
           setScanError(
             polled.status === "failed"
@@ -512,7 +520,20 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
         return;
       }
 
+      if (needsTranslationPoll) {
+        setTranslationStatus("pending");
+      }
       setConfirmed(confirmedState);
+
+      // Background-poll for the Chinese translation without blocking the UI.
+      if (needsTranslationPoll) {
+        pollTranslationResult(result.id).then(({ scan: translated, failed }) => {
+          if (translated) {
+            setConfirmed((prev) => (prev ? { ...prev, riskScan: translated } : prev));
+          }
+          setTranslationStatus(failed ? "failed" : "idle");
+        });
+      }
     } catch {
       setScanError(t(lang, "err_save"));
     } finally {
@@ -569,7 +590,7 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
   }
 
   if (confirmed) {
-    return <ConfirmationView confirmed={confirmed} />;
+    return <ConfirmationView confirmed={confirmed} translationStatus={translationStatus} />;
   }
 
   if (scanError) {
@@ -1087,7 +1108,13 @@ function RegulatoryCategoryRow({ cat, lang }: { cat: RiskCategory; lang: Lang })
 
 // ── Confirmation + cockpit view ───────────────────────────────────────────────
 
-function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
+function ConfirmationView({
+  confirmed,
+  translationStatus,
+}: {
+  confirmed: ConfirmedState;
+  translationStatus: "idle" | "pending" | "failed";
+}) {
   const lang = useLang();
   const { riskScan } = confirmed;
   const [officialOpen, setOfficialOpen] = useState(false);
@@ -1173,6 +1200,20 @@ function ConfirmationView({ confirmed }: { confirmed: ConfirmedState }) {
           </div>
         </div>
       </Card>
+
+      {/* Chinese translation status banner */}
+      {translationStatus === "pending" && (
+        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-blue-800">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          <span>{t(lang, "translation_pending_banner")}</span>
+        </div>
+      )}
+      {translationStatus === "failed" && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{t(lang, "translation_failed_banner")}</span>
+        </div>
+      )}
 
       {/* Product / Route summary */}
       <Card className="divide-y overflow-hidden p-0">

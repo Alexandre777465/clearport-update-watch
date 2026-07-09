@@ -661,6 +661,16 @@ const DICT = {
   },
   sec1_cannot_value: { en: "Customs value not provided", zh: "未提供关税价值" },
 
+  // ── Chinese translation status banners ───────────────────────────────────
+  translation_pending_banner: {
+    en: "Base report ready. Chinese version is being generated, please wait…",
+    zh: "基础报告已生成，中文版本正在生成，请稍候……",
+  },
+  translation_failed_banner: {
+    en: "Chinese translation temporarily unavailable. Showing English report.",
+    zh: "中文翻译暂时不可用，以下显示英文报告。",
+  },
+
   // ── Misc ─────────────────────────────────────────────────────────────────
   banner_saved: { en: "Product saved for monitoring.", zh: "产品已保存以进行监测。" },
   err_generic: { en: "Something went wrong. Please try again.", zh: "出现问题，请重试。" },
