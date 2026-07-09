@@ -955,35 +955,63 @@ export function postVerifySync(
 export async function translateScanToZh(scan: ScanResult): Promise<ScanResult | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null;
 
-  // Build a flat dictionary of stable keys → English narrative text.
+  // Build a flat dictionary of stable keys → English text to translate.
+  // Includes both narrative fields (explanation, action…) AND structural
+  // labels (category names, document names) so the full visible report is in Chinese.
   const dict: Record<string, string> = {};
 
   if (scan.overall_summary) dict['summary'] = scan.overall_summary;
 
   (scan.risk_categories ?? []).forEach((c, i) => {
-    if (c.explanation) dict[`cat_${i}_expl`] = c.explanation;
-    if (c.action) dict[`cat_${i}_action`] = c.action;
-    if (c.what_changed) dict[`cat_${i}_changed`] = c.what_changed;
+    if (c.category)                  dict[`cat_${i}_name`]       = c.category;
+    if (c.explanation)               dict[`cat_${i}_expl`]       = c.explanation;
+    if (c.action)                    dict[`cat_${i}_action`]     = c.action;
+    if (c.what_changed)              dict[`cat_${i}_changed`]    = c.what_changed;
+    if (c.financial_impact)          dict[`cat_${i}_financial`]  = c.financial_impact;
+    if (c.applicability_conditions)  dict[`cat_${i}_conditions`] = c.applicability_conditions;
   });
 
   (scan.document_checklist ?? []).forEach((d, i) => {
-    if (d.reason) dict[`doc_${i}_reason`] = d.reason;
+    if (d.document) dict[`doc_${i}_name`]      = d.document;
+    if (d.reason)   dict[`doc_${i}_reason`]    = d.reason;
+    if (d.condition) dict[`doc_${i}_condition`] = d.condition;
   });
 
-  (scan.broker_questions ?? []).forEach((q, i) => { dict[`bq_${i}`] = q; });
+  (scan.broker_questions ?? []).forEach((q, i)  => { dict[`bq_${i}`] = q; });
   (scan.supplier_questions ?? []).forEach((q, i) => { dict[`sq_${i}`] = q; });
-  (scan.next_actions ?? []).forEach((a, i) => { dict[`na_${i}`] = a; });
+  (scan.next_actions ?? []).forEach((a, i)       => { dict[`na_${i}`] = a; });
 
   if (Object.keys(dict).length === 0) return scan;
 
-  const prompt = `Translate the following import-compliance advisory text from English to Simplified Chinese (简体中文).
+  const prompt = `Translate the following U.S. import-compliance text from English to Simplified Chinese (简体中文).
 
 Rules:
-- Translate ONLY the values — never the keys.
-- Use professional trade/import terminology appropriate for a Chinese small business owner.
-- Do NOT translate or alter: agency names (CBP, FDA, CPSC, FCC, USTR, DOT/PHMSA), regulation citations (e.g. "21 CFR 174", "16 CFR 303"), HTS codes, URLs, numeric percentages, or document titles (e.g. "UN 38.3", "CPSIA").
-- Do NOT add new requirements, risks, legal obligations, documents, or actions that are not in the original text.
-- Return ONLY a JSON object with the same keys and translated values — no markdown, no code fences, no explanation.
+1. Translate ONLY the JSON values — never change the keys.
+2. Use professional import/trade terminology suitable for a Chinese small-business importer.
+3. Preserve ALL of the following EXACTLY as-is anywhere they appear inside translated text:
+   - Acronyms: CBP, FDA, CPSC, FCC, USTR, DOT, PHMSA, CPSIA, CPC, GCC, HTS, HS, MFN,
+     MPF, HMF, AD/CVD, OSHA, EPA, USDA, FSIS, USCG, NHTSA, FTC, MoCRA, BoL, AWB, SDoC,
+     SDS, ASTM, FMVSS, TSCA, FIFRA
+   - Regulation citations: Section 301, Section 232, Section 122, Chapter 99, 16 CFR Part 1203,
+     16 CFR Part 1512, 21 CFR 174, 19 CFR, 49 CFR, 29 CFR, 46 CFR, CFR numbers generally
+   - HTS codes and numeric codes (e.g. "8708.30.50", "6403.91.60")
+   - URLs and form numbers (e.g. "CBP Form 3461", "CBP Form 7501", "HS-7")
+   - Dollar amounts, percentages, and rates (e.g. "$2,000", "7.5%")
+4. DO translate document names and category names into natural Chinese, while keeping
+   the acronyms/codes within them intact.
+   Examples:
+     "Commercial Invoice" → "商业发票"
+     "Packing List" → "装箱单"
+     "Bill of Lading (BoL)" → "提单（BoL）"
+     "Merchandise Processing Fee (MPF)" → "商品处理费（MPF）"
+     "Harbor Maintenance Fee (HMF)" → "港口维护费（HMF）"
+     "Section 301 / Chapter 99 applicability & exclusion confirmation" → "Section 301 / Chapter 99 适用性及豁免确认"
+     "Country-of-origin marking / declaration" → "原产国标识/声明"
+     "Customs Entry Filing" → "海关申报"
+     "CPSIA tracking label (on product and packaging)" → "CPSIA 追踪标签（产品及包装上）"
+5. Do NOT add, remove, or invent any requirements, risks, documents, or obligations.
+6. Return ONLY a valid JSON object with the same keys and translated values.
+   No markdown, no code fences, no explanation outside the JSON.
 
 Input:
 ${JSON.stringify(dict)}`;
@@ -991,7 +1019,7 @@ ${JSON.stringify(dict)}`;
   try {
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
+      max_tokens: 8192,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -1009,32 +1037,36 @@ ${JSON.stringify(dict)}`;
       return typeof v === 'string' && v.trim() ? v.trim() : undefined;
     };
 
-    // Merge translated values back into the scan structure — fall back to
-    // English for any key the model omitted or returned with wrong type.
+    // Merge translated values back — fall back to English for any key the model omitted.
     const newCategories = (scan.risk_categories ?? []).map((c, i) => ({
       ...c,
-      explanation: get(`cat_${i}_expl`) ?? c.explanation,
-      action: get(`cat_${i}_action`) ?? c.action,
-      what_changed: get(`cat_${i}_changed`) ?? c.what_changed,
+      category:                 get(`cat_${i}_name`)       ?? c.category,
+      explanation:              get(`cat_${i}_expl`)       ?? c.explanation,
+      action:                   get(`cat_${i}_action`)     ?? c.action,
+      what_changed:             get(`cat_${i}_changed`)    ?? c.what_changed,
+      financial_impact:         get(`cat_${i}_financial`)  ?? c.financial_impact,
+      applicability_conditions: get(`cat_${i}_conditions`) ?? c.applicability_conditions,
     }));
 
     const newChecklist = (scan.document_checklist ?? []).map((d, i) => ({
       ...d,
-      reason: get(`doc_${i}_reason`) ?? d.reason,
+      document:  get(`doc_${i}_name`)      ?? d.document,
+      reason:    get(`doc_${i}_reason`)    ?? d.reason,
+      condition: get(`doc_${i}_condition`) ?? d.condition,
     }));
 
-    const newBrokerQs = (scan.broker_questions ?? []).map((q, i) => get(`bq_${i}`) ?? q);
-    const newSupplierQs = (scan.supplier_questions ?? []).map((q, i) => get(`sq_${i}`) ?? q);
-    const newNextActions = (scan.next_actions ?? []).map((a, i) => get(`na_${i}`) ?? a);
+    const newBrokerQs    = (scan.broker_questions ?? []).map((q, i)  => get(`bq_${i}`) ?? q);
+    const newSupplierQs  = (scan.supplier_questions ?? []).map((q, i) => get(`sq_${i}`) ?? q);
+    const newNextActions = (scan.next_actions ?? []).map((a, i)       => get(`na_${i}`) ?? a);
 
     return {
       ...scan,
-      overall_summary: get('summary') ?? scan.overall_summary,
-      risk_categories: newCategories,
+      overall_summary:  get('summary') ?? scan.overall_summary,
+      risk_categories:  newCategories,
       document_checklist: newChecklist,
       broker_questions: newBrokerQs,
       supplier_questions: newSupplierQs,
-      next_actions: newNextActions,
+      next_actions:     newNextActions,
     };
   } catch (err: any) {
     console.error(`[translateScanToZh] Translation failed: ${err.message}`);
