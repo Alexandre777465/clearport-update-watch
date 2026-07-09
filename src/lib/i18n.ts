@@ -629,6 +629,32 @@ const DICT = {
   // ── Compliance clarification step ────────────────────────────────────────
   clarification_title: { en: "Product details for compliance screening", zh: "合规筛查产品详情" },
   clarification_subtitle: { en: "Answer any questions you can — we'll refine the results.", zh: "尽量回答以下问题，我们将优化筛查结果。" },
+  clarification_detail: {
+    en: "These questions let ClearPort determine exactly which regulations apply and what documentation you will need. Select \"I don't know\" to skip — ClearPort will state exactly what it cannot determine and why.",
+    zh: "这些问题帮助 ClearPort 精准判断适用法规及所需文件。如不确定，请选择「我不确定」——ClearPort 将明确说明无法确定的内容及原因。",
+  },
+  clarification_run: { en: "Run compliance scan →", zh: "运行合规扫描 →" },
+  clarification_skip: { en: "Skip", zh: "跳过" },
+  clarification_note: {
+    en: "When \"I don't know\" is selected, ClearPort will state exactly what it cannot determine and why — it will never substitute vague language.",
+    zh: "选择「我不确定」后，ClearPort 将明确说明无法确定的内容及原因，绝不以模糊语言代替。",
+  },
+  clarification_detected: {
+    en: "ClearPort detected regulatory requirements — you'll answer a few specific questions on the next screen.",
+    zh: "ClearPort 检测到适用法规要求——您将在下一步回答几个具体问题。",
+  },
+  // ── Module section labels ─────────────────────────────────────────────────
+  module_label_automotive:      { en: "Automotive / NHTSA",              zh: "汽车 / NHTSA" },
+  module_label_electronics:     { en: "Electronics / FCC",               zh: "电子设备 / FCC" },
+  module_label_batteries:       { en: "Batteries / DOT-PHMSA",           zh: "电池 / DOT-PHMSA" },
+  module_label_childrens:       { en: "Children's Products / CPSC",      zh: "儿童产品 / CPSC" },
+  module_label_textiles:        { en: "Textiles / FTC",                  zh: "纺织品 / FTC" },
+  module_label_cosmetics:       { en: "Cosmetics / FDA",                 zh: "化妆品 / FDA" },
+  module_label_food:            { en: "Food / FDA-FSIS",                 zh: "食品 / FDA-FSIS" },
+  module_label_medical_devices: { en: "Medical Devices / FDA",           zh: "医疗器械 / FDA" },
+  module_label_chemicals:       { en: "Chemicals / EPA",                 zh: "化学品 / EPA" },
+  module_label_furniture:       { en: "Furniture / EPA TSCA",            zh: "家具 / EPA TSCA" },
+  module_label_sports:          { en: "Sports & Outdoor Equipment",      zh: "运动/户外产品" },
 
   // ── Tariff / cost section ─────────────────────────────────────────────────
   known_customs_charges: { en: "Known customs charges:", zh: "已知关税费用：" },

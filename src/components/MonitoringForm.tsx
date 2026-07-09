@@ -943,11 +943,11 @@ export function MonitoringFormBlock({ headingAs = "h2" }: { headingAs?: "h1" | "
             <div className="rounded-md border border-primary/20 bg-primary/5 px-4 py-3">
               <p className="text-xs font-medium text-foreground">
                 <ScanSearch className="mr-1.5 inline h-3.5 w-3.5 text-primary" />
-                ClearPort detected regulatory requirements — you'll answer a few specific questions on the next screen.
+                {t(lang, "clarification_detected")}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {Array.from(new Set(dynamicQuestions.map((q) => q.module)))
-                  .map((m) => MODULE_LABELS[m])
+                  .map((m) => t(lang, `module_label_${m}` as DictKey))
                   .join(" · ")}
               </p>
             </div>
@@ -1485,19 +1485,6 @@ function ConfirmationView({
 
 // ── Module display labels ─────────────────────────────────────────────────────
 
-const MODULE_LABELS: Record<string, string> = {
-  automotive: "Automotive / NHTSA",
-  electronics: "Electronics / FCC",
-  batteries: "Batteries / DOT-PHMSA",
-  childrens: "Children's Products / CPSC",
-  textiles: "Textiles / FTC",
-  cosmetics: "Cosmetics / FDA",
-  food: "Food / FDA-FSIS",
-  medical_devices: "Medical Devices / FDA",
-  chemicals: "Chemicals / EPA",
-  furniture: "Furniture / EPA TSCA",
-};
-
 // ── Post-scan clarification step ─────────────────────────────────────────────
 // Shown after the scan completes when the verifier identifies one decisive missing
 // fact. Blocks the final report until the user answers (or skips).
@@ -1593,21 +1580,25 @@ function DynamicClarificationStep({
       <div>
         <h2 className="text-lg font-semibold">{t(lang, "clarification_title")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          These questions let ClearPort determine exactly which regulations apply and what documentation you will need. Select "I don't know" to skip — ClearPort will state exactly what it cannot determine and why.
+          {t(lang, "clarification_detail")}
         </p>
       </div>
 
       {Object.entries(moduleGroups).map(([module, qs]) => (
         <div key={module}>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {MODULE_LABELS[module] ?? module}
+            {t(lang, `module_label_${module}` as DictKey) || module}
           </p>
           <Card className="divide-y overflow-hidden p-0">
             {qs.map((q) => (
               <div key={q.key} className="px-4 py-4 space-y-2">
-                <p className="text-sm font-medium text-foreground">{q.question}</p>
-                {q.helpText && (
-                  <p className="text-xs text-muted-foreground">{q.helpText}</p>
+                <p className="text-sm font-medium text-foreground">
+                  {lang === "zh" ? (q.questionZh ?? q.question) : q.question}
+                </p>
+                {(lang === "zh" ? (q.helpTextZh ?? q.helpText) : q.helpText) && (
+                  <p className="text-xs text-muted-foreground">
+                    {lang === "zh" ? (q.helpTextZh ?? q.helpText) : q.helpText}
+                  </p>
                 )}
                 <RadioGroup
                   value={answers[q.key] ?? ""}
@@ -1624,7 +1615,7 @@ function DynamicClarificationStep({
                       } ${opt.value === "unknown" ? "opacity-70" : ""}`}
                     >
                       <RadioGroupItem value={opt.value} className="shrink-0" />
-                      {opt.label}
+                      {lang === "zh" ? (opt.labelZh ?? opt.label) : opt.label}
                     </label>
                   ))}
                 </RadioGroup>
@@ -1636,15 +1627,15 @@ function DynamicClarificationStep({
 
       <div className="flex gap-3">
         <Button onClick={onContinue} className="flex-1">
-          Run compliance scan →
+          {t(lang, "clarification_run")}
         </Button>
         <Button variant="outline" onClick={onSkip} className="shrink-0">
-          Skip
+          {t(lang, "clarification_skip")}
         </Button>
       </div>
 
       <p className="text-xs text-muted-foreground">
-        When "I don't know" is selected, ClearPort will state exactly what it cannot determine and why — it will never substitute vague language.
+        {t(lang, "clarification_note")}
       </p>
     </div>
   );
