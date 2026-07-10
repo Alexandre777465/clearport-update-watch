@@ -492,10 +492,13 @@ export function getQuestionsForProduct(
   // Map explicit false booleans to negative structured answers so that a user
   // unchecking "Electronic product" (etc.) immediately suppresses that module's
   // questions without waiting for a full scan round-trip.
+  // is_children is EXCLUDED: the checkbox is never exposed in the UI so false is
+  // always the default, never an explicit denial. Children's suppression comes from
+  // the age_range dynamic question answer.
   const attrOverrides: Record<string, string> = {};
   if (attrs.is_electronic  === false) attrOverrides['product_function']        = 'not_electronic';
   if (attrs.has_battery    === false) attrOverrides['battery_type']             = 'no_battery';
-  if (attrs.is_children    === false) attrOverrides['age_range']                = 'not_for_children';
+  // is_children === false intentionally NOT mapped — see comment above.
   if (attrs.is_textile     === false) attrOverrides['textile_type']             = 'not_textile';
   if (attrs.is_cosmetic    === false) attrOverrides['contains_otc_ingredient']  = 'not_cosmetic';
   if (attrs.is_food_contact === false) attrOverrides['food_contact_use']        = 'no';

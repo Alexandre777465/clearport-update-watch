@@ -1,6 +1,7 @@
 import type { ProductAttributes } from "./api";
 import type { DictKey } from "./i18n";
 import { extractFacts } from "./factEngine";
+import { normalizeProductTextForDetection } from "./chineseNormalization";
 
 export interface InferredAttribute {
   key: keyof ProductAttributes;
@@ -30,7 +31,7 @@ export function inferAttributes(
   name: string,
   description: string,
 ): InferredAttribute[] {
-  const text = `${name} ${description}`;
+  const text = normalizeProductTextForDetection(`${name} ${description}`);
   const facts = extractFacts('', text, {});
 
   return FACT_TO_ATTR

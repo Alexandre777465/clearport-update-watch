@@ -1164,11 +1164,24 @@ describe('Bug 5 — explicit false attrs suppress corresponding module', () => {
     expect(mods.has('batteries')).toBe(false);
   });
 
-  it('is_children=false suppresses childrens module', () => {
+  it('is_children=false does NOT suppress childrens module when text has children keywords', () => {
+    // is_children=false is the form default (checkbox never exposed in UI), not an explicit
+    // user denial. Text-based children detection must still work.
+    // Explicit denial comes from age_range structured answer, not from attrs.is_children=false.
     const mods = detectCategories(
       '',
       "children's toy sports equipment for kids under 12",
       { is_children: false },
+    );
+    expect(mods.has('childrens')).toBe(true);
+  });
+
+  it('is_children=false + explicit age_range=not_for_children suppresses childrens module', () => {
+    const mods = detectCategories(
+      '',
+      "children's toy sports equipment for kids under 12",
+      { is_children: false },
+      { age_range: 'not_for_children' },
     );
     expect(mods.has('childrens')).toBe(false);
   });

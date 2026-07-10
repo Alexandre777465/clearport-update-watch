@@ -27,11 +27,12 @@ function makeInput(
   htsDigits: string,
   productText: string,
   knownFacts: Record<string, string> = {},
+  attrs: ModuleInput['attrs'] = {},
 ): ModuleInput {
   return {
     htsDigits,
     productText: normalizeProductTextForDetection(productText),
-    attrs: {},
+    attrs,
     originCountry: 'China',
     importDate: '2026-07-09',
     knownFacts,
@@ -449,5 +450,113 @@ describe('Task 7: explicit positive Chinese child phrases activate children modu
   it('"面向儿童销售" activates childrens module', () => {
     const mods = activeModules(hts, '自行车头盔 面向儿童销售');
     expect(mods).toContain('childrens');
+  });
+});
+
+// ── Production-path integration test (attrs.is_children=false default) ────────
+// This is the EXACT scenario from the live bug report (commit 15eafa6).
+// The form always submits is_children=false by default (the UI checkbox is not
+// exposed). This must NOT block text-derived children's detection.
+
+describe('Production-path integration: Chinese children helmet with is_children=false default', () => {
+  // Exact product name and description from the live bug report
+  const hts = '6506103045';
+  const productName = '儿童自行车头盔 测试15eafa6';
+  const productDesc =
+    '儿童自行车头盔，用于休闲骑行，适用于5至12岁儿童。EPS泡沫缓冲层，聚碳酸酯外壳，可调节尼龙下巴带。' +
+    '面向儿童销售。无电子元件、无电池、无蓝牙、无灯光、无电机、非纺织服装、无化学处理、' +
+    '无抗菌或杀虫声明、非摩托车头盔。';
+  const combinedText = `${productName} ${productDesc}`;
+
+  it('normalized text contains positive child keywords', () => {
+    const n = normalize(combinedText);
+    expect(n).toContain('for children');
+    expect(n).toContain('children');
+  });
+
+  it('extractFacts returns intended_for_children=yes from normalized text', () => {
+    const n = normalize(combinedText);
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).toBe('yes');
+  });
+
+  it('childrens module activates despite is_children=false default attr', () => {
+    // Simulate the production scan path: attrs.is_children=false (form default)
+    const mods = activeModules(hts, combinedText);
+    expect(mods).toContain('childrens');
+    expect(mods).toContain('sports');
+  });
+
+  it('cpsia_cpc emitted with attrs.is_children=false (production scenario)', () => {
+    // knownFacts matches the user-submitted answers from the live bug report
+    const input = makeInput(hts, combinedText, {
+      sports_product_type: 'bicycle',
+      head_protection_type: 'bicycle_helmet',
+    }, { is_children: false });  // production default
+    const result = evaluateAllModules(input);
+    expect(findingIds(result)).toContain('cpsia_cpc');
+  });
+
+  it('cpsia_tracking_label emitted with attrs.is_children=false (production scenario)', () => {
+    const input = makeInput(hts, combinedText, {
+      sports_product_type: 'bicycle',
+      head_protection_type: 'bicycle_helmet',
+    }, { is_children: false });
+    const result = evaluateAllModules(input);
+    expect(findingIds(result)).toContain('cpsia_tracking_label');
+  });
+
+  it('cpsia_third_party_testing emitted with attrs.is_children=false', () => {
+    const input = makeInput(hts, combinedText, {
+      sports_product_type: 'bicycle',
+      head_protection_type: 'bicycle_helmet',
+    }, { is_children: false });
+    const result = evaluateAllModules(input);
+    expect(findingIds(result)).toContain('cpsia_third_party_testing');
+  });
+
+  it('sports_bicycle_helmet_cpsc_1203 emitted (HTS 6506 activates helmet standard)', () => {
+    const input = makeInput(hts, combinedText, {
+      sports_product_type: 'bicycle',
+      head_protection_type: 'bicycle_helmet',
+    }, { is_children: false });
+    const result = evaluateAllModules(input);
+    expect(findingIds(result)).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+
+  it('Part 1203 finding uses CPC language (not GCC) for Chinese children helmet', () => {
+    const input = makeInput(hts, combinedText, {
+      sports_product_type: 'bicycle',
+      head_protection_type: 'bicycle_helmet',
+    }, { is_children: false });
+    const result = evaluateAllModules(input);
+    const helmetFinding = result.findings.find((f) => f.id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(helmetFinding).toBeDefined();
+    expect(helmetFinding!.explanation).toContain("Children's Product Certificate (CPC)");
+    expect(helmetFinding!.explanation).not.toContain('General Conformity Certificate (GCC)');
+  });
+
+  it('adult Chinese helmet with is_children=false still shows GCC (no children keyword)', () => {
+    const adultInput = makeInput(hts, '成人自行车头盔 非电动 不含电池', {
+      sports_product_type: 'bicycle',
+    }, { is_children: false });
+    const result = evaluateAllModules(adultInput);
+    const helmetFinding = result.findings.find((f) => f.id === 'sports_bicycle_helmet_cpsc_1203');
+    // Adult text has no "children" keyword → isChildrensProduct=false → GCC
+    expect(helmetFinding?.explanation).not.toContain("Children's Product Certificate (CPC)");
+    expect(findingIds(result)).not.toContain('cpsia_cpc');
+    expect(findingIds(result)).not.toContain('cpsia_tracking_label');
+  });
+
+  it('explicit age_range=not_for_children still suppresses children docs', () => {
+    const input = makeInput(hts, combinedText, {
+      sports_product_type: 'bicycle',
+      age_range: 'not_for_children',  // explicit user denial via dynamic question
+    }, { is_children: false });
+    const result = evaluateAllModules(input);
+    expect(findingIds(result)).not.toContain('cpsia_cpc');
+    expect(findingIds(result)).not.toContain('cpsia_tracking_label');
+    const helmetFinding = result.findings.find((f) => f.id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(helmetFinding?.explanation).not.toContain("Children's Product Certificate (CPC)");
   });
 });

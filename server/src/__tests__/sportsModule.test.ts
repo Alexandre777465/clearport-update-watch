@@ -867,55 +867,55 @@ describe('Adult bicycle helmet (is_children=false, age_range=over_12) — no chi
   });
 });
 
-describe('Adult bicycle helmet (is_children=false only, no age_range knownFact) — no children\'s docs', () => {
-  // This is the specific live-system scenario: is_children=false in attrs but no explicit
-  // age_range structured answer. The is_children=false attr must be sufficient to suppress all
-  // children's-product documents.
+describe('Adult bicycle helmet (is_children=false, no age_range answer) — English adult text → no children docs', () => {
+  // is_children=false is the form default, never an explicit user denial.
+  // Children's suppression relies on the text not containing "children" keywords
+  // and no explicit age_range answer confirming children's.
+  // "adult bicycle helmet" text has no children keywords → no children's docs.
   const result = evaluateAllModules(moduleInput({
     htsDigits: '65061030',
     productText: 'adult bicycle helmet, polycarbonate shell, EPS foam liner',
     attrs: { is_children: false },
     knownFacts: {
       sports_product_type: 'bicycle_helmet',
-      // age_range deliberately omitted — only attrs.is_children=false is set
+      // age_range deliberately omitted — text has no children signal
     },
   }));
 
-  it('no CPC docSpec when only is_children=false (no age_range answer)', () => {
+  it('no CPC docSpec (adult English text, no children keyword)', () => {
     expect(result.docSpecs.filter((d) => d.document.includes('Children\'s Product Certificate'))).toHaveLength(0);
   });
 
-  it('no CPSIA third-party test report docSpec when only is_children=false', () => {
+  it('no CPSIA third-party test report docSpec', () => {
     expect(result.docSpecs.find((d) => d.document.includes('CPSIA'))).toBeUndefined();
   });
 
-  it('no tracking label docSpec when only is_children=false', () => {
+  it('no tracking label docSpec', () => {
     expect(result.docSpecs.find((d) => d.finding_id === 'cpsia_tracking_label')).toBeUndefined();
   });
 });
 
-describe('Adult bicycle helmet: is_children=false overrides stale age_3_to_12 answer', () => {
-  // Defensive test: if a stale knownFact age_range=age_3_to_12 exists but attrs.is_children=false,
-  // the attr must win and suppress all children's documents.
+describe('Adult bicycle helmet: explicit age_range=over_12 suppresses children docs', () => {
+  // is_children=false is always the default; explicit suppression comes from age_range answer.
   const result = evaluateAllModules(moduleInput({
     htsDigits: '65061030',
-    productText: 'adult bicycle helmet, polycarbonate shell',
+    productText: 'bicycle helmet, polycarbonate shell',
     attrs: { is_children: false },
     knownFacts: {
       sports_product_type: 'bicycle_helmet',
-      age_range: 'age_3_to_12',  // stale / incorrect answer
+      age_range: 'over_12',  // explicit user answer — this is the correct denial mechanism
     },
   }));
 
-  it('is_children=false overrides stale age_3_to_12: no CPC docSpec', () => {
+  it('age_range=over_12 suppresses CPC docSpec', () => {
     expect(result.docSpecs.filter((d) => d.document.includes('Children\'s Product Certificate'))).toHaveLength(0);
   });
 
-  it('is_children=false overrides stale age_3_to_12: no CPSIA third-party docSpec', () => {
+  it('age_range=over_12 suppresses CPSIA third-party docSpec', () => {
     expect(result.docSpecs.find((d) => d.document.includes('CPSIA'))).toBeUndefined();
   });
 
-  it('is_children=false overrides stale age_3_to_12: Part 1203 docSpec uses GCC not CPC', () => {
+  it('age_range=over_12: Part 1203 docSpec uses GCC not CPC', () => {
     const doc = result.docSpecs.find((d) => d.finding_id === 'sports_bicycle_helmet_cpsc_1203');
     expect(doc?.document).toContain('GCC');
     expect(doc?.document).not.toContain('CPC');

@@ -36,14 +36,18 @@ export interface ProductBooleans {
 // fact engine at inference level (confidence < explicit sources).
 function attrsToAnswers(attrs: ProductBooleans): Record<string, string> {
   const out: Record<string, string> = {};
-  // Positive attrs activate the module; negative attrs suppress it so text/HTS
-  // detection can't override an explicit user denial (e.g. unchecking Electronic).
+  // Positive attrs activate the module; negative attrs suppress text/HTS detection
+  // so an explicit user denial (e.g. unchecking "Electronic") wins.
+  // is_children is EXCLUDED from the negative mapping: the UI checkbox is never
+  // exposed for user unchecking (see MonitoringForm.tsx "toggleAttr not exposed in UI"),
+  // so is_children=false is always the form default — never an explicit user denial.
+  // Children's suppression must come from an explicit age_range dynamic question answer.
   if (attrs.has_battery    === true)  out['battery_type']            = 'other_chemistry';
   if (attrs.has_battery    === false) out['battery_type']            = 'no_battery';
   if (attrs.is_electronic  === true)  out['product_function']        = 'other_no_radio';
   if (attrs.is_electronic  === false) out['product_function']        = 'not_electronic';
   if (attrs.is_children    === true)  out['age_range']               = 'age_3_to_12';
-  if (attrs.is_children    === false) out['age_range']               = 'not_for_children';
+  // is_children === false intentionally NOT mapped — see comment above.
   if (attrs.is_textile     === true)  out['textile_type']            = 'yes_textile';
   if (attrs.is_textile     === false) out['textile_type']            = 'not_textile';
   if (attrs.is_cosmetic    === true)  out['contains_otc_ingredient'] = 'no';

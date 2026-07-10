@@ -87,9 +87,9 @@ export const childrensModule: RegulatoryModule = {
     const hasCoating  = knownFacts['contains_paint_or_surface_coating'];
     const isChildren  = attrs.is_children === true;
 
-    // attrs.is_children === false is a definitive "not a children's product" signal.
-    // It overrides any age_range knownFact (which may be stale from a prior answer).
-    const notChildrenOverride = attrs.is_children === false;
+    // attrs.is_children=false is the form default, never an explicit user denial.
+    // The UI checkbox ("is_children") is not exposed for unchecking (see MonitoringForm.tsx).
+    // Explicit denial must come from the age_range dynamic question answer.
 
     // ── Toy classification ────────────────────────────────────────────────────
     // Positive signals (any one is sufficient when not denied):
@@ -115,18 +115,23 @@ export const childrensModule: RegulatoryModule = {
     const childrenTextFact = extractFacts(input.htsDigits, productText, input.knownFacts)
       .intended_for_children;
 
-    // "children's product confirmed" — only when not overridden by is_children=false
+    // Explicit denial: only from dynamic question answer, not from the attrs default.
+    const childrenExplicitlyDenied =
+      ageRange === 'over_12' ||
+      ageRange === 'not_for_children' ||
+      ageRange === 'adults_only' ||
+      ageRange === 'not_applicable';
+
+    // "children's product confirmed"
     const childrenConfirmed =
-      !notChildrenOverride &&
+      !childrenExplicitlyDenied &&
       (isChildren ||
         childrenTextFact?.value === 'yes' ||
         ageRange === 'under_3' ||
         ageRange === 'age_3_to_12');
 
-    // "definitely not children" — covers all explicit adult/non-children age values
-    // and the authoritative is_children=false attribute
+    // "definitely not children" — explicit age_range denial from dynamic question
     const childrenDefinitelyNot =
-      notChildrenOverride ||
       ageRange === 'over_12' ||
       ageRange === 'not_for_children' ||
       ageRange === 'adults_only' ||

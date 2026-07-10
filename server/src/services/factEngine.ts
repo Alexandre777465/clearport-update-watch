@@ -350,7 +350,10 @@ const HTS_RULES: readonly HtsRule[] = [
                '8533','8534','8535','8536','8537','8538','8539','8540','8541',
                '8542','8543','8544','8545','8546','8547','8548','9009','9013'],
                                                          fact: 'contains_electronics', value: 'yes' },
-  { prefixes: ['9501','9502','9503','9504','9505','9506','9507','9508'],
+  // 9501–9505 are children-specific HTS headings (wheeled riding toys, dolls,
+  // toys/puzzles, video games, festive articles). 9506–9508 are general sports
+  // and outdoor equipment — not children-specific — so excluded here.
+  { prefixes: ['9501','9502','9503','9504','9505'],
                                                          fact: 'intended_for_children', value: 'yes' },
   { prefixes: ['3303','3304','3305','3306','3307','3401'], fact: 'contains_cosmetic',  value: 'yes' },
   { prefixes: ['9018','9019','9020','9021','9022'],       fact: 'medical_intended_use', value: 'yes' },

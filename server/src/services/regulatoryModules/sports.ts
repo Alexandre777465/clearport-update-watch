@@ -117,17 +117,22 @@ export const sportsModule: RegulatoryModule = {
     const isBicycleHelmet = hasBicycleHelmet || isBicycleHelmetOnly;
 
     // Children's product flag — used to choose CPC vs GCC for Part 1203.
-    // attrs.is_children === false is a definitive override: even if text or age_range
-    // signals "children", an explicit structured "not children" attribute wins.
+    // attrs.is_children=false is the form default, never an explicit user denial, so
+    // it does NOT block text or knownFacts detection. Explicit denial comes from the
+    // age_range dynamic question answer (not_for_children / over_12 / etc.).
     const childrenTextFact = extractFacts(input.htsDigits, input.productText, input.knownFacts)
       .intended_for_children;
+    const childrenExplicitlyDenied =
+      knownFacts['age_range'] === 'not_for_children' ||
+      knownFacts['age_range'] === 'over_12' ||
+      knownFacts['age_range'] === 'adults_only' ||
+      knownFacts['age_range'] === 'not_applicable';
     const isChildrensProduct =
-      input.attrs.is_children === true ||
-      (input.attrs.is_children !== false && (
-        childrenTextFact?.value === 'yes' ||
-        knownFacts['age_range'] === 'under_3' ||
-        knownFacts['age_range'] === 'age_3_to_12'
-      ));
+      !childrenExplicitlyDenied &&
+      (input.attrs.is_children === true ||
+       childrenTextFact?.value === 'yes' ||
+       knownFacts['age_range'] === 'under_3' ||
+       knownFacts['age_range'] === 'age_3_to_12');
 
     if (isNotSports) {
       return { findings: [], coverageDomains: [], docSpecs: [], questions };
