@@ -20,12 +20,26 @@ const ZH_TO_EN: ReadonlyArray<[string, string]> = [
   ['安全帽',           'safety helmet'],
   ['头部保护',          'head protection'],
   // ── Children / adults ─────────────────────────────────────────────────────
-  ['儿童产品',          'children child product'],
-  ['婴儿',             'infant baby children child'],
-  ['幼儿',             'infant toddler children child'],
-  ['儿童',             'children child'],
-  ['小孩',             'children child'],
-  ['成人',             'adult'],
+  // Negative child phrases before positive substring matches.
+  // factEngine precedence (negative > positive) resolves the conflict correctly.
+  ['不是儿童产品',       'not a children product'],
+  ['不面向儿童销售',     'not for children'],
+  ['不面向儿童',        'not for children'],
+  ['不适用于儿童',      'not for children not intended for children'],
+  ['仅适用于成人',      'adults only for adults only'],
+  ['成人专用',         'adults only'],
+  ['仅成人使用',       'adults only'],
+  // Positive child phrases
+  ['面向儿童销售',      'for children sold to children'],
+  ['适用于儿童',       'for children intended for children'],
+  ['12岁以下',         'for children under 12 children'],
+  ['适用于5至12岁儿童', 'for children ages 5 to 12 children'],
+  ['儿童产品',         'children child product'],
+  ['婴儿',            'infant baby children child'],
+  ['幼儿',            'infant toddler children child'],
+  ['儿童',            'children child'],
+  ['小孩',            'children child'],
+  ['成人',            'adult'],
   // ── Other sports equipment ─────────────────────────────────────────────────
   ['踏板车',            'scooter'],
   ['滑板车',            'kick scooter'],

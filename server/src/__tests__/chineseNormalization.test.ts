@@ -276,3 +276,178 @@ describe('scenario: Chinese adult non-electric product — no children activatio
     expect(mods).not.toContain('childrens');
   });
 });
+
+// ── Task 7: sports.ts isChildrensProduct fix ──────────────────────────────────
+// Before the fix, sports.ts only checked attrs.is_children and knownFacts
+// age_range — it ignored the factEngine text-derived intended_for_children fact.
+// These tests verify that Chinese children's text now produces CPC (not GCC)
+// from the sports module even without structured age_range answers.
+
+describe('Task 7: Chinese children bicycle helmet — CPC from text alone', () => {
+  const hts  = '6506103045';
+  // Full Chinese description matching the user's reported test case
+  const text = '儿童自行车头盔 适用于5至12岁儿童 CPSC认证 符合16 CFR Part 1203标准';
+
+  it('extracts intended_for_children=yes from Chinese text', () => {
+    const n = normalize(text);
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).toBe('yes');
+  });
+
+  it('activates both sports and childrens modules', () => {
+    const mods = activeModules(hts, text);
+    expect(mods).toContain('sports');
+    expect(mods).toContain('childrens');
+  });
+
+  it('sports module emits CPC (not GCC) when children text detected — core fix', () => {
+    // No structured age answer — sports.ts must derive isChildrensProduct from text
+    const input = makeInput(hts, text, {});
+    // Simulate user answering bicycle_helmet in the dynamic question flow
+    const inputWithAnswer: ModuleInput = {
+      ...input,
+      knownFacts: { ...input.knownFacts, sports_product_type: 'bicycle_helmet' },
+    };
+    const result = evaluateAllModules(inputWithAnswer);
+    const helmetFinding = result.findings.find((f) => f.id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(helmetFinding).toBeDefined();
+    expect(helmetFinding!.explanation).toContain("Children's Product Certificate (CPC)");
+    expect(helmetFinding!.explanation).not.toContain('General Conformity Certificate (GCC)');
+  });
+
+  it('childrens module emits cpsia_cpc finding', () => {
+    const input = makeInput(hts, text, { sports_product_type: 'bicycle_helmet' });
+    const result = evaluateAllModules(input);
+    const ids = findingIds(result);
+    expect(ids).toContain('cpsia_cpc');
+  });
+
+  it('childrens module emits cpsia_tracking_label finding', () => {
+    const input = makeInput(hts, text, { sports_product_type: 'bicycle_helmet' });
+    const result = evaluateAllModules(input);
+    const ids = findingIds(result);
+    expect(ids).toContain('cpsia_tracking_label');
+  });
+
+  it('childrens module emits cpsia_third_party_testing finding', () => {
+    const input = makeInput(hts, text, { sports_product_type: 'bicycle_helmet' });
+    const result = evaluateAllModules(input);
+    const ids = findingIds(result);
+    expect(ids).toContain('cpsia_third_party_testing');
+  });
+
+  it('sports module emits sports_bicycle_helmet_cpsc_1203 finding', () => {
+    const input = makeInput(hts, text, { sports_product_type: 'bicycle_helmet' });
+    const result = evaluateAllModules(input);
+    const ids = findingIds(result);
+    expect(ids).toContain('sports_bicycle_helmet_cpsc_1203');
+  });
+});
+
+// ── Task 7: Chinese adult bicycle helmet — still no CPC ───────────────────────
+
+describe('Task 7: Chinese adult bicycle helmet — no CPC after fix', () => {
+  const hts  = '6506103045';
+  const text = '成人自行车头盔 非电动 不含电池 不含电子元件 适合成人骑行';
+
+  it('does NOT extract intended_for_children=yes', () => {
+    const n = normalize(text);
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).not.toBe('yes');
+  });
+
+  it('does NOT activate childrens module', () => {
+    const mods = activeModules(hts, text);
+    expect(mods).not.toContain('childrens');
+  });
+
+  it('sports module emits GCC (not CPC) for adult helmet', () => {
+    const input = makeInput(hts, text, { sports_product_type: 'bicycle_helmet' });
+    const result = evaluateAllModules(input);
+    const helmetFinding = result.findings.find((f) => f.id === 'sports_bicycle_helmet_cpsc_1203');
+    expect(helmetFinding).toBeDefined();
+    expect(helmetFinding!.explanation).not.toContain("Children's Product Certificate (CPC)");
+  });
+
+  it('does NOT produce cpsia_cpc finding', () => {
+    const input = makeInput(hts, text, { sports_product_type: 'bicycle_helmet' });
+    const result = evaluateAllModules(input);
+    expect(findingIds(result)).not.toContain('cpsia_cpc');
+  });
+
+  it('does NOT produce cpsia_tracking_label finding', () => {
+    const input = makeInput(hts, text, { sports_product_type: 'bicycle_helmet' });
+    const result = evaluateAllModules(input);
+    expect(findingIds(result)).not.toContain('cpsia_tracking_label');
+  });
+});
+
+// ── Task 7: Negative Chinese child phrases ────────────────────────────────────
+
+describe('Task 7: negative Chinese child phrases override positive substrings', () => {
+  const hts = '6506103045';
+
+  it('"不是儿童产品" normalizes to include "not a children"', () => {
+    const n = normalize('自行车头盔 不是儿童产品');
+    expect(n).toContain('not a children');
+    expect(n).toContain('children'); // substring still matched
+  });
+
+  it('"不是儿童产品" → intended_for_children NOT yes (negative wins)', () => {
+    const n = normalize('自行车头盔 不是儿童产品');
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).not.toBe('yes');
+  });
+
+  it('"不面向儿童销售" → intended_for_children NOT yes', () => {
+    const n = normalize('自行车头盔 不面向儿童销售');
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).not.toBe('yes');
+  });
+
+  it('"仅适用于成人" → intended_for_children NOT yes', () => {
+    const n = normalize('自行车头盔 仅适用于成人');
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).not.toBe('yes');
+  });
+
+  it('"成人专用" → intended_for_children NOT yes', () => {
+    const n = normalize('自行车头盔 成人专用');
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).not.toBe('yes');
+  });
+
+  it('"不是儿童产品" does NOT activate childrens module', () => {
+    const mods = activeModules(hts, '自行车头盔 不是儿童产品');
+    expect(mods).not.toContain('childrens');
+  });
+});
+
+// ── Task 7: Positive explicit Chinese child phrases ───────────────────────────
+
+describe('Task 7: explicit positive Chinese child phrases activate children module', () => {
+  const hts = '6506103045';
+
+  it('"面向儿童销售" → intended_for_children=yes', () => {
+    const n = normalize('自行车头盔 面向儿童销售');
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).toBe('yes');
+  });
+
+  it('"12岁以下" → intended_for_children=yes', () => {
+    const n = normalize('自行车头盔 12岁以下');
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).toBe('yes');
+  });
+
+  it('"适用于5至12岁儿童" → intended_for_children=yes', () => {
+    const n = normalize('自行车头盔 适用于5至12岁儿童');
+    const facts = extractFacts(hts, n);
+    expect(facts.intended_for_children.value).toBe('yes');
+  });
+
+  it('"面向儿童销售" activates childrens module', () => {
+    const mods = activeModules(hts, '自行车头盔 面向儿童销售');
+    expect(mods).toContain('childrens');
+  });
+});

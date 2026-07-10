@@ -13,6 +13,7 @@
 
 import type { RiskCategory, CoverageItem } from '../../types';
 import type { RegulatoryModule, ModuleInput, ModuleResult, DocSpec, DynamicQuestion } from './index';
+import { extractFacts } from '../factEngine';
 
 // ── Detection helpers ─────────────────────────────────────────────────────────
 
@@ -110,10 +111,15 @@ export const childrensModule: RegulatoryModule = {
         h.startsWith('9503') ||
         (TOY_TEXT_POSITIVE_RE.test(productText) && !TOY_TEXT_NEGATIVE_RE.test(productText)));
 
+    // Text-derived intended_for_children fact (from normalizeProductTextForDetection output)
+    const childrenTextFact = extractFacts(input.htsDigits, productText, input.knownFacts)
+      .intended_for_children;
+
     // "children's product confirmed" — only when not overridden by is_children=false
     const childrenConfirmed =
       !notChildrenOverride &&
       (isChildren ||
+        childrenTextFact?.value === 'yes' ||
         ageRange === 'under_3' ||
         ageRange === 'age_3_to_12');
 

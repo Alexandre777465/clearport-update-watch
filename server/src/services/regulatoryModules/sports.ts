@@ -32,6 +32,7 @@
 
 import type { RiskCategory, CoverageItem } from '../../types';
 import type { RegulatoryModule, ModuleInput, ModuleResult, DocSpec, DynamicQuestion } from './index';
+import { extractFacts } from '../factEngine';
 
 // ── Module ────────────────────────────────────────────────────────────────────
 
@@ -116,12 +117,17 @@ export const sportsModule: RegulatoryModule = {
     const isBicycleHelmet = hasBicycleHelmet || isBicycleHelmetOnly;
 
     // Children's product flag — used to choose CPC vs GCC for Part 1203.
-    // attrs.is_children === false is a definitive override: even if a stale age_range
-    // answer says 'age_3_to_12', an explicit "not children" attribute wins.
+    // attrs.is_children === false is a definitive override: even if text or age_range
+    // signals "children", an explicit structured "not children" attribute wins.
+    const childrenTextFact = extractFacts(input.htsDigits, input.productText, input.knownFacts)
+      .intended_for_children;
     const isChildrensProduct =
       input.attrs.is_children === true ||
-      (input.attrs.is_children !== false &&
-        (knownFacts['age_range'] === 'under_3' || knownFacts['age_range'] === 'age_3_to_12'));
+      (input.attrs.is_children !== false && (
+        childrenTextFact?.value === 'yes' ||
+        knownFacts['age_range'] === 'under_3' ||
+        knownFacts['age_range'] === 'age_3_to_12'
+      ));
 
     if (isNotSports) {
       return { findings: [], coverageDomains: [], docSpecs: [], questions };
