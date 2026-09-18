@@ -125,14 +125,18 @@ function checkScope(
 ): ScopeCheckResult {
   // HTS chapter (first 2 digits)
   if (cond.hts_chapters && cond.hts_chapters.length > 0) {
-    if (!facts.htsDigits) return { verdict: 'clarify', factKey: 'hts_code' };
+    if (!facts.htsDigits) {
+      return { verdict: 'clarify', factKey: facts.htsProvidedButInvalid ? 'hts_code_invalid' : 'hts_code' };
+    }
     const ch = parseInt(facts.htsDigits.slice(0, 2), 10);
     if (!cond.hts_chapters.includes(ch)) return { verdict: 'fail', isStructural: true };
   }
 
   // HTS heading (first 4 digits, as string)
   if (cond.hts_headings && cond.hts_headings.length > 0) {
-    if (!facts.htsDigits) return { verdict: 'clarify', factKey: 'hts_code' };
+    if (!facts.htsDigits) {
+      return { verdict: 'clarify', factKey: facts.htsProvidedButInvalid ? 'hts_code_invalid' : 'hts_code' };
+    }
     const hd = facts.htsDigits.slice(0, 4);
     if (!cond.hts_headings.includes(hd)) return { verdict: 'fail', isStructural: true };
   }
@@ -239,6 +243,11 @@ const CLARIFICATION_TEMPLATES: Record<string, ClarificationTemplate> = {
   hts_code: {
     missingInfo: 'HTS classification code',
     whyItMatters: (r) => `${r} applies only to specific HTS chapters — the rule may not apply to this product's classification`,
+    options: undefined,
+  },
+  hts_code_invalid: {
+    missingInfo: 'HTS code provided but format/code appears invalid',
+    whyItMatters: (r) => `${r} applies only to specific HTS chapters — please provide a valid 4–10 digit HTS code (e.g. 9503.00.8900)`,
     options: undefined,
   },
   product_description: {
@@ -493,6 +502,10 @@ export interface VerificationResult {
 export interface ProductFacts {
   /** Numeric HTS digits only, e.g. '4203218060'. */
   htsDigits?: string;
+  /** True when the user supplied a non-empty HTS value that could not be parsed
+   *  as a structurally valid HTS digit sequence (< 4 or > 10 significant digits).
+   *  Lets verifiers distinguish "code appears invalid" from "code not provided". */
+  htsProvidedButInvalid?: boolean;
   /** Combined product name + description for keyword matching. */
   productText?: string;
   /** Origin country, e.g. 'China', 'CN', 'Mexico'. Case-insensitive substring matched. */

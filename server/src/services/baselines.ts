@@ -664,7 +664,10 @@ const DOMAIN_REGISTRY: Array<{
       if (c.verification_status === 'official_unconfirmed')
         return { status: 'official_unconfirmed', note: 'HTS heading found; exact 10-digit line needed to confirm rate', missing: ['exact 10-digit HTS statistical line'] };
       if (hts.match_level === 'outage') return { status: 'source_unavailable', note: 'USITC HTS service temporarily unavailable' };
-      return { status: 'insufficient_info', note: 'HTS code not found in USITC database' };
+      // not_found: user provided a structurally valid code but USITC cannot resolve it.
+      // Use official_unconfirmed rather than insufficient_info — the code was provided;
+      // it just could not be verified against the official source.
+      return { status: 'official_unconfirmed', note: 'HTS code provided but not found in USITC database — verify against hts.usitc.gov or confirm with your customs broker' };
     },
   },
   {

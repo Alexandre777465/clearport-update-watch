@@ -2,12 +2,23 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/client';
 import type { AuthedRequest } from '../middleware/auth';
+import { normalizeHts, formatHts } from '../services/htsBaseline';
 
 export const htsCodesRouter = Router();
 
 const HtsCodeSchema = z.object({
-  hts_code: z.string().regex(/^\d{4}(\.\d{2}(\.\d{2,4})?)?$/, {
-    message: 'HTS code must be in format XXXX, XXXX.XX, or XXXX.XX.XXXX',
+  // Accept any separator variant (dots, spaces, hyphens, bare digits) and
+  // normalize to canonical dotted form: "9503 00 8900" → "9503.00.8900".
+  hts_code: z.string().transform((val, ctx) => {
+    const digits = normalizeHts(val);
+    if (digits.length < 4 || digits.length > 10) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'HTS code must contain 4–10 digits (e.g. 9503.00.8900, 9503 00 8900, or 9503008900)',
+      });
+      return z.NEVER;
+    }
+    return formatHts(digits);
   }),
   description: z.string().optional(),
 });

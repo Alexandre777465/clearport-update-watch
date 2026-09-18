@@ -14,6 +14,7 @@ import { generateRiskScan, translateScanToZh } from '../services/riskScanner';
 import { htsCodesRelated } from '../services/matchingEngine';
 import { evaluateBaselines } from '../services/baselines';
 import { sendWatchlistConfirmation } from '../services/emailService';
+import { normalizeHts, formatHts } from '../services/htsBaseline';
 
 // Email is only truthfully "active" when a Resend key is present AND alerts
 // are enabled. The frontend uses this to avoid promising emails it can't send.
@@ -69,7 +70,16 @@ router.post('/', async (req, res) => {
   const data = parsed.data;
   const email = data.email.toLowerCase().trim();
   const productName = data.product_name.trim();
-  const htsCode = data.hts_code?.trim() || null;
+  // Normalize HTS to canonical dotted form (e.g. "9503 00 8900" → "9503.00.8900").
+  // All separator variants (spaces, hyphens, dots, bare digits) are accepted.
+  // Structurally invalid inputs (non-null but < 4 or > 10 significant digits) are
+  // kept as-is so downstream can distinguish "invalid" from "not provided".
+  const htsRaw = data.hts_code?.trim() || null;
+  const htsDigitsRaw = htsRaw ? normalizeHts(htsRaw) : null;
+  const htsCode =
+    htsDigitsRaw && htsDigitsRaw.length >= 4 && htsDigitsRaw.length <= 10
+      ? formatHts(htsDigitsRaw)
+      : htsRaw;
   const origin = data.origin_country.trim();
 
   // ── Dedupe retries ──────────────────────────────────────────────────────────

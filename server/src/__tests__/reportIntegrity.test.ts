@@ -507,14 +507,17 @@ describe('10-digit HTS formatting and resolution', () => {
     expect(formatHts('61091000')).toBe('6109.10.00');
   });
 
-  test('formatHts handles 10-digit statistical lines (4 groups)', () => {
-    expect(formatHts('8708305020')).toBe('8708.30.50.20');
-    expect(formatHts('8708305060')).toBe('8708.30.50.60');
+  test('formatHts handles 10-digit statistical lines (3 groups, last group 4 digits)', () => {
+    expect(formatHts('8708305020')).toBe('8708.30.5020');
+    expect(formatHts('8708305060')).toBe('8708.30.5060');
   });
 
-  test('formatHts strips dots before formatting', () => {
-    expect(formatHts('8708.30.5020')).toBe('8708.30.50.20');
-    expect(formatHts('8708.30.50.20')).toBe('8708.30.50.20');
+  test('formatHts strips non-digit separators before formatting', () => {
+    // All separator variants produce the same 3-group display form
+    expect(formatHts('8708.30.5020')).toBe('8708.30.5020');
+    expect(formatHts('8708.30.50.20')).toBe('8708.30.5020');
+    expect(formatHts('8708 30 5020')).toBe('8708.30.5020');
+    expect(formatHts('8708-30-5020')).toBe('8708.30.5020');
   });
 
   test('8708.30.5020 resolves as exact — not downgraded to 8708.30.50', () => {
@@ -527,7 +530,7 @@ describe('10-digit HTS formatting and resolution', () => {
     expect(r.match_level).toBe('exact');
     // hts8 must preserve the 10-digit code, not truncate to 8.
     expect(r.hts8).toBe('8708305020');
-    expect(formatHts(r.hts8!)).toBe('8708.30.50.20');
+    expect(formatHts(r.hts8!)).toBe('8708.30.5020');
     expect(r.mfn_ad_valorem_pct).toBe(2.5);
   });
 
@@ -562,7 +565,7 @@ describe('10-digit HTS formatting and resolution', () => {
     expect(r.matched_htsno).toBe('8708.30.50.20'); // cites the statistical line, not the heading
     expect(r.description).toBe('Brake drums'); // description from child row
     expect(r.mfn_ad_valorem_pct).toBe(2.5);    // rate inherited from parent
-    expect(formatHts(r.hts8!)).toBe('8708.30.50.20');
+    expect(formatHts(r.hts8!)).toBe('8708.30.5020');
   });
 });
 
@@ -1051,7 +1054,7 @@ describe('HTS persistence: 8708.30.50.20 through the pipeline', () => {
     expect(hts.match_level).toBe('exact');
     expect(hts.mfn_ad_valorem_pct).toBe(2.5);
     // The cited HTS number must be the 10-digit statistical line, not the 8-digit parent
-    expect(formatHts(hts.hts8!)).toBe('8708.30.50.20');
+    expect(formatHts(hts.hts8!)).toBe('8708.30.5020');
     expect(hts.matched_htsno).toBe('8708.30.50.20');
     expect(hts.description).toBe('Brake drums');
   });

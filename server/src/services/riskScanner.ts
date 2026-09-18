@@ -259,6 +259,11 @@ CONFIDENCE LEVEL: "High" if HTS code provided and product is straightforward, "M
       transportMode: tmode,
       productFacts: {
         htsDigits: (entry.hts_code ?? '').replace(/[^0-9]/g, ''),
+        htsProvidedButInvalid: Boolean(
+          entry.hts_code &&
+            (entry.hts_code.replace(/[^0-9]/g, '').length < 4 ||
+              entry.hts_code.replace(/[^0-9]/g, '').length > 10),
+        ),
         productText: productText || undefined,
         originCountry: entry.origin_country,
         importDate: opts.importDate ?? new Date().toISOString().slice(0, 10),

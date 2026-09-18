@@ -69,7 +69,7 @@ export function matchDocumentToProduct(
 // HTS codes match if one is a prefix of the other at a dot boundary
 // e.g. "8471.30" matches "8471.30.0100" and vice-versa
 function htsMatch(a: string, b: string): boolean {
-  const norm = (s: string) => s.replace(/\./g, '');
+  const norm = (s: string) => s.replace(/[^0-9]/g, '');
   const na = norm(a);
   const nb = norm(b);
   const shorter = na.length <= nb.length ? na : nb;

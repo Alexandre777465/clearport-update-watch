@@ -2,15 +2,27 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/client';
 import type { AuthedRequest } from '../middleware/auth';
+import { normalizeHts, formatHts } from '../services/htsBaseline';
 
 export const productsRouter = Router();
+
+// Normalize a single HTS code to canonical dotted form; reject structurally invalid inputs.
+const htsCodeField = z.string().transform((val, ctx) => {
+  const digits = normalizeHts(val);
+  if (digits.length < 4 || digits.length > 10) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'HTS code must contain 4–10 digits (e.g. 9503.00.8900, 9503 00 8900, or 9503008900)',
+    });
+    return z.NEVER;
+  }
+  return formatHts(digits);
+});
 
 const ProductSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().optional(),
-  hts_codes: z.array(z.string().regex(/^\d{4}(\.\d{2}(\.\d{2,4})?)?$/, {
-    message: 'HTS code must be in format XXXX, XXXX.XX, or XXXX.XX.XXXX',
-  })).default([]),
+  hts_codes: z.array(htsCodeField).default([]),
   categories: z.array(z.string().min(1)).default([]),
   origin_countries: z.array(z.string().min(1)).default([]),
   destination_countries: z.array(z.string().min(1)).default([]),

@@ -61,15 +61,18 @@ function toDotted(digits: string): string {
   return parts.join('.');
 }
 
-// Format a normalized digit string (8 or 10 digits) as a dotted HTS code.
-// 8 digits → "XXXX.XX.XX"    (heading + subheading)
-// 10 digits → "XXXX.XX.XX.XX" (full statistical line)
+// Format a normalized digit string as a dotted HTS code for display.
+// 4 digits  → "XXXX"
+// 6 digits  → "XXXX.XX"
+// 7–10 dig  → "XXXX.XX.XXXX"  (last group carries all remaining digits)
+//
+// The 3-group form is the standard US display format (e.g. 9503.00.8900).
+// toDotted() uses the 4-group form required by the USITC API; these are separate.
 export function formatHts(raw: string): string {
   const n = (raw ?? '').replace(/[^0-9]/g, '');
-  if (n.length > 8) {
-    return [n.slice(0, 4), n.slice(4, 6), n.slice(6, 8), n.slice(8, 10)].filter(Boolean).join('.');
-  }
-  return [n.slice(0, 4), n.slice(4, 6), n.slice(6, 8)].filter(Boolean).join('.');
+  if (n.length <= 4) return n;
+  if (n.length <= 6) return `${n.slice(0, 4)}.${n.slice(4)}`;
+  return `${n.slice(0, 4)}.${n.slice(4, 6)}.${n.slice(6)}`;
 }
 
 function parseAdValorem(rate: string | null): number | null {
