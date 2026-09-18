@@ -433,6 +433,16 @@ const CLARIFICATION_TEMPLATES: Record<string, ClarificationTemplate> = {
       { value: 'no', label: 'No — solid wood only, metal, plastic, or no wood components' },
     ],
   },
+
+  contains_soft_plastic: {
+    missingInfo: 'Whether the product contains soft or flexible plastic (e.g. PVC, vinyl)',
+    whyItMatters: (r) => `${r} limits eight phthalates to ≤ 0.1 % (1,000 ppm) in any soft plastic component of a children\'s toy or childcare article`,
+    options: [
+      { value: 'yes',            label: 'Yes — contains PVC, vinyl, or other soft/flexible plastic' },
+      { value: 'no',             label: 'No — hard/rigid plastic or no plastic' },
+      { value: 'not_applicable', label: 'Not applicable / no plastic' },
+    ],
+  },
 };
 
 function buildClarificationQuestion(

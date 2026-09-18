@@ -81,6 +81,18 @@ export const childrensModule: RegulatoryModule = {
       ],
     });
 
+    questions.push({
+      key: 'contains_soft_plastic',
+      module: 'childrens',
+      question: 'Does the product contain soft or flexible plastic (e.g. PVC, vinyl)?',
+      options: [
+        { value: 'yes',            label: 'Yes — contains PVC, vinyl, or other soft/flexible plastic' },
+        { value: 'no',             label: 'No — hard/rigid plastic or no plastic' },
+        { value: 'not_applicable', label: 'Not applicable / no plastic' },
+        { value: 'unknown',        label: 'Unknown' },
+      ],
+    });
+
     // ── Derived facts ─────────────────────────────────────────────────────────
 
     const ageRange    = knownFacts['age_range'];
@@ -111,9 +123,10 @@ export const childrensModule: RegulatoryModule = {
         h.startsWith('9503') ||
         (TOY_TEXT_POSITIVE_RE.test(productText) && !TOY_TEXT_NEGATIVE_RE.test(productText)));
 
-    // Text-derived intended_for_children fact (from normalizeProductTextForDetection output)
-    const childrenTextFact = extractFacts(input.htsDigits, productText, input.knownFacts)
-      .intended_for_children;
+    // Text-derived facts
+    const derivedFacts = extractFacts(input.htsDigits, productText, input.knownFacts);
+    const childrenTextFact = derivedFacts.intended_for_children;
+    const softPlasticFact  = derivedFacts.contains_soft_plastic;
 
     // Explicit denial: only from dynamic question answer, not from the attrs default.
     const childrenExplicitlyDenied =
@@ -136,6 +149,23 @@ export const childrensModule: RegulatoryModule = {
       ageRange === 'not_for_children' ||
       ageRange === 'adults_only' ||
       ageRange === 'not_applicable';
+
+    // Soft-plastic / phthalate gates.
+    // Explicit answer 'no'/'not_applicable' or text-derived 'no' → denied.
+    // Explicit 'yes' or text-derived 'yes' (with no denial) → confirmed.
+    // All other states (including inference-only / unknown) → neither gate.
+    const softPlasticDenied =
+      knownFacts['contains_soft_plastic'] === 'no' ||
+      knownFacts['contains_soft_plastic'] === 'not_applicable' ||
+      softPlasticFact?.value === 'no';
+
+    // Inference-level text evidence ("inflatable" word alone) is not sufficient to confirm
+    // soft plastic — it keeps the finding at Medium so the user is asked to confirm.
+    // Only explicit_positive, hts_indication, or structured_answer confirm the fact.
+    const softPlasticConfirmed =
+      !softPlasticDenied &&
+      (knownFacts['contains_soft_plastic'] === 'yes' ||
+        (softPlasticFact?.value === 'yes' && softPlasticFact.source !== 'inference'));
 
     // ── Sources ───────────────────────────────────────────────────────────────
 
@@ -417,6 +447,98 @@ export const childrensModule: RegulatoryModule = {
           'The eFiling must reference the applicable rules, test laboratory, and CPC data.',
         doc_status: 'required_to_clear',
         finding_id: 'cpsia_cpc',
+      });
+    }
+
+    // ── Phthalate limits (CPSIA Section 108 / 16 CFR Part 1307) ─────────────
+    // Applies to soft/flexible plastic portions of children's toys and childcare articles.
+    // Eight phthalates (DEHP, DBP, BBP, DIBP, DINP, DCHP, DPENP, DHEXP) capped at 0.1 %.
+    // Decisive attributes: (a) intended for children and (b) contains soft plastic.
+    // Any unknown decisive attribute → "applicability needs confirmation" (Medium).
+
+    const phthalate_source = {
+      agency: 'CPSC',
+      name: '16 CFR Part 1307 -- Prohibition of Children\'s Toys and Child Care Articles Containing Specified Phthalates',
+      title: 'CPSIA Section 108 / 16 CFR Part 1307 -- Phthalate Limits',
+      cfr_citation: '16 CFR Part 1307',
+      last_verified_at: '2025-08-01',
+      url: 'https://www.cpsc.gov/Regulations-Laws--Standards/Rulemaking/Final-and-Proposed-Rules/Phthalates',
+      why_relevant:
+        'CPSIA Section 108 permanently prohibits concentrations of DEHP, DBP, BBP, DIBP, DINP, DCHP, DPENP, and DHEXP exceeding 0.1 % (1,000 ppm) in the soft plastic portions of children\'s toys and childcare articles.',
+    };
+
+    if (childrenDefinitelyNot) {
+      findings.push({
+        id: 'cpsia_phthalates',
+        category: 'CPSIA / 16 CFR Part 1307 -- Phthalate Limits',
+        level: 'N/A',
+        explanation: 'The phthalate limits under CPSIA Section 108 apply only to children\'s products. This product is not intended for children.',
+        action: 'No phthalate testing is required for this product.',
+        verification_status: 'not_applicable',
+        source: phthalate_source,
+      });
+    } else if (childrenConfirmed && softPlasticDenied) {
+      findings.push({
+        id: 'cpsia_phthalates',
+        category: 'CPSIA / 16 CFR Part 1307 -- Phthalate Limits',
+        level: 'N/A',
+        explanation: 'The product does not contain soft or flexible plastic, so the phthalate limits under 16 CFR Part 1307 do not apply.',
+        action: 'No phthalate testing is required because the product contains no soft/flexible plastic.',
+        verification_status: 'not_applicable',
+        source: phthalate_source,
+      });
+    } else if (childrenConfirmed && softPlasticConfirmed) {
+      findings.push({
+        id: 'cpsia_phthalates',
+        category: 'CPSIA / 16 CFR Part 1307 -- Phthalate Limits',
+        level: 'Critical',
+        explanation:
+          'This children\'s product contains soft/flexible plastic. CPSIA Section 108 (16 CFR Part 1307) permanently prohibits DEHP, DBP, BBP, DIBP, DINP, DCHP, DPENP, and DHEXP each at concentrations greater than 0.1 % (1,000 ppm) in any soft plastic component of a children\'s toy or childcare article.',
+        action:
+          'Obtain third-party phthalate test reports from the manufacturer covering all eight regulated phthalates in every soft plastic component. Results must confirm each phthalate is below 1,000 ppm.',
+        verification_status: 'verified_applicable',
+        applicability_conditions: 'Children\'s product confirmed; product contains soft/flexible plastic (PVC/vinyl).',
+        source: phthalate_source,
+      });
+
+      docSpecs.push({
+        document: 'Phthalate test report (16 CFR Part 1307 — all eight regulated phthalates)',
+        owner: 'supplier',
+        responsible_party: 'supplier',
+        reason:
+          'CPSIA Section 108 requires that soft plastic components in children\'s toys contain no more than 1,000 ppm of any regulated phthalate; a third-party test report is required before importation.',
+        doc_status: 'required_to_clear',
+        finding_id: 'cpsia_phthalates',
+      });
+    } else if (childrenConfirmed) {
+      // Children's product confirmed but soft-plastic status is unknown.
+      findings.push({
+        id: 'cpsia_phthalates',
+        category: 'CPSIA / 16 CFR Part 1307 -- Phthalate Limits',
+        level: 'Medium',
+        explanation:
+          'This appears to be a children\'s product. CPSIA Section 108 limits eight phthalates to ≤ 0.1 % in any soft/flexible plastic component of a children\'s toy or childcare article. Whether this product contains soft or flexible plastic has not been confirmed.',
+        action:
+          'Confirm whether the product contains any soft or flexible plastic (e.g. PVC, vinyl). If yes, obtain phthalate test reports covering all eight regulated phthalates (DEHP, DBP, BBP, DIBP, DINP, DCHP, DPENP, DHEXP).',
+        verification_status: 'insufficient_info',
+        missing_info:
+          'Whether the product contains soft/flexible plastic (PVC, vinyl, or similar) — if yes, phthalate testing under 16 CFR Part 1307 is required.',
+        source: phthalate_source,
+      });
+    } else {
+      // Both children status and soft-plastic status unknown.
+      findings.push({
+        id: 'cpsia_phthalates',
+        category: 'CPSIA / 16 CFR Part 1307 -- Phthalate Limits',
+        level: 'Low',
+        explanation:
+          'CPSIA Section 108 phthalate limits may apply if this is a children\'s product containing soft/flexible plastic. The intended age range and material composition have not been confirmed.',
+        action:
+          'Clarify the intended age range and whether the product contains soft or flexible plastic. If both conditions are met, phthalate testing under 16 CFR Part 1307 is required.',
+        verification_status: 'insufficient_info',
+        missing_info:
+          'Intended age range and whether the product contains soft/flexible plastic.',
+        source: phthalate_source,
       });
     }
 

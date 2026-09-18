@@ -45,7 +45,9 @@ export type FactKey =
   | 'climbing_or_fall_arrest'
   | 'inflatable'
   | 'intended_for_water'
-  | 'protective_equipment';
+  | 'protective_equipment'
+  // ── Material composition ─────────────────────────────────────────────────
+  | 'contains_soft_plastic';
 
 export const ALL_FACT_KEYS: readonly FactKey[] = [
   'contains_battery',
@@ -69,6 +71,7 @@ export const ALL_FACT_KEYS: readonly FactKey[] = [
   'inflatable',
   'intended_for_water',
   'protective_equipment',
+  'contains_soft_plastic',
 ];
 
 // ── Fact type ─────────────────────────────────────────────────────────────────
@@ -320,6 +323,15 @@ const TEXT_RULES: Readonly<Record<FactKey, TextRules>> = {
       /\bshin\s+guard\b|\bknee\s+(?:pad|guard)\b|\belbow\s+(?:pad|guard)\b|\bbody\s+armor\b|\bface\s+guard\b|\bmouthguard\b|\bprotective\s+(?:vest|padding|gear|equipment|cup)\b|\bimpact\s+(?:protection|absorbing|resistant)\b|\bsports?\s+protective\s+(?:gear|equipment)\b/i,
     inferenceRe: /\bpadding\b|\bprotective\b/i,
   },
+
+  // ── Material: soft / flexible plastic (PVC, vinyl) ────────────────────────
+  contains_soft_plastic: {
+    negativeRe:
+      /\bPVC[-\s]?free\b|\bno\s+PVC\b|\bnot\s+PVC\b|\bhard\s+(?:plastic|shell)\b|\brigid\s+plastic\b|\bABS\s+plastic\b/i,
+    positiveRe:
+      /\bPVC\b|\bpolyvinyl\s+chloride\b|\bvinyl\b|\bsoft\s+(?:plastic|PVC)\b|\bflexible\s+(?:PVC|plastic)\b|\bplasticized\b|\bplastisol\b|\bsqueeze\s+(?:toy|ball|ring)\b/i,
+    inferenceRe: /\binflatable\b/i,
+  },
 };
 
 // ── HTS rules ─────────────────────────────────────────────────────────────────
@@ -487,6 +499,10 @@ const ANSWER_RULES: Record<string, readonly AnswerRule[]> = {
   ],
   is_occupational: [
     { fact: 'load_bearing', value: 'yes', matchValues: ['yes_occupational', 'yes_recreational'] },
+  ],
+  contains_soft_plastic: [
+    { fact: 'contains_soft_plastic', value: 'yes', matchValues: ['yes'] },
+    { fact: 'contains_soft_plastic', value: 'no',  matchValues: ['no', 'not_applicable'] },
   ],
 };
 

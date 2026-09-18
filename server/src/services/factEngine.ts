@@ -45,7 +45,9 @@ export type FactKey =
   | 'climbing_or_fall_arrest'   // climbing / fall-arrest / rope-access equipment
   | 'inflatable'                // inflatable or air-bladder product
   | 'intended_for_water'        // used in or on water
-  | 'protective_equipment';     // sports impact / body-protection gear
+  | 'protective_equipment'      // sports impact / body-protection gear
+  // ── Material composition ─────────────────────────────────────────────────
+  | 'contains_soft_plastic';    // soft/flexible PVC or vinyl (gates phthalate rule)
 
 export const ALL_FACT_KEYS: readonly FactKey[] = [
   'contains_battery',
@@ -69,6 +71,7 @@ export const ALL_FACT_KEYS: readonly FactKey[] = [
   'inflatable',
   'intended_for_water',
   'protective_equipment',
+  'contains_soft_plastic',
 ];
 
 // ── Fact type ─────────────────────────────────────────────────────────────────
@@ -332,6 +335,20 @@ const TEXT_RULES: Readonly<Record<FactKey, TextRules>> = {
       /\bshin\s+guard\b|\bknee\s+(?:pad|guard)\b|\belbow\s+(?:pad|guard)\b|\bbody\s+armor\b|\bface\s+guard\b|\bmouthguard\b|\bprotective\s+(?:vest|padding|gear|equipment|cup)\b|\bimpact\s+(?:protection|absorbing|resistant)\b|\bsports?\s+protective\s+(?:gear|equipment)\b/i,
     inferenceRe: /\bpadding\b|\bprotective\b/i,
   },
+
+  // ── Material: soft / flexible plastic (PVC, vinyl) ────────────────────────
+  // Gates 16 CFR Part 1307 / CPSIA Section 108 phthalate limits in childrens.ts.
+  // positiveRe: product text explicitly names PVC, vinyl, or soft/flexible plastic.
+  // inferenceRe: "inflatable" — the vast majority of inflatable consumer products
+  //   use PVC; treated as inference (medium confidence) so unknown-material inflatables
+  //   trigger "applicability needs confirmation" rather than a confirmed finding.
+  contains_soft_plastic: {
+    negativeRe:
+      /\bPVC[-\s]?free\b|\bno\s+PVC\b|\bnot\s+PVC\b|\bhard\s+(?:plastic|shell)\b|\brigid\s+plastic\b|\bABS\s+plastic\b/i,
+    positiveRe:
+      /\bPVC\b|\bpolyvinyl\s+chloride\b|\bvinyl\b|\bsoft\s+(?:plastic|PVC)\b|\bflexible\s+(?:PVC|plastic)\b|\bplasticized\b|\bplastisol\b|\bsqueeze\s+(?:toy|ball|ring)\b/i,
+    inferenceRe: /\binflatable\b/i,
+  },
 };
 
 // ── HTS rules ─────────────────────────────────────────────────────────────────
@@ -511,6 +528,10 @@ const ANSWER_RULES: Record<string, readonly AnswerRule[]> = {
     // Fall-arrest equipment used in occupational settings → OSHA route
     // Consumer/recreational climbing stays in voluntary standards route
     { fact: 'load_bearing',         value: 'yes', matchValues: ['yes_occupational', 'yes_recreational'] },
+  ],
+  contains_soft_plastic: [
+    { fact: 'contains_soft_plastic', value: 'yes', matchValues: ['yes'] },
+    { fact: 'contains_soft_plastic', value: 'no',  matchValues: ['no', 'not_applicable'] },
   ],
 };
 
