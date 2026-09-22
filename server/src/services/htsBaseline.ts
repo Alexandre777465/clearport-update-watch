@@ -293,14 +293,57 @@ export async function lookupHtsBaseline(rawHts: string): Promise<HtsLookupResult
   try {
     if (requested.length === 10) {
       // Fetch parent 8-digit row (for rate) + statistical-suffix range (for child rows) in parallel.
+      // Track failures separately so an empty API response is not mistaken for a network outage.
+      let parentFailed = false;
+      let rangeFailed = false;
       const parent8 = toDotted(requested.slice(0, 8));
       const parentUrl = `${HTS_API}?from=${encodeURIComponent(parent8)}&to=${encodeURIComponent(parent8)}&format=JSON&styles=false`;
       const [parentRes, rangeRes] = await Promise.all([
-        axios.get(parentUrl, opts).then((r) => (Array.isArray(r.data) ? r.data : [])).catch(() => [] as any[]),
-        axios.get(rangeUrl, opts).then((r) => (Array.isArray(r.data) ? r.data : [])).catch(() => [] as any[]),
+        axios.get(parentUrl, opts).then((r) => (Array.isArray(r.data) ? r.data : [])).catch(() => { parentFailed = true; return [] as any[]; }),
+        axios.get(rangeUrl, opts).then((r) => (Array.isArray(r.data) ? r.data : [])).catch(() => { rangeFailed = true; return [] as any[]; }),
       ]);
       rows = [...parentRes, ...rangeRes];
-      if (rows.length === 0) rows = null; // both calls failed → outage
+
+      if (rows.length === 0) {
+        if (parentFailed && rangeFailed) {
+          rows = null; // both calls threw exceptions → true network outage
+        } else {
+          // API responded normally but the 8-digit parent derived from these digits is
+          // not present in the current USITC schedule (e.g. heading 9503 reorganised
+          // its 3rd group — 9503.00.89 does not exist; the rated parent is 9503.00.00).
+          // Widen the search to the full 6-digit subheading range as a fallback.
+          const sub6Dotted = toDotted(requested.slice(0, 6));
+          const subUrl = `${HTS_API}?from=${encodeURIComponent(`${sub6Dotted}.00`)}&to=${encodeURIComponent(`${sub6Dotted}.99`)}&format=JSON&styles=false`;
+          let subFailed = false;
+          const subRows: any[] = await axios.get(subUrl, opts)
+            .then((r) => (Array.isArray(r.data) ? r.data : []))
+            .catch(() => { subFailed = true; return []; });
+
+          if (subFailed) {
+            rows = null; // confirmed network outage
+          } else if (subRows.length > 0) {
+            // Resolve against the 6-digit prefix so the scoping filter matches correctly,
+            // then restore the original 10-digit requested code on the returned result.
+            const sub6 = requested.slice(0, 6);
+            const subResult = resolveHtsRows(sub6, subRows);
+            const result: HtsLookupResult = {
+              ...subResult,
+              requested,
+              source_url: htsQueryUrl(requested),
+              note: `Submitted code ${formatHts(requested)} was not found in the current USITC schedule; rate resolved from subheading ${formatHts(sub6)}.${subResult.note ? ` ${subResult.note}` : ''}`,
+            };
+            if (result.match_level === 'exact') {
+              await persist(result);
+              await logRefresh('hts', 'success', 1);
+            } else if (result.match_level !== 'outage') {
+              await logRefresh('hts', 'success', result.match_level === 'parent' || result.match_level === 'ambiguous' ? 1 : 0);
+            }
+            return result;
+          }
+          // subRows.length === 0: code is genuinely not found in USITC
+          rows = []; // resolveHtsRows([]) → not_found
+        }
+      }
     } else {
       const { data } = await axios.get(rangeUrl, opts);
       rows = Array.isArray(data) ? data : [];

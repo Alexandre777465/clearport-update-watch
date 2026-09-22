@@ -34,6 +34,7 @@ import {
   lookupBrakeDrumCvdRate,
 } from '../services/adcvdScanner';
 import { assembleBaselines, buildCoverageMatrix } from '../services/baselines';
+import { resolveHtsRows } from '../services/htsBaseline';
 import type { WatchlistEntry } from '../types';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -872,5 +873,123 @@ describe('buildCoverageMatrix — Section 301 not_found is not a regression for 
     const s301 = matrix.find((c) => c.domain_key === 'section_301');
     expect(s301).toBeDefined();
     expect(s301!.status).toBe('verified_applicable');
+  });
+});
+
+// ── Subheading fallback — resolveHtsRows with 6-digit prefix ──────────────────
+//
+// When lookupHtsBaseline cannot find the 8-digit parent (because USITC reorganised
+// the heading — e.g. 9503.00.89 does not exist; the real parent is 9503.00.00),
+// it queries the full subheading range and calls resolveHtsRows with the 6-digit
+// prefix so the scoping filter matches.  These tests verify that pure resolution
+// logic produces the correct 'parent' result.
+
+describe('resolveHtsRows — subheading fallback for reorganised heading 9503', () => {
+  // Representative subset of what USITC returns for from=9503.00.00&to=9503.00.99
+  const USITC_9503_ROWS = [
+    { htsno: '9503.00.00', description: 'Toys; puzzles of all kinds; reduced-scale models; other', general: 'Free', footnotes: [] },
+    { htsno: '9503.00.00.11', description: 'Stuffed toys, not children\'s 3 and under', general: '', footnotes: [] },
+    { htsno: '9503.00.00.13', description: 'Stuffed toys, children\'s 3 and under', general: '', footnotes: [] },
+    { htsno: '9503.00.00.71', description: 'Non-stuffed toys, children\'s 3 and under', general: '', footnotes: [] },
+    { htsno: '9503.00.00.73', description: 'Non-stuffed toys, children\'s 3 and under', general: '', footnotes: [] },
+    { htsno: '9503.00.00.90', description: 'Other', general: '', footnotes: [] },
+  ];
+
+  it('A-fallback: resolveHtsRows("950300", rows) → parent with one rated candidate (9503.00.00 = Free)', () => {
+    const result = resolveHtsRows('950300', USITC_9503_ROWS);
+    expect(result.match_level).toBe('parent');
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].htsno).toBe('9503.00.00');
+    expect(result.candidates[0].general).toBe('Free');
+  });
+
+  it('A-fallback: section301_ref is null — heading 9503.00 has no Chapter 99 footnote', () => {
+    const result = resolveHtsRows('950300', USITC_9503_ROWS);
+    expect(result.section301_ref).toBeNull();
+  });
+
+  it('A-fallback: mfn_text_rate is null on parent result (rate lives in candidates)', () => {
+    const result = resolveHtsRows('950300', USITC_9503_ROWS);
+    expect(result.mfn_text_rate).toBeNull();
+  });
+
+  it('A-fallback: resolveHtsRows("950300", []) → not_found (API found nothing at all)', () => {
+    const result = resolveHtsRows('950300', []);
+    expect(result.match_level).toBe('not_found');
+  });
+
+  it('A-fallback: resolveHtsRows("950300", null) → outage (API threw)', () => {
+    const result = resolveHtsRows('950300', null);
+    expect(result.match_level).toBe('outage');
+  });
+});
+
+// ── 9503.00.8900 (Charles case) — parent coverage-matrix result ───────────────
+//
+// After the subheading fallback, lookupHtsBaseline returns match_level='parent'
+// (not 'outage') for 9503.00.8900.  These tests verify that the coverage-matrix
+// domains produce the right downstream states: MFN=official_unconfirmed (not
+// source_unavailable) and Section 301=insufficient_info (not source_unavailable).
+
+describe('buildCoverageMatrix — 9503.00.8900 China→US with subheading-fallback parent result', () => {
+  const TOYS_ENTRY: WatchlistEntry = {
+    id: 'test-charles-1',
+    user_id: 'test-user',
+    product_name: 'Vinyl inflatable toy',
+    product_description: 'Vinyl inflatable children\'s toy, China origin',
+    hts_code: '9503.00.8900',
+    origin_country: 'China',
+    destination_country: 'US',
+    status: 'active',
+    is_children: true,
+    has_battery: false,
+    is_electronic: false,
+    is_textile: false,
+    is_cosmetic: false,
+    is_food_contact: false,
+    is_supplement: false,
+    created_at: '2026-09-01T00:00:00Z',
+    updated_at: '2026-09-01T00:00:00Z',
+  };
+
+  // This is the result lookupHtsBaseline now returns after the subheading fallback
+  const HTS_PARENT_9503: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'parent',
+    requested: '9503008900',
+    hts8: '95030000',
+    matched_htsno: '9503.00.00',
+    description: 'Toys; puzzles of all kinds',
+    mfn_text_rate: null,
+    mfn_ad_valorem_pct: null,
+    section301_ref: null,
+    candidates: [{ htsno: '9503.00.00', description: 'Toys; puzzles of all kinds', general: 'Free' }],
+    source_url: 'https://hts.usitc.gov/?query=9503.00.8900',
+    note: 'Submitted code 9503.00.8900 was not found in the current USITC schedule; rate resolved from subheading 9503.00.',
+  };
+
+  it('K: MFN domain is official_unconfirmed (NOT source_unavailable)', () => {
+    const cats = assembleBaselines(TOYS_ENTRY, null, HTS_PARENT_9503, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(TOYS_ENTRY, cats, [], HTS_PARENT_9503, '9503008900', []);
+    const mfn = matrix.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('official_unconfirmed');
+    expect(mfn!.status).not.toBe('source_unavailable');
+  });
+
+  it('K: Section 301 domain is insufficient_info (NOT source_unavailable)', () => {
+    const cats = assembleBaselines(TOYS_ENTRY, null, HTS_PARENT_9503, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(TOYS_ENTRY, cats, [], HTS_PARENT_9503, '9503008900', []);
+    const s301 = matrix.find((c) => c.domain_key === 'section_301');
+    expect(s301).toBeDefined();
+    expect(s301!.status).toBe('insufficient_info');
+    expect(s301!.status).not.toBe('source_unavailable');
+  });
+
+  it('K: Section 301 missing_facts references 10-digit HTS code (not "exact HTS code")', () => {
+    const cats = assembleBaselines(TOYS_ENTRY, null, HTS_PARENT_9503, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(TOYS_ENTRY, cats, [], HTS_PARENT_9503, '9503008900', []);
+    const s301 = matrix.find((c) => c.domain_key === 'section_301');
+    expect((s301!.missing_facts ?? []).some((f) => /10.digit|10-digit/i.test(f))).toBe(true);
+    expect(s301!.missing_facts ?? []).not.toContain('exact HTS code');
   });
 });
