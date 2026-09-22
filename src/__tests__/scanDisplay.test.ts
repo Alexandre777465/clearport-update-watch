@@ -829,3 +829,163 @@ describe("collectMissingFacts — raw internal key filtering", () => {
     expect(facts).toContain("Producer or manufacturer name");
   });
 });
+
+// ── HTS provided + lookup failed — must NOT produce "missing HTS code" ────────
+//
+// Root cause (Issue 3 follow-up): the Section 301 coverage domain resolver had
+// no branch for `not_found` HTS and fell through to the catch-all, which emitted
+// status: 'insufficient_info' + missing: ['exact HTS code'].  That caused:
+//   - "Cannot determine — missing: exact HTS code" in the cost table
+//   - "exact HTS code" in "Information still missing"
+// even when the user had provided a perfectly valid 10-digit HTS code.
+//
+// These tests verify the fixed behavior end-to-end through buildCostRows and
+// collectMissingFacts using a minimal synthetic scan that represents the
+// post-fix state from baselines.ts (official_unconfirmed, no missing_facts).
+
+/** Minimal scan fixture: China-origin, HTS provided and normalised, but USITC
+ *  could not resolve the code (official_unconfirmed, no missing_facts). */
+const HTS_PROVIDED_LOOKUP_FAILED_SCAN: ProductRiskScan = {
+  ...BOXING_GLOVES_SCAN,
+  hts_code: "9503.00.8900",
+  origin_country: "China",
+  risk_categories: [
+    // No hts_section301 category — lookup returned not_found so none was created
+    {
+      id: "hts_duty",
+      category: "Customs Duty (HTS code not found in USITC)",
+      level: "N/A" as const,
+      explanation: "HTS code 9503.00.8900 was provided but not found in the USITC HTS database.",
+      action: "Verify the HTS code against hts.usitc.gov.",
+      verification_status: "no_verified_source" as const,
+      verified_rate_pct: null,
+      source: {
+        agency: "USITC",
+        name: "Harmonized Tariff Schedule of the United States",
+        title: "HTS lookup — not found",
+        cfr_citation: "HTSUS",
+        last_verified_at: "2026-09-22",
+        url: "https://hts.usitc.gov/",
+        why_relevant: "Code was submitted but not resolved.",
+      },
+    },
+  ],
+  coverage_matrix: [
+    // mfn_duty: official_unconfirmed — code provided, not found
+    {
+      domain: "Customs Duty (MFN / General Rate)",
+      domain_key: "mfn_duty",
+      category: "tariff",
+      status: "official_unconfirmed",
+      note: "HTS code provided but not found in USITC database",
+      // No missing_facts — the code was provided
+    },
+    // section_301: official_unconfirmed — fixed state after the baselines.ts patch
+    {
+      domain: "Section 301 China Tariff (Chapter 99)",
+      domain_key: "section_301",
+      category: "tariff",
+      status: "official_unconfirmed",
+      note: "HTS code provided but not found in USITC database — Section 301 applicability cannot be verified",
+      // No missing_facts — the code was provided; this is a lookup failure, not a missing-input
+    },
+    { domain: "Customs Entry", domain_key: "customs_entry", category: "customs", status: "verified_applicable" },
+  ],
+  missing_facts: [],
+};
+
+/** Scan where HTS was genuinely never provided */
+const HTS_ABSENT_SCAN: ProductRiskScan = {
+  ...BOXING_GLOVES_SCAN,
+  hts_code: null as unknown as string,
+  coverage_matrix: [
+    {
+      domain: "Section 301 China Tariff (Chapter 99)",
+      domain_key: "section_301",
+      category: "tariff",
+      status: "insufficient_info",
+      note: "HTS code required to screen Section 301 footnotes",
+      missing_facts: ["exact HTS code"],
+    },
+    { domain: "Customs Entry", domain_key: "customs_entry", category: "customs", status: "verified_applicable" },
+  ],
+  missing_facts: ["exact HTS code"],
+};
+
+/** Scan where HTS was provided but is syntactically invalid */
+const HTS_INVALID_SCAN: ProductRiskScan = {
+  ...BOXING_GLOVES_SCAN,
+  hts_code: "950",  // only 3 digits — invalid
+  coverage_matrix: [
+    {
+      domain: "Section 301 China Tariff (Chapter 99)",
+      domain_key: "section_301",
+      category: "tariff",
+      status: "insufficient_info",
+      note: "HTS code provided but format/code appears invalid",
+      missing_facts: ["HTS code provided but format/code appears invalid"],
+    },
+    { domain: "Customs Entry", domain_key: "customs_entry", category: "customs", status: "verified_applicable" },
+  ],
+  missing_facts: [],
+};
+
+describe("HTS provided + lookup failed — collectMissingFacts must NOT include 'exact HTS code'", () => {
+  it("A: 9503008900 normalised to 9503.00.8900 — official_unconfirmed section_301 has no missing_facts", () => {
+    const s301 = HTS_PROVIDED_LOOKUP_FAILED_SCAN.coverage_matrix!.find(
+      (c) => c.domain_key === "section_301",
+    );
+    expect(s301).toBeDefined();
+    expect(s301!.status).toBe("official_unconfirmed");
+    expect(s301!.missing_facts ?? []).toHaveLength(0);
+  });
+
+  it("B: 9503.00.8900 provided — collectMissingFacts does NOT include 'exact HTS code'", () => {
+    const facts = collectMissingFacts(HTS_PROVIDED_LOOKUP_FAILED_SCAN);
+    expect(facts).not.toContain("exact HTS code");
+    expect(facts.some((f) => /exact hts/i.test(f))).toBe(false);
+  });
+
+  it("C: valid provided HTS + failed lookup — 'exact HTS code' not in missing facts", () => {
+    const facts = collectMissingFacts(HTS_PROVIDED_LOOKUP_FAILED_SCAN);
+    // No "missing: HTS" string of any kind should appear
+    expect(facts.every((f) => !/\bhts\b/i.test(f))).toBe(true);
+  });
+
+  it("D: genuinely absent HTS DOES generate missing-HTS entry in collectMissingFacts", () => {
+    const facts = collectMissingFacts(HTS_ABSENT_SCAN);
+    expect(facts.some((f) => /exact hts/i.test(f))).toBe(true);
+  });
+
+  it("E: invalid supplied HTS stays distinct from absent HTS in coverage status", () => {
+    const invalidS301 = HTS_INVALID_SCAN.coverage_matrix!.find((c) => c.domain_key === "section_301");
+    const absentS301  = HTS_ABSENT_SCAN.coverage_matrix!.find((c) => c.domain_key === "section_301");
+    // Both are insufficient_info in this fixture, but the note/missing_facts differ
+    expect(invalidS301!.note).not.toBe(absentS301!.note);
+    // Invalid: missing_facts contains the "format appears invalid" message, not just "exact HTS code"
+    expect(invalidS301!.missing_facts?.[0]).toContain("invalid");
+  });
+});
+
+describe("HTS provided + lookup failed — buildCostRows renders lookup-failure, NOT 'missing HTS code'", () => {
+  const rows = buildCostRows(HTS_PROVIDED_LOOKUP_FAILED_SCAN, "en");
+
+  it("Section 301 row answer does NOT say 'missing: exact HTS code'", () => {
+    const s301 = rows.find((r) => r.coverageItem.domain_key === "section_301");
+    expect(s301).toBeDefined();
+    expect(s301!.answer).not.toContain("missing: exact HTS code");
+    expect(s301!.answer).not.toContain("exact HTS code required");
+  });
+
+  it("Section 301 row answer communicates a lookup failure, not a missing input", () => {
+    const s301 = rows.find((r) => r.coverageItem.domain_key === "section_301");
+    // The answer must reference a lookup/verification failure, not a missing code
+    expect(s301!.answer.toLowerCase()).toMatch(/cannot determine|lookup failed|not found|unverified/);
+  });
+
+  it("MFN duty row answer does NOT say 'HTS code required'", () => {
+    const mfn = rows.find((r) => r.coverageItem.domain_key === "mfn_duty");
+    expect(mfn).toBeDefined();
+    expect(mfn!.answer).not.toContain("HTS code required");
+  });
+});

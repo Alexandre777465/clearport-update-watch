@@ -121,12 +121,16 @@ export function buildCostRows(scan: ProductRiskScan, lang: Lang): CostRow[] {
         const missing = c.missing_facts?.join(", ") ?? "exact HTS code";
         rows.push({ label: t(lang, "imp_costs_s301"), answer: `Cannot determine — missing: ${missing}`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
       } else {
-        // official_unconfirmed — rate may still be known from the category
+        // official_unconfirmed / source_unavailable — rate may still be known from the category
         if (ratePct != null) {
           const ref = cat?.source?.cfr_citation ?? "";
           rows.push({ label: t(lang, "imp_costs_s301"), answer: `Applies — +${ratePct}%${ref ? ` — ${ref}` : ""}`, rateText, ratePct, status: c.status, coverageItem: c });
+        } else if (c.status === "source_unavailable") {
+          rows.push({ label: t(lang, "imp_costs_s301"), answer: "Cannot determine — tariff source temporarily unavailable", rateText: null, ratePct: null, status: c.status, coverageItem: c });
         } else {
-          rows.push({ label: t(lang, "imp_costs_s301"), answer: "Cannot determine — exact HTS code required", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+          // official_unconfirmed with no resolved rate: the HTS was provided but the
+          // official lookup could not verify it — this is NOT a missing-code situation.
+          rows.push({ label: t(lang, "imp_costs_s301"), answer: "Cannot determine — official tariff lookup failed for the provided HTS code", rateText: null, ratePct: null, status: c.status, coverageItem: c });
         }
       }
 

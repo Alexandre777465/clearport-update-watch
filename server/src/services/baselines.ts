@@ -688,6 +688,13 @@ const DOMAIN_REGISTRY: Array<{
         return { status: 'no_applicable_rule', note: 'No Section 301 footnote found on the matched HTS line' };
       if (hts && (hts.match_level === 'parent' || hts.match_level === 'ambiguous'))
         return { status: 'insufficient_info', note: '10-digit HTS line needed to confirm Section 301 cross-reference', missing: ['exact 10-digit HTS code'] };
+      // HTS was provided and syntactically valid but USITC could not resolve it.
+      // This is a source/verification problem, not missing user information — never
+      // emit missing: ['exact HTS code'] when the code was already supplied.
+      if (hts && hts.match_level === 'not_found')
+        return { status: 'official_unconfirmed', note: 'HTS code provided but not found in USITC database — Section 301 applicability cannot be verified; confirm with USTR or your customs broker' };
+      if (hts && hts.match_level === 'outage')
+        return { status: 'source_unavailable', note: 'USITC HTS service temporarily unavailable — Section 301 applicability cannot be verified right now' };
       return { status: 'insufficient_info', note: 'HTS code required to screen Section 301 footnotes', missing: ['exact HTS code'] };
     },
   },

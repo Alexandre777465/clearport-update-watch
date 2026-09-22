@@ -33,7 +33,7 @@ import {
   lookupBrakeDrumAdRate,
   lookupBrakeDrumCvdRate,
 } from '../services/adcvdScanner';
-import { assembleBaselines } from '../services/baselines';
+import { assembleBaselines, buildCoverageMatrix } from '../services/baselines';
 import type { WatchlistEntry } from '../types';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -764,5 +764,113 @@ describe('Bluetooth speaker (HTS 8518.21) — assembleBaselines acceptance', () 
     for (const cat of cats) {
       expect(cat.missing_info ?? '').not.toMatch(/civil_aircraft_use/);
     }
+  });
+});
+
+// ── HTS provided + official lookup failed — state-collapse regression ─────────
+//
+// Root cause: the Section 301 coverage domain resolver had no `not_found` branch
+// and fell to the catch-all, emitting status:'insufficient_info' with
+// missing:['exact HTS code'] — identical to "no HTS provided at all."
+//
+// These tests call buildCoverageMatrix directly with a not_found HTS result for
+// a China-origin product and verify the correct official_unconfirmed state,
+// with no missing_facts, and the catch-all insufficient_info only fires when
+// no HTS was provided.
+
+describe('buildCoverageMatrix — HTS provided + not_found — Section 301 state', () => {
+  const CHINA_ENTRY: WatchlistEntry = {
+    ...BASE_ENTRY,
+    hts_code: '9503.00.8900',
+    product_name: 'Vinyl inflatable toy',
+    product_description: 'Vinyl inflatable children\'s toy',
+    origin_country: 'China',
+  };
+
+  const HTS_NOT_FOUND: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'not_found',
+    requested: '9503008900',
+    hts8: null,
+    matched_htsno: null,
+    description: null,
+    mfn_text_rate: null,
+    mfn_ad_valorem_pct: null,
+    section301_ref: null,
+    candidates: [],
+    source_url: 'https://hts.usitc.gov/',
+    note: 'Code not found in USITC HTS',
+  };
+
+  const HTS_OUTAGE: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'outage',
+    requested: '9503008900',
+    hts8: null,
+    matched_htsno: null,
+    description: null,
+    mfn_text_rate: null,
+    mfn_ad_valorem_pct: null,
+    section301_ref: null,
+    candidates: [],
+    source_url: 'https://hts.usitc.gov/',
+    note: 'USITC service unavailable',
+  };
+
+  it('C: not_found HTS for China-origin — section_301 domain is official_unconfirmed, NOT insufficient_info', () => {
+    const cats = assembleBaselines(CHINA_ENTRY, null, HTS_NOT_FOUND, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(CHINA_ENTRY, cats, [], HTS_NOT_FOUND, '9503008900', []);
+    const s301 = matrix.find((c) => c.domain_key === 'section_301');
+    expect(s301).toBeDefined();
+    expect(s301!.status).toBe('official_unconfirmed');
+    expect(s301!.status).not.toBe('insufficient_info');
+  });
+
+  it('C: not_found HTS — section_301 domain has NO missing_facts ("exact HTS code" must not appear)', () => {
+    const cats = assembleBaselines(CHINA_ENTRY, null, HTS_NOT_FOUND, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(CHINA_ENTRY, cats, [], HTS_NOT_FOUND, '9503008900', []);
+    const s301 = matrix.find((c) => c.domain_key === 'section_301');
+    expect(s301!.missing_facts ?? []).toHaveLength(0);
+    expect(s301!.missing_facts ?? []).not.toContain('exact HTS code');
+  });
+
+  it('C: outage HTS — section_301 domain is source_unavailable, not insufficient_info', () => {
+    const cats = assembleBaselines(CHINA_ENTRY, null, HTS_OUTAGE, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(CHINA_ENTRY, cats, [], HTS_OUTAGE, '9503008900', []);
+    const s301 = matrix.find((c) => c.domain_key === 'section_301');
+    expect(s301).toBeDefined();
+    expect(s301!.status).toBe('source_unavailable');
+    expect(s301!.status).not.toBe('insufficient_info');
+  });
+
+  it('D: genuinely absent HTS (null) — section_301 domain is insufficient_info with missing_facts', () => {
+    const noHtsEntry: WatchlistEntry = { ...CHINA_ENTRY, hts_code: null as unknown as string };
+    const cats = assembleBaselines(noHtsEntry, null, null, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(noHtsEntry, cats, [], null, '', []);
+    const s301 = matrix.find((c) => c.domain_key === 'section_301');
+    expect(s301).toBeDefined();
+    expect(s301!.status).toBe('insufficient_info');
+    expect((s301!.missing_facts ?? []).some((f) => /hts/i.test(f))).toBe(true);
+  });
+});
+
+describe('buildCoverageMatrix — Section 301 not_found is not a regression for verified exact match', () => {
+  it('F: exact HTS 8708.30.50.20 with section301_ref still produces verified_applicable section_301', () => {
+    const MOCK_HTS_EXACT = {
+      match_level: 'exact' as const,
+      requested: '8708305020',
+      hts8: '8708.30.50',
+      matched_htsno: '8708.30.50.20',
+      description: 'Brake drums',
+      mfn_text_rate: '2.5%',
+      mfn_ad_valorem_pct: 2.5,
+      section301_ref: '9903.88.03',
+      candidates: [],
+      source_url: 'https://hts.usitc.gov/',
+      note: null,
+    };
+    const cats = assembleBaselines(BASE_ENTRY, null, MOCK_HTS_EXACT, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(BASE_ENTRY, cats, [], MOCK_HTS_EXACT, '8708305020', []);
+    const s301 = matrix.find((c) => c.domain_key === 'section_301');
+    expect(s301).toBeDefined();
+    expect(s301!.status).toBe('verified_applicable');
   });
 });
