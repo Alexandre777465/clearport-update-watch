@@ -22,6 +22,7 @@ import {
 } from './tariffRules';
 import { evaluateAllModules } from './regulatoryModules/index';
 import type { ModuleInput, DocSpec as ModuleDocSpec, DynamicQuestion } from './regulatoryModules/index';
+import { calculateDutyStack, lookupSection301Ustr, IEEPA_RULES } from './tariffRuleEngine';
 
 type AttrKey = keyof Pick<
   WatchlistEntry,
@@ -239,7 +240,7 @@ export function assembleBaselines(
         id: 'hts_duty',
         category: 'Customs Duty (MFN / General Rate)',
         level: pct != null && pct >= 5 ? 'Medium' : 'Low',
-        explanation: `Under HTS ${formatHts(hts.hts8)} (${hts.description}), the official General (MFN) duty rate is ${hts.mfn_text_rate ?? 'as published'}. This is the base duty before any trade-remedy tariffs.`,
+        explanation: `Under HTS ${formatHts(hts.hts8)} (${hts.description}), the official General (MFN) duty rate is ${hts.mfn_text_rate ?? 'as published'}. This is the base duty before any trade-remedy tariffs.${hts.note && hts.note.includes('not found in the current USITC schedule') ? ` NOTE: Submitted HTS code ${formatHts(hts.requested)} does not appear in the current HTS schedule. Duty rate resolved from current parent subheading ${formatHts(hts.hts8)}. Confirm the current 10-digit statistical classification before entry.` : ''}`,
         action: 'Confirm this HTS classification with your customs broker — the rate only applies if the goods are correctly classified.',
         verification_status: 'verified_applicable',
         applicability_conditions: `Goods correctly classified under HTS ${formatHts(hts.hts8)}.`,
@@ -384,6 +385,44 @@ export function assembleBaselines(
           why_relevant: `USITC HTS official footnote cross-references China-origin goods under this heading to ${hts.section301_ref}.`,
         },
       });
+    }
+
+    // ── 2b-ii. Section 301 USTR fallback (P6) ──────────────────────────────────
+    // When origin is China, hts8 is resolved, but NO USITC footnote was found,
+    // check the USTR hts_new.json static lookup for the authoritative 301 rate.
+    // USITC footnotes are unreliable for 301 detection (they may be absent even for
+    // listed codes). The USTR database is the primary source for Section 301.
+    if (
+      entry.origin_country.toLowerCase().includes('china') &&
+      hts.hts8 &&
+      !hts.section301_ref
+    ) {
+      const ustrEntry = lookupSection301Ustr(hts.hts8);
+      if (ustrEntry) {
+        const isZero = ustrEntry.rate_pct === 0;
+        out.push({
+          id: 'hts_section301',
+          category: 'Section 301 China Tariff',
+          level: isZero ? 'N/A' : 'High',
+          explanation: `HTS ${formatHts(hts.hts8)} is listed in the USTR Section 301 database: "${ustrEntry.action_description}". ${isZero ? 'No additional Section 301 duty applies to this HTS subheading (0.0%).' : `An additional ${ustrEntry.rate_pct}% Section 301 duty applies to China-origin goods.`}`,
+          action: isZero ? 'No Section 301 additional duty for this HTS subheading.' : `Budget +${ustrEntry.rate_pct}% Section 301 additional duty on top of the MFN base rate.`,
+          verification_status: isZero ? 'not_applicable' : 'verified_applicable',
+          applicability_conditions: `China-origin goods classified under HTS ${formatHts(hts.hts8)}.`,
+          verified_rate_pct: isZero ? null : ustrEntry.rate_pct,
+          financial_impact: !isZero && value != null
+            ? `$${((value * ustrEntry.rate_pct) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on a $${value.toLocaleString('en-US')} shipment (+${ustrEntry.rate_pct}% Section 301)`
+            : undefined,
+          source: {
+            agency: ustrEntry.source.authority,
+            name: 'Office of the United States Trade Representative',
+            title: `Section 301 — ${ustrEntry.action_description}`,
+            cfr_citation: `USTR hts_new.json HTS_id ${hts.hts8}`,
+            last_verified_at: ustrEntry.source.retrieved_at,
+            url: ustrEntry.source.url ?? 'https://ustr.gov/issue-areas/enforcement/section-301-investigations',
+            why_relevant: `USTR Section 301 database (hts_new.json) queried for HTS ${formatHts(hts.hts8)}.`,
+          },
+        });
+      }
     }
 
     // ── 2c. Merchandise Processing Fee (MPF) and Harbor Maintenance Fee (HMF) ──
@@ -565,6 +604,55 @@ export function assembleBaselines(
       }
       // before/after window: no card — surcharge not active on this import date
     }
+
+    // ── 2e. IEEPA tariff layers (Chapter 99, Subchapter III) ─────────────────
+    // Evaluate all IEEPA rules for this entry date and origin.
+    // Show each rule that is ACTIVE or SUSPENDED (so customer sees what was evaluated).
+    // Expired rules and rules with wrong origin/HTS scope are suppressed.
+    {
+      const htsDigits = hts?.requested ?? normalizeHts(entry.hts_code ?? '');
+      const ieepResult = calculateDutyStack(htsDigits, entry.origin_country, today, IEEPA_RULES);
+      for (const ev of ieepResult.evaluated_rules) {
+        const rule = ev.rule;
+        if (!rule.ch99_provision) continue;
+        // Show ACTIVE rules + SUSPENDED rules that are origin-relevant (informative)
+        const showActive = ev.status === 'ACTIVE';
+        const showSuspended = ev.status === 'SUSPENDED' && matchesOriginForDisplay(rule, entry.origin_country);
+        if (!showActive && !showSuspended) continue;
+
+        const rateStr = rule.rate.type === 'ad_valorem' ? `${rule.rate.ad_valorem_pct}%` : (rule.rate.description ?? 'see provision');
+        const dutyAmt = showActive && rule.rate.type === 'ad_valorem' && value != null
+          ? (value * (rule.rate.ad_valorem_pct ?? 0)) / 100
+          : null;
+        const financialImpact = dutyAmt != null
+          ? `$${dutyAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on a $${value!.toLocaleString('en-US')} shipment (+${rateStr} per ${rule.ch99_provision})`
+          : undefined;
+
+        out.push({
+          id: `ieepa_${rule.ch99_provision.replace(/\./g, '_')}`,
+          category: `IEEPA Tariff — ${rule.ch99_provision}`,
+          level: showActive ? 'High' : 'N/A',
+          explanation: `${ev.reason}${rule.stacking_note ? ` ${rule.stacking_note}` : ''}`,
+          action: showActive
+            ? `Include +${rateStr} IEEPA additional duty in your landed cost. Source: ${rule.source.document}.`
+            : 'No action required — this IEEPA provision is suspended.',
+          verification_status: showActive ? 'verified_applicable' : 'not_applicable',
+          applicability_conditions: `${rule.ch99_provision}: effective ${rule.effective_from}${rule.effective_to ? `–${rule.effective_to}` : ''}; ${rule.origin_scope.type === 'all' ? 'all countries' : (rule.origin_scope.countries ?? []).join(', ')}.`,
+          verified_rate_pct: showActive ? ev.rate_pct : null,
+          financial_impact: financialImpact,
+          source: {
+            agency: rule.source.authority,
+            name: rule.source.authority,
+            title: `HTSUS ${rule.ch99_provision} — ${rule.source.document}`,
+            cfr_citation: `HTSUS ${rule.ch99_provision}`,
+            effective_date: rule.effective_from,
+            last_verified_at: rule.last_verified_at,
+            url: rule.source.url ?? 'https://hts.usitc.gov/',
+            why_relevant: `${rule.ch99_provision} evaluated for ${entry.origin_country}-origin goods, entry date ${today}.`,
+          },
+        });
+      }
+    }
   }
 
   // ── 3. Curated standing regulatory baselines ────────────────────────────────
@@ -594,6 +682,12 @@ export function assembleBaselines(
   }
 
   return out;
+}
+
+function matchesOriginForDisplay(rule: { origin_scope: { type: string; countries?: readonly string[] } }, originCountry: string): boolean {
+  if (rule.origin_scope.type === 'all') return true;
+  const lc = originCountry.toLowerCase();
+  return rule.origin_scope.countries?.some((c) => lc.includes(c)) ?? false;
 }
 
 function describeApplicability(a: Applicability): string {
@@ -748,6 +842,53 @@ const DOMAIN_REGISTRY: Array<{
       if (s122.reason === 'before_effective_date') return { status: 'not_applicable', note: `Import date is before surcharge effective date (${SECTION_122_SURCHARGE.effective_date})` };
       if (s122.reason === 'after_expiry') return { status: 'not_applicable', note: `Surcharge expired ${SECTION_122_SURCHARGE.expiry_date}` };
       return { status: 'no_applicable_rule', note: 'Section 122 surcharge date window not active' };
+    },
+  },
+  // ── IEEPA tariff domain entries ───────────────────────────────────────────
+  {
+    key: 'ieepa_9903_01_24',
+    label: 'IEEPA Tariff — 9903.01.24 (China/HK +10%, from Nov 10, 2025)',
+    cat: 'tariff',
+    relevant: (_e, _hts) => true,
+    resolve: (cats, entry) => {
+      if (!entry.origin_country.toLowerCase().includes('china') && !entry.origin_country.toLowerCase().includes('hong kong'))
+        return { status: 'not_applicable', note: 'Not applicable — origin is not China/HK' };
+      const c = cats.find((x) => x.id === 'ieepa_9903_01_24');
+      if (c?.verification_status === 'verified_applicable')
+        return { status: 'verified_applicable', note: `Applies — +${c.verified_rate_pct ?? 10}% (9903.01.24, effective 2025-11-10)` };
+      if (c?.verification_status === 'not_applicable')
+        return { status: 'not_applicable', note: c.explanation?.slice(0, 120) ?? '9903.01.24 does not apply' };
+      return { status: 'not_applicable', note: '9903.01.24 not applicable for this entry date or origin' };
+    },
+  },
+  {
+    key: 'ieepa_9903_01_25',
+    label: 'IEEPA Tariff — 9903.01.25 (all countries +10%, from Apr 5, 2025)',
+    cat: 'tariff',
+    relevant: () => true,
+    resolve: (cats) => {
+      const c = cats.find((x) => x.id === 'ieepa_9903_01_25');
+      if (c?.verification_status === 'verified_applicable')
+        return { status: 'verified_applicable', note: `Applies — +${c.verified_rate_pct ?? 10}% (9903.01.25)` };
+      if (c?.verification_status === 'not_applicable')
+        return { status: 'not_applicable', note: c.explanation?.slice(0, 120) ?? '9903.01.25 does not apply' };
+      return { status: 'not_applicable', note: '9903.01.25 not applicable for this entry date' };
+    },
+  },
+  {
+    key: 'ieepa_9903_01_63',
+    label: 'IEEPA Tariff — 9903.01.63 (China/HK +34% reciprocal — SUSPENDED)',
+    cat: 'tariff',
+    relevant: (_e, _hts) => true,
+    resolve: (cats, entry) => {
+      if (!entry.origin_country.toLowerCase().includes('china') && !entry.origin_country.toLowerCase().includes('hong kong'))
+        return { status: 'not_applicable', note: 'Not applicable — origin is not China/HK' };
+      const c = cats.find((x) => x.id === 'ieepa_9903_01_63');
+      if (c?.verification_status === 'not_applicable')
+        return { status: 'not_applicable', note: '9903.01.63 — China 34% reciprocal tariff is SUSPENDED (Geneva deal)' };
+      if (c?.verification_status === 'verified_applicable')
+        return { status: 'verified_applicable', note: `Applies — +${c.verified_rate_pct ?? 34}% (9903.01.63)` };
+      return { status: 'not_applicable', note: '9903.01.63 suspended or not applicable' };
     },
   },
   {
@@ -915,6 +1056,9 @@ export function buildCoverageMatrix(
     section_301: 'hts_section301',
     section_232_auto: 'section_232_auto',
     section_122_surcharge: 'section_122_surcharge',
+    ieepa_9903_01_24: 'ieepa_9903_01_24',
+    ieepa_9903_01_25: 'ieepa_9903_01_25',
+    ieepa_9903_01_63: 'ieepa_9903_01_63',
   };
 
   // Domains from the registry

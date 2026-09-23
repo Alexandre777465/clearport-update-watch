@@ -14,7 +14,7 @@
  *  6. Active Section 301 exclusion: excluded = true, rate not applied
  *  7. Expired Section 301 exclusion: excluded = false, rate applies
  *  8. No exclusion record: excluded = false, beyond-verification caveat when import after cutoff
- *  9. Full brake-drum tariff determination: MFN 2.5% + S301 25% + S232 25% = 52.5% known
+ *  9. Full brake-drum tariff determination: MFN 2.5% + S301 25% + S232 25% + IEEPA 20% = 72.5% known
  * 10. assembleBaselines does NOT produce a section_232_auto category for non-8708 HTS
  */
 
@@ -23,12 +23,20 @@ import {
   checkSection232Auto,
   checkSection301Exclusion,
   checkSection122Surcharge,
+  computeMpf,
   SECTION_232_AUTO,
   SECTION_301_RATES,
   SECTION_301_LIST3_EXCLUSIONS,
   SECTION_301_LAST_VERIFIED,
   type Section301Exclusion,
 } from '../services/tariffRules';
+import {
+  calculateDutyStack,
+  evaluateRule,
+  entryDateWithinRange,
+  lookupSection301Ustr,
+  IEEPA_RULES,
+} from '../services/tariffRuleEngine';
 import {
   lookupBrakeDrumAdRate,
   lookupBrakeDrumCvdRate,
@@ -311,13 +319,13 @@ describe('Brake drum full tariff — assembleBaselines', () => {
     expect(s232).toBeUndefined();
   });
 
-  it('known tariff total (MFN + S301 + S232) = 52.5%', () => {
+  it('known tariff total (MFN 2.5% + S301 25% + S232 25% + IEEPA 01.24 10% + IEEPA 01.25 10%) = 72.5%', () => {
     const cats = assembleBaselines(BASE_ENTRY, null, MOCK_HTS_RESULT, [], '2026-06-26');
     const rates = cats
       .filter((c) => c.verification_status === 'verified_applicable' && c.verified_rate_pct != null)
       .map((c) => c.verified_rate_pct!);
     const total = rates.reduce((a, b) => a + b, 0);
-    expect(total).toBe(52.5);
+    expect(total).toBe(72.5);
   });
 
   it('Section 232 does NOT apply when entry is from Mexico (USMCA cannot_determine)', () => {
@@ -976,20 +984,256 @@ describe('buildCoverageMatrix — 9503.00.8900 China→US with subheading-fallba
     expect(mfn!.status).not.toBe('source_unavailable');
   });
 
-  it('K: Section 301 domain is insufficient_info (NOT source_unavailable)', () => {
+  it('K: Section 301 domain is not_applicable — USTR confirms 0% for HTS 9503.00.00', () => {
+    // P6: USTR hts_new.json lookup overrides USITC footnote absence for China origin.
+    // 9503.00.00 is on List 4 Modification at 0.0%, so Section 301 = not_applicable.
     const cats = assembleBaselines(TOYS_ENTRY, null, HTS_PARENT_9503, [], '2026-09-22');
     const matrix = buildCoverageMatrix(TOYS_ENTRY, cats, [], HTS_PARENT_9503, '9503008900', []);
     const s301 = matrix.find((c) => c.domain_key === 'section_301');
     expect(s301).toBeDefined();
-    expect(s301!.status).toBe('insufficient_info');
+    expect(s301!.status).toBe('not_applicable');
     expect(s301!.status).not.toBe('source_unavailable');
   });
 
-  it('K: Section 301 missing_facts references 10-digit HTS code (not "exact HTS code")', () => {
+  it('K: Section 301 not_applicable — no missing_facts required when USTR resolves to 0%', () => {
     const cats = assembleBaselines(TOYS_ENTRY, null, HTS_PARENT_9503, [], '2026-09-22');
     const matrix = buildCoverageMatrix(TOYS_ENTRY, cats, [], HTS_PARENT_9503, '9503008900', []);
     const s301 = matrix.find((c) => c.domain_key === 'section_301');
-    expect((s301!.missing_facts ?? []).some((f) => /10.digit|10-digit/i.test(f))).toBe(true);
-    expect(s301!.missing_facts ?? []).not.toContain('exact HTS code');
+    expect(s301!.status).toBe('not_applicable');
+    expect((s301!.missing_facts ?? [])).toHaveLength(0);
+  });
+});
+
+// ── TariffRuleEngine — IEEPA rule state tests ─────────────────────────────────
+
+describe('entryDateWithinRange', () => {
+  it('date within range → true', () => {
+    expect(entryDateWithinRange('2026-09-22', '2025-11-10', null)).toBe(true);
+  });
+  it('date before effective_from → false', () => {
+    expect(entryDateWithinRange('2025-11-09', '2025-11-10', null)).toBe(false);
+  });
+  it('date after effective_to → false', () => {
+    expect(entryDateWithinRange('2025-03-05', '2025-02-04', '2025-03-04')).toBe(false);
+  });
+  it('date equals effective_to → true (inclusive)', () => {
+    expect(entryDateWithinRange('2025-03-04', '2025-02-04', '2025-03-04')).toBe(true);
+  });
+  it('null effective_to means open-ended → true for future date', () => {
+    expect(entryDateWithinRange('2030-01-01', '2025-11-10', null)).toBe(true);
+  });
+});
+
+describe('evaluateRule — 9903.01.20 (EXPIRED Mar 4, 2025)', () => {
+  const rule = IEEPA_RULES.find((r) => r.ch99_provision === '9903.01.20')!;
+  it('entry date 2025-03-04 (last day) → ACTIVE', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2025-03-04');
+    expect(r.status).toBe('ACTIVE');
+    expect(r.applies).toBe(true);
+    expect(r.rate_pct).toBe(10);
+  });
+  it('entry date 2025-03-05 (day after expiry) → EXPIRED', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2025-03-05');
+    expect(r.status).toBe('EXPIRED');
+    expect(r.applies).toBe(false);
+  });
+  it('entry date Sep 2026 → EXPIRED', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2026-09-22');
+    expect(r.status).toBe('EXPIRED');
+    expect(r.applies).toBe(false);
+  });
+  it('Vietnam origin → NOT_APPLICABLE (origin scope is China/HK only)', () => {
+    const r = evaluateRule(rule, '95030000', 'Vietnam', '2025-02-15');
+    expect(r.status).toBe('NOT_APPLICABLE');
+    expect(r.applies).toBe(false);
+  });
+});
+
+describe('evaluateRule — 9903.01.24 (ACTIVE from Nov 10, 2025)', () => {
+  const rule = IEEPA_RULES.find((r) => r.ch99_provision === '9903.01.24')!;
+  it('entry date 2026-09-22 from China → ACTIVE +10%', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2026-09-22');
+    expect(r.status).toBe('ACTIVE');
+    expect(r.applies).toBe(true);
+    expect(r.rate_pct).toBe(10);
+  });
+  it('entry date 2025-11-09 (day before) → NOT_APPLICABLE (before effective date)', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2025-11-09');
+    expect(r.status).toBe('NOT_APPLICABLE');
+    expect(r.applies).toBe(false);
+  });
+  it('Hong Kong origin → ACTIVE', () => {
+    const r = evaluateRule(rule, '95030000', 'Hong Kong', '2026-09-22');
+    expect(r.status).toBe('ACTIVE');
+    expect(r.applies).toBe(true);
+  });
+  it('Mexico origin → NOT_APPLICABLE (not China/HK)', () => {
+    const r = evaluateRule(rule, '95030000', 'Mexico', '2026-09-22');
+    expect(r.status).toBe('NOT_APPLICABLE');
+    expect(r.applies).toBe(false);
+  });
+});
+
+describe('evaluateRule — 9903.01.25 (universal +10%, China exclusion SUSPENDED)', () => {
+  const rule = IEEPA_RULES.find((r) => r.ch99_provision === '9903.01.25')!;
+  it('China origin Sep 2026 → ACTIVE (exclusion suspended)', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2026-09-22');
+    expect(r.status).toBe('ACTIVE');
+    expect(r.applies).toBe(true);
+    expect(r.rate_pct).toBe(10);
+  });
+  it('Vietnam origin Sep 2026 → ACTIVE (universal rule)', () => {
+    const r = evaluateRule(rule, '95030000', 'Vietnam', '2026-09-22');
+    expect(r.status).toBe('ACTIVE');
+    expect(r.applies).toBe(true);
+  });
+  it('entry before Apr 5 2025 → NOT_APPLICABLE', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2025-04-04');
+    expect(r.status).toBe('NOT_APPLICABLE');
+    expect(r.applies).toBe(false);
+  });
+});
+
+describe('evaluateRule — 9903.01.63 (China 34% reciprocal, SUSPENDED)', () => {
+  const rule = IEEPA_RULES.find((r) => r.ch99_provision === '9903.01.63')!;
+  it('China Sep 2026 → SUSPENDED (Geneva deal)', () => {
+    const r = evaluateRule(rule, '95030000', 'China', '2026-09-22');
+    expect(r.status).toBe('SUSPENDED');
+    expect(r.applies).toBe(false);
+    expect(r.reason).toMatch(/suspended/i);
+  });
+  it('Vietnam Sep 2026 → NOT_APPLICABLE (origin scope is China/HK)', () => {
+    const r = evaluateRule(rule, '95030000', 'Vietnam', '2026-09-22');
+    expect(r.status).toBe('NOT_APPLICABLE');
+    expect(r.applies).toBe(false);
+  });
+});
+
+describe('calculateDutyStack — China, Sep 2026', () => {
+  const CHINA = 'China';
+  const DATE = '2026-09-22';
+  const HTS = '95030000';
+
+  it('total IEEPA = 20% (9903.01.24 +10% + 9903.01.25 +10%)', () => {
+    const result = calculateDutyStack(HTS, CHINA, DATE);
+    expect(result.total_ad_valorem_pct).toBe(20);
+  });
+
+  it('exactly 2 active rules (9903.01.24 and 9903.01.25)', () => {
+    const result = calculateDutyStack(HTS, CHINA, DATE);
+    expect(result.active_rules).toHaveLength(2);
+    const provisions = result.active_rules.map((r) => r.rule.ch99_provision).sort();
+    expect(provisions).toEqual(['9903.01.24', '9903.01.25']);
+  });
+
+  it('9903.01.20 evaluates to EXPIRED', () => {
+    const result = calculateDutyStack(HTS, CHINA, DATE);
+    const ev20 = result.evaluated_rules.find((r) => r.rule.ch99_provision === '9903.01.20');
+    expect(ev20).toBeDefined();
+    expect(ev20!.status).toBe('EXPIRED');
+    expect(ev20!.applies).toBe(false);
+  });
+
+  it('9903.01.63 evaluates to SUSPENDED', () => {
+    const result = calculateDutyStack(HTS, CHINA, DATE);
+    const ev63 = result.evaluated_rules.find((r) => r.rule.ch99_provision === '9903.01.63');
+    expect(ev63).toBeDefined();
+    expect(ev63!.status).toBe('SUSPENDED');
+    expect(ev63!.applies).toBe(false);
+  });
+
+  it('stacking explanation names both active provisions', () => {
+    const result = calculateDutyStack(HTS, CHINA, DATE);
+    expect(result.stacking_explanation).toContain('9903.01.24');
+    expect(result.stacking_explanation).toContain('9903.01.25');
+    expect(result.stacking_explanation).toContain('+20%');
+  });
+});
+
+describe('calculateDutyStack — Vietnam, Sep 2026 (universal rule only)', () => {
+  it('total IEEPA = 10% (9903.01.25 only — 9903.01.24 and 9903.01.63 are China/HK-specific)', () => {
+    const result = calculateDutyStack('95030000', 'Vietnam', '2026-09-22');
+    expect(result.total_ad_valorem_pct).toBe(10);
+    expect(result.active_rules).toHaveLength(1);
+    expect(result.active_rules[0].rule.ch99_provision).toBe('9903.01.25');
+  });
+});
+
+describe('calculateDutyStack — China, early 2025 before IEEPA (no active rules)', () => {
+  it('entry Jan 1 2025 → total IEEPA = 0 (all rules before effective date)', () => {
+    const result = calculateDutyStack('95030000', 'China', '2025-01-01');
+    expect(result.total_ad_valorem_pct).toBe(0);
+    expect(result.active_rules).toHaveLength(0);
+  });
+});
+
+describe('lookupSection301Ustr', () => {
+  it('9503.00.00 → List 4 Modification 0.0%', () => {
+    const entry = lookupSection301Ustr('95030000');
+    expect(entry).not.toBeNull();
+    expect(entry!.rate_pct).toBe(0);
+    expect(entry!.action_description).toContain('0.0%');
+    expect(entry!.source.authority).toBe('USTR');
+  });
+  it('unknown HTS → null', () => {
+    expect(lookupSection301Ustr('87083050')).toBeNull();
+  });
+});
+
+// ── P7: Charles regression test ───────────────────────────────────────────────
+// Product: Vinyl Inflatable Children's Toy, HTS 9503.00.8900, China→US
+// Customs value: $50,000, Ocean mode, entry date: 2026-09-22
+// Expected total: ~$10,235.70
+//
+// Breakdown (all from generic engine, not hard-coded):
+//   MFN: 0% (HTS 9503.00.00, general='Free')
+//   Section 301: 0% (USTR List 4 Modification, 0.0%)
+//   IEEPA 9903.01.24: +10% = $5,000
+//   IEEPA 9903.01.25: +10% = $5,000
+//   IEEPA 9903.01.63: SUSPENDED = $0
+//   IEEPA 9903.01.20: EXPIRED = $0
+//   MPF (FY2026): 0.3464% × $50,000 = $173.20 (between min $33.58 and max $651.50)
+//   HMF (ocean): 0.125% × $50,000 = $62.50
+//   Total: $0 + $0 + $5,000 + $5,000 + $0 + $0 + $173.20 + $62.50 = $10,235.70
+
+describe('P7: Charles regression — HTS 9503.00.8900, China, $50,000, ocean, 2026-09-22', () => {
+  const CUSTOMS_VALUE = 50_000;
+  const ENTRY_DATE = '2026-09-22';
+  const ORIGIN = 'China';
+  const HTS8 = '95030000'; // resolved from 9503.00.8900 via subheading fallback
+
+  it('IEEPA duty stack = 20% → $10,000', () => {
+    const stack = calculateDutyStack(HTS8, ORIGIN, ENTRY_DATE);
+    expect(stack.total_ad_valorem_pct).toBe(20);
+    const ieepaDuty = (CUSTOMS_VALUE * stack.total_ad_valorem_pct) / 100;
+    expect(ieepaDuty).toBe(10_000);
+  });
+
+  it('Section 301 rate = 0% (USTR List 4 Modification)', () => {
+    const s301 = lookupSection301Ustr(HTS8);
+    expect(s301).not.toBeNull();
+    expect(s301!.rate_pct).toBe(0);
+  });
+
+  it('MPF = $173.20 (0.3464% × $50,000, FY2026 schedule)', () => {
+    const { amount } = computeMpf(CUSTOMS_VALUE, ENTRY_DATE);
+    // 0.3464% × 50,000 = 173.20; between min $33.58 and max $651.50
+    expect(amount).toBeCloseTo(173.20, 2);
+  });
+
+  it('HMF (ocean) = $62.50 (0.125% × $50,000)', () => {
+    const hmf = (CUSTOMS_VALUE * 0.125) / 100;
+    expect(hmf).toBe(62.50);
+  });
+
+  it('Total landed cost components sum to ~$10,235.70', () => {
+    const stack = calculateDutyStack(HTS8, ORIGIN, ENTRY_DATE);
+    const s301 = lookupSection301Ustr(HTS8);
+    const ieepaDuty = (CUSTOMS_VALUE * stack.total_ad_valorem_pct) / 100;
+    const s301Duty = ((s301?.rate_pct ?? 0) * CUSTOMS_VALUE) / 100;
+    const { amount: mpf } = computeMpf(CUSTOMS_VALUE, ENTRY_DATE);
+    const hmf = (CUSTOMS_VALUE * 0.125) / 100;
+    const total = ieepaDuty + s301Duty + mpf + hmf;
+    expect(total).toBeCloseTo(10_235.70, 1);
   });
 });

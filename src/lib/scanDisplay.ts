@@ -35,6 +35,9 @@ export const DOMAIN_FINDING_MAP: Record<string, string> = {
   section_301: "hts_section301",
   section_232_auto: "section_232_auto",
   section_122_surcharge: "section_122_surcharge",
+  ieepa_9903_01_24: "ieepa_9903_01_24",
+  ieepa_9903_01_25: "ieepa_9903_01_25",
+  ieepa_9903_01_63: "ieepa_9903_01_63",
 };
 
 /**
@@ -160,6 +163,16 @@ export function buildCostRows(scan: ProductRiskScan, lang: Lang): CostRow[] {
         rows.push({ label: t(lang, "imp_costs_s122"), answer: `Cannot determine — missing: ${missing}`, rateText: null, ratePct: null, status: c.status, coverageItem: c });
       } else {
         rows.push({ label: t(lang, "imp_costs_s122"), answer: "Cannot determine — confirm applicability", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      }
+
+    } else if (c.domain_key.startsWith("ieepa_9903_01_")) {
+      const provision = c.domain_key.replace("ieepa_", "").replace(/_/g, ".");  // e.g. "9903.01.24"
+      if (c.status === "not_applicable" || c.status === "no_applicable_rule") {
+        rows.push({ label: `IEEPA ${provision}`, answer: "Does not apply", rateText: null, ratePct: null, status: c.status, coverageItem: c });
+      } else if (c.status === "verified_applicable" && ratePct != null) {
+        rows.push({ label: `IEEPA ${provision}`, answer: `Applies — +${ratePct}% — ${provision}`, rateText, ratePct, status: c.status, coverageItem: c });
+      } else {
+        rows.push({ label: `IEEPA ${provision}`, answer: "Cannot determine — confirm applicability", rateText: null, ratePct: null, status: c.status, coverageItem: c });
       }
 
     } else if (c.domain_key.startsWith("adcvd_A-")) {
