@@ -449,12 +449,24 @@ export function documentsForFinding(c: RiskCategory): DocSpec[] {
   }
   if (id === 'hts_duty') {
     if (c.verification_status === 'official_unconfirmed') {
+      if (c.missing_info) {
+        // Partial code supplied (<8 digits) — prompt user to provide the full statistical line.
+        return [{
+          document: 'Exact 10-digit HTS classification confirmation',
+          owner: 'importer_broker', responsible_party: 'customs_broker',
+          reason: 'Confirm the precise statistical line with your customs broker so the official MFN duty rate can be verified.',
+          doc_status: 'required_if',
+          condition: 'HTS code is not yet officially confirmed at the 10-digit level',
+        }];
+      }
+      // State 4: user supplied a complete HTS code that was not found in the current
+      // USITC schedule. The code was provided; it needs current-schedule confirmation only.
       return [{
-        document: 'Exact 10-digit HTS classification confirmation',
+        document: 'HTS current-schedule classification confirmation',
         owner: 'importer_broker', responsible_party: 'customs_broker',
-        reason: 'Confirm the precise statistical line with your customs broker so the official MFN duty rate can be verified.',
+        reason: 'Confirm the current statistical classification with your customs broker before filing the CBP entry.',
         doc_status: 'required_if',
-        condition: 'HTS code is not yet officially confirmed at the 10-digit level',
+        condition: 'Supplied HTS code not matched to exact statistical line in current USITC schedule',
       }];
     }
     return [];

@@ -258,8 +258,8 @@ export function assembleBaselines(
         },
       });
     } else if (hts.match_level === 'parent' || hts.match_level === 'ambiguous') {
-      // Official heading found, but the exact tariff line / rate is NOT
-      // confirmed. We never present a parent heading's rate as the exact rate.
+      // Official heading found, but the exact tariff line / rate is NOT confirmed.
+      // We never present a parent heading's rate as the exact rate.
       const candidateText = hts.candidates.length
         ? ' Subheadings found: ' +
           hts.candidates
@@ -267,29 +267,69 @@ export function assembleBaselines(
             .join('; ') +
           '.'
         : '';
-      out.push({
-        id: 'hts_duty',
-        category: 'Customs Duty (HTS classification needs confirmation)',
-        level: 'Medium',
-        explanation:
-          `Official HTS heading found for ${submitted}${hts.description ? ` (${hts.description})` : ''}, but the exact 10-digit tariff line — and therefore the precise MFN duty rate — still needs confirmation.${candidateText} ClearPort does not assume a parent heading's rate is the rate for your goods.`,
-        action:
-          'Provide the exact 10-digit HTS statistical line (or confirm it with your customs broker) so ClearPort can verify the official MFN duty rate.',
-        verification_status: 'official_unconfirmed',
-        applicability_conditions:
-          'A specific 10-digit HTS classification is required to confirm the official duty rate.',
-        verified_rate_pct: null,
-        missing_info: 'the exact 10-digit HTS statistical suffix for this product',
-        source: {
-          agency: 'USITC',
-          name: 'Harmonized Tariff Schedule of the United States',
-          title: `HTS heading ${submitted} — exact tariff line to be confirmed`,
-          cfr_citation: hts.hts8 ? `HTSUS ${formatHts(hts.hts8)}` : `HTSUS ${submitted}`,
-          last_verified_at: today,
-          url: hts.source_url,
-          why_relevant: 'The product was submitted under this HTS heading.',
-        },
-      });
+
+      // Distinguish two cases:
+      //  State 4: user supplied a complete HTS code (≥8 digits) but the exact
+      //           statistical line is absent from the current USITC schedule.
+      //           The tariff was resolved from a broader heading. This is NOT a
+      //           case of missing user information.
+      //  Partial: user supplied only a short prefix (<8 digits) — genuinely needs
+      //           more specific classification.
+      const suppliedComplete = hts.requested.length >= 8;
+
+      if (suppliedComplete) {
+        // State 4: supplied HTS not in current schedule — confirmation, not missing info.
+        out.push({
+          id: 'hts_duty',
+          category: 'Customs Duty (HTS classification needs current-schedule confirmation)',
+          level: 'Medium',
+          explanation:
+            `You provided HTS ${submitted}. ClearPort could not match this exact statistical line in the current USITC schedule and used the applicable parent tariff structure (${hts.hts8 ? formatHts(hts.hts8) : 'parent subheading'}) for this screening.${candidateText} Confirm the current statistical classification with your customs broker before entry.`,
+          action:
+            'Confirm the current 10-digit HTS statistical classification with your customs broker before filing the CBP entry.',
+          verification_status: 'official_unconfirmed',
+          applicability_conditions:
+            'HTS code provided but not matched to an exact statistical line in the current USITC schedule.',
+          verified_rate_pct: null,
+          // No missing_info — the user supplied the HTS code; it only needs current-schedule confirmation.
+          source: {
+            agency: 'USITC',
+            name: 'Harmonized Tariff Schedule of the United States',
+            title: `HTS ${submitted} — current-schedule confirmation needed`,
+            cfr_citation: hts.hts8
+              ? `HTSUS ${formatHts(hts.hts8)} (resolved from ${submitted})`
+              : `HTSUS ${submitted}`,
+            last_verified_at: today,
+            url: hts.source_url,
+            why_relevant: 'The product was submitted under this HTS code.',
+          },
+        });
+      } else {
+        // Partial code: user supplied fewer than 8 digits — needs the full statistical line.
+        out.push({
+          id: 'hts_duty',
+          category: 'Customs Duty (HTS classification needs confirmation)',
+          level: 'Medium',
+          explanation:
+            `Official HTS heading found for ${submitted}${hts.description ? ` (${hts.description})` : ''}, but the exact 10-digit tariff line — and therefore the precise MFN duty rate — still needs confirmation.${candidateText} ClearPort does not assume a parent heading's rate is the rate for your goods.`,
+          action:
+            'Provide the exact 10-digit HTS statistical line (or confirm it with your customs broker) so ClearPort can verify the official MFN duty rate.',
+          verification_status: 'official_unconfirmed',
+          applicability_conditions:
+            'A specific 10-digit HTS classification is required to confirm the official duty rate.',
+          verified_rate_pct: null,
+          missing_info: 'the exact 10-digit HTS statistical suffix for this product',
+          source: {
+            agency: 'USITC',
+            name: 'Harmonized Tariff Schedule of the United States',
+            title: `HTS heading ${submitted} — exact tariff line to be confirmed`,
+            cfr_citation: hts.hts8 ? `HTSUS ${formatHts(hts.hts8)}` : `HTSUS ${submitted}`,
+            last_verified_at: today,
+            url: hts.source_url,
+            why_relevant: 'The product was submitted under this HTS heading.',
+          },
+        });
+      }
     } else if (hts.match_level === 'not_found') {
       // Truthful "could not be verified" — makes NO duty claim and does NOT
       // influence the risk score, but the tariff section is still present.
@@ -755,8 +795,12 @@ const DOMAIN_REGISTRY: Array<{
       if (!c) return { status: 'source_unavailable', note: 'HTS lookup did not return a duty card' };
       if (c.verification_status === 'verified_applicable')
         return { status: 'verified_applicable', note: `MFN rate: ${hts.mfn_text_rate ?? 'confirmed from USITC'}` };
-      if (c.verification_status === 'official_unconfirmed')
+      if (c.verification_status === 'official_unconfirmed') {
+        // State 4: user supplied a complete HTS code — do not list it as a missing fact.
+        if (hts && hts.requested.length >= 8)
+          return { status: 'official_unconfirmed', note: 'HTS provided but not found in current USITC schedule — tariff resolved from parent subheading; confirm classification with customs broker' };
         return { status: 'official_unconfirmed', note: 'HTS heading found; exact 10-digit line needed to confirm rate', missing: ['exact 10-digit HTS statistical line'] };
+      }
       if (hts.match_level === 'outage') return { status: 'source_unavailable', note: 'USITC HTS service temporarily unavailable' };
       // not_found: user provided a structurally valid code but USITC cannot resolve it.
       // Use official_unconfirmed rather than insufficient_info — the code was provided;
@@ -780,8 +824,13 @@ const DOMAIN_REGISTRY: Array<{
       if (c) return { status: 'official_unconfirmed', note: `Chapter 99 cross-reference ${hts?.section301_ref ?? ''} found in official HTS footnote` };
       if (hts && hts.match_level === 'exact' && !hts.section301_ref)
         return { status: 'no_applicable_rule', note: 'No Section 301 footnote found on the matched HTS line' };
-      if (hts && (hts.match_level === 'parent' || hts.match_level === 'ambiguous'))
+      if (hts && (hts.match_level === 'parent' || hts.match_level === 'ambiguous')) {
+        // State 4: user supplied a complete HTS code — classification resolved from parent.
+        // Not a missing-info situation; Section 301 applicability follows the resolved heading.
+        if (hts.requested.length >= 8)
+          return { status: 'official_unconfirmed', note: 'Section 301 applicability based on parent subheading — confirm exact classification with USTR or your customs broker' };
         return { status: 'insufficient_info', note: '10-digit HTS line needed to confirm Section 301 cross-reference', missing: ['exact 10-digit HTS code'] };
+      }
       // HTS was provided and syntactically valid but USITC could not resolve it.
       // This is a source/verification problem, not missing user information — never
       // emit missing: ['exact HTS code'] when the code was already supplied.

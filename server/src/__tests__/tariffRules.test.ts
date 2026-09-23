@@ -1237,3 +1237,260 @@ describe('P7: Charles regression — HTS 9503.00.8900, China, $50,000, ocean, 20
     expect(total).toBeCloseTo(10_235.70, 1);
   });
 });
+
+// ── HTS State Model — Regression Tests A–H ──────────────────────────────────
+//
+// These tests verify the 5-state HTS model.  The key distinction addressed
+// here is state 4: the user supplied a complete HTS code (≥8 digits) that was
+// not found in the current USITC schedule, but the tariff was resolved from the
+// parent heading.  This must NEVER be described as user-missing information.
+
+describe('HTS state model — A: 10-digit HTS supplied, parent resolved (state 4)', () => {
+  const ENTRY: WatchlistEntry = {
+    ...BASE_ENTRY,
+    hts_code: '9503.00.8900',
+    product_name: 'Vinyl inflatable toy',
+    product_description: 'Vinyl inflatable toy',
+    origin_country: 'China',
+    is_children: true,
+  };
+
+  // Fixture: lookupHtsBaseline returns parent after subheading fallback.
+  // requested is always digit-only (10 digits) — this is the signal for state 4.
+  const HTS_PARENT_10DIG: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'parent',
+    requested: '9503008900',
+    hts8: '95030000',
+    matched_htsno: '9503.00.00',
+    description: 'Toys; puzzles of all kinds',
+    mfn_text_rate: null,
+    mfn_ad_valorem_pct: null,
+    section301_ref: null,
+    candidates: [{ htsno: '9503.00.00', description: 'Toys', general: 'Free' }],
+    source_url: 'https://hts.usitc.gov/?query=9503.00.8900',
+    note: 'Submitted code 9503.00.8900 was not found in the current USITC schedule; rate resolved from subheading 9503.00.',
+  };
+
+  it('A1: category card has verification_status official_unconfirmed, NOT no_verified_source', () => {
+    const cats = assembleBaselines(ENTRY, null, HTS_PARENT_10DIG, [], '2026-09-22');
+    const htsCard = cats.find((c) => c.id === 'hts_duty');
+    expect(htsCard).toBeDefined();
+    expect(htsCard!.verification_status).toBe('official_unconfirmed');
+  });
+
+  it('A2: category card has NO missing_info — user already supplied the HTS code', () => {
+    const cats = assembleBaselines(ENTRY, null, HTS_PARENT_10DIG, [], '2026-09-22');
+    const htsCard = cats.find((c) => c.id === 'hts_duty');
+    expect(htsCard!.missing_info).toBeUndefined();
+  });
+
+  it('A3: category explanation says "You provided HTS" — not "needs" or "statistical suffix"', () => {
+    const cats = assembleBaselines(ENTRY, null, HTS_PARENT_10DIG, [], '2026-09-22');
+    const htsCard = cats.find((c) => c.id === 'hts_duty');
+    const expl = htsCard!.explanation ?? '';
+    expect(expl).toMatch(/You provided HTS/);
+    expect(expl).not.toMatch(/statistical suffix/i);
+    expect(expl).not.toMatch(/exact 10-digit tariff line/i);
+    expect(expl).not.toMatch(/needs confirmation\./);
+  });
+
+  it('A4: MFN domain is official_unconfirmed with NO missing_facts', () => {
+    const cats = assembleBaselines(ENTRY, null, HTS_PARENT_10DIG, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(ENTRY, cats, [], HTS_PARENT_10DIG, '9503008900', []);
+    const mfn = matrix.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('official_unconfirmed');
+    expect(mfn!.missing_facts ?? []).toHaveLength(0);
+    expect((mfn!.missing_facts ?? []).join(' ')).not.toMatch(/exact 10-digit HTS statistical line/i);
+  });
+});
+
+describe('HTS state model — B: dotted HTS "9503.00.8900" normalises to 10 digits (same as A)', () => {
+  it('B: entry with hts_code "9503.00.8900" + parent result → no missing_info on category card', () => {
+    const entryDotted: WatchlistEntry = {
+      ...BASE_ENTRY,
+      hts_code: '9503.00.8900',
+      origin_country: 'China',
+    };
+    const HTS_PARENT_10DIG: import('../services/htsBaseline').HtsLookupResult = {
+      match_level: 'parent',
+      requested: '9503008900', // digit-only form; length=10
+      hts8: '95030000',
+      matched_htsno: '9503.00.00',
+      description: 'Toys',
+      mfn_text_rate: null, mfn_ad_valorem_pct: null, section301_ref: null,
+      candidates: [],
+      source_url: 'https://hts.usitc.gov/',
+      note: 'Submitted code 9503.00.8900 was not found in the current USITC schedule; rate resolved from subheading 9503.00.',
+    };
+    const cats = assembleBaselines(entryDotted, null, HTS_PARENT_10DIG, [], '2026-09-22');
+    const htsCard = cats.find((c) => c.id === 'hts_duty');
+    expect(htsCard).toBeDefined();
+    expect(htsCard!.missing_info).toBeUndefined();
+    expect(htsCard!.explanation ?? '').toMatch(/You provided HTS/);
+  });
+});
+
+describe('HTS state model — C: no HTS supplied → genuinely absent', () => {
+  it('C: null hts → MFN domain is insufficient_info with HTS missing_facts', () => {
+    const entryNoHts: WatchlistEntry = { ...BASE_ENTRY, hts_code: null as unknown as string };
+    const cats = assembleBaselines(entryNoHts, null, null, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(entryNoHts, cats, [], null, '', []);
+    const mfn = matrix.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('insufficient_info');
+    expect((mfn!.missing_facts ?? []).some((f) => /hts/i.test(f))).toBe(true);
+  });
+});
+
+describe('HTS state model — D: short/partial HTS (<8 digits) → missing_info IS set', () => {
+  // User supplied only a 4-digit heading prefix — genuinely needs the full statistical line.
+  const ENTRY_SHORT: WatchlistEntry = {
+    ...BASE_ENTRY,
+    hts_code: '9503',
+    origin_country: 'China',
+  };
+
+  const HTS_PARENT_SHORT: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'parent',
+    requested: '9503', // 4 digits — NOT state 4
+    hts8: '95030000',
+    matched_htsno: '9503.00.00',
+    description: 'Toys',
+    mfn_text_rate: null, mfn_ad_valorem_pct: null, section301_ref: null,
+    candidates: [{ htsno: '9503.00.00', description: 'Toys', general: 'Free' }],
+    source_url: 'https://hts.usitc.gov/',
+    note: null,
+  };
+
+  it('D1: partial HTS → category card DOES have missing_info (user needs to provide more)', () => {
+    const cats = assembleBaselines(ENTRY_SHORT, null, HTS_PARENT_SHORT, [], '2026-09-22');
+    const htsCard = cats.find((c) => c.id === 'hts_duty');
+    expect(htsCard).toBeDefined();
+    expect(htsCard!.missing_info).toBeTruthy();
+    expect(htsCard!.missing_info).toMatch(/10-digit HTS/i);
+  });
+
+  it('D2: partial HTS → MFN domain has missing_facts (not treated as absent HTS)', () => {
+    const cats = assembleBaselines(ENTRY_SHORT, null, HTS_PARENT_SHORT, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(ENTRY_SHORT, cats, [], HTS_PARENT_SHORT, '9503', []);
+    const mfn = matrix.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('official_unconfirmed');
+    expect((mfn!.missing_facts ?? []).length).toBeGreaterThan(0);
+  });
+});
+
+describe('HTS state model — E: exact current HTS match → verified, no missing items', () => {
+  const HTS_EXACT: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'exact',
+    requested: '8708305020',
+    hts8: '87083050',
+    matched_htsno: '8708.30.50.20',
+    description: 'Brake drums',
+    mfn_text_rate: '2.5%',
+    mfn_ad_valorem_pct: 2.5,
+    section301_ref: '9903.88.03',
+    candidates: [],
+    source_url: 'https://hts.usitc.gov/',
+    note: null,
+  };
+
+  it('E: exact match → category card is verified_applicable with no missing_info', () => {
+    const cats = assembleBaselines(BASE_ENTRY, null, HTS_EXACT, [], '2026-09-22');
+    const htsCard = cats.find((c) => c.id === 'hts_duty');
+    expect(htsCard).toBeDefined();
+    expect(htsCard!.verification_status).toBe('verified_applicable');
+    expect(htsCard!.missing_info).toBeUndefined();
+  });
+
+  it('E: exact match → MFN domain is verified_applicable with no missing_facts', () => {
+    const cats = assembleBaselines(BASE_ENTRY, null, HTS_EXACT, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(BASE_ENTRY, cats, [], HTS_EXACT, '8708305020', []);
+    const mfn = matrix.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('verified_applicable');
+    expect(mfn!.missing_facts ?? []).toHaveLength(0);
+  });
+});
+
+describe('HTS state model — F: official source outage → source_unavailable, HTS not described as missing', () => {
+  const HTS_OUTAGE_F: import('../services/htsBaseline').HtsLookupResult = {
+    match_level: 'outage',
+    requested: '9503008900',
+    hts8: null, matched_htsno: null, description: null,
+    mfn_text_rate: null, mfn_ad_valorem_pct: null, section301_ref: null,
+    candidates: [],
+    source_url: 'https://hts.usitc.gov/',
+    note: 'USITC service unavailable',
+  };
+
+  const ENTRY_F: WatchlistEntry = { ...BASE_ENTRY, hts_code: '9503.00.8900', origin_country: 'China' };
+
+  it('F: outage → MFN domain is source_unavailable (not insufficient_info)', () => {
+    const cats = assembleBaselines(ENTRY_F, null, HTS_OUTAGE_F, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(ENTRY_F, cats, [], HTS_OUTAGE_F, '9503008900', []);
+    const mfn = matrix.find((c) => c.domain_key === 'mfn_duty');
+    expect(mfn).toBeDefined();
+    expect(mfn!.status).toBe('source_unavailable');
+    expect(mfn!.status).not.toBe('insufficient_info');
+  });
+
+  it('F: outage → no missing_facts claiming user failed to supply HTS', () => {
+    const cats = assembleBaselines(ENTRY_F, null, HTS_OUTAGE_F, [], '2026-09-22');
+    const matrix = buildCoverageMatrix(ENTRY_F, cats, [], HTS_OUTAGE_F, '9503008900', []);
+    const mfn = matrix.find((c) => c.domain_key === 'mfn_duty');
+    expect((mfn!.missing_facts ?? []).join(' ')).not.toMatch(/exact hts/i);
+    expect((mfn!.missing_facts ?? []).join(' ')).not.toMatch(/10-digit/i);
+  });
+});
+
+describe('HTS state model — G: Charles tariff regression unchanged ($10,235.70)', () => {
+  it('G: P7 components still sum to $10,235.70 after HTS state model fix', () => {
+    const CUSTOMS_VALUE = 50_000;
+    const ENTRY_DATE = '2026-09-22';
+    const ORIGIN = 'China';
+    const HTS8 = '95030000';
+
+    const stack = calculateDutyStack(HTS8, ORIGIN, ENTRY_DATE);
+    const s301 = lookupSection301Ustr(HTS8);
+    const ieepaDuty = (CUSTOMS_VALUE * stack.total_ad_valorem_pct) / 100;
+    const s301Duty = ((s301?.rate_pct ?? 0) * CUSTOMS_VALUE) / 100;
+    const { amount: mpf } = computeMpf(CUSTOMS_VALUE, ENTRY_DATE);
+    const hmf = (CUSTOMS_VALUE * 0.125) / 100;
+    const total = ieepaDuty + s301Duty + mpf + hmf;
+
+    expect(stack.total_ad_valorem_pct).toBe(20);
+    expect(s301!.rate_pct).toBe(0);
+    expect(total).toBeCloseTo(10_235.70, 1);
+  });
+});
+
+describe('HTS state model — H: existing compliance/CPSC/phthalate test fixtures unaffected', () => {
+  it('H: checkSection232Auto still works for brake drum (non-toys HTS)', () => {
+    const r = checkSection232Auto(HTS_BRAKE_DRUM, 'China', '2026-09-22');
+    expect(r.applies).toBe(true);
+    expect(r.rate_pct).toBe(25);
+  });
+
+  it('H: assembleBaselines for exact HTS still returns is_children-gated compliance categories', () => {
+    const HTS_EXACT_BRAKE: import('../services/htsBaseline').HtsLookupResult = {
+      match_level: 'exact',
+      requested: '8708305020',
+      hts8: '87083050',
+      matched_htsno: '8708.30.50.20',
+      description: 'Brake drums',
+      mfn_text_rate: '2.5%',
+      mfn_ad_valorem_pct: 2.5,
+      section301_ref: '9903.88.03',
+      candidates: [],
+      source_url: 'https://hts.usitc.gov/',
+      note: null,
+    };
+    const cats = assembleBaselines(BASE_ENTRY, null, HTS_EXACT_BRAKE, [], '2026-09-22');
+    // HTS duty card still present for non-toys exact match
+    expect(cats.find((c) => c.id === 'hts_duty')).toBeDefined();
+    // No spurious children/CPSC card for non-children product
+    expect(cats.find((c) => c.id === 'cpsc_child_safety')).toBeUndefined();
+  });
+});
