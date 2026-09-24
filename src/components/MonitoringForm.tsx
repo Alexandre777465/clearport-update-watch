@@ -1152,7 +1152,7 @@ function ConfirmationView({
     // Hide N/A findings UNLESS they are informational (not_applicable with a source).
     // no_verified_source neutralized guesses always have level N/A — hide those.
     if (c.level === "N/A" && c.verification_status !== "not_applicable") return false;
-    if (c.id && (tariffCatIds.has(c.id) || c.id.startsWith("adcvd_"))) return false;
+    if (c.id && (tariffCatIds.has(c.id) || c.id.startsWith("adcvd_") || c.id.startsWith("ieepa_"))) return false;
     if (tariffCatNames.has(c.category)) return false;
     return true;
   });

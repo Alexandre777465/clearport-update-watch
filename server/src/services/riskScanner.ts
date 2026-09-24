@@ -366,6 +366,14 @@ function topicsOf(name: string): Set<string> {
   if (/battery|un ?38\.3|lithium|phmsa/.test(n)) t.add('battery');
   if (/epa|tsca|fifra/.test(n)) t.add('epa');
   if (/textile|apparel|fiber|ftc label/.test(n)) t.add('textile');
+  // IEEPA executive-order tariff provisions (9903.01.x, 9903.03.x, etc.).
+  // Without this, an LLM-generated "IEEPA Trade Action" (no "tariff" in the name)
+  // would have an empty topic set and leak through finalizeScan as official_unconfirmed.
+  if (/\bieepa\b|9903\.0[13]\.\d/i.test(n)) t.add('ieepa');
+  // Phthalate limits (CPSIA Section 108 / 16 CFR Part 1307).
+  // Names without "cpsia" or "children" (e.g. "Phthalate Limits") must still be
+  // recognised as covered by the childrens module's baseline finding.
+  if (/phthalate|part.?1307/i.test(n)) t.add('phthalate');
   if (/customs documentation|^documentation/.test(n)) t.add('docs');
   if (/marketplace|amazon|tiktok/.test(n)) t.add('marketplace');
   return t;

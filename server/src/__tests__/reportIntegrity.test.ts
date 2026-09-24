@@ -1127,3 +1127,299 @@ describe('HTS persistence: 8708.30.50.20 through the pipeline', () => {
     // Contrast: without HTS the same domain is insufficient_info (tested in June-25 group)
   });
 });
+
+// ── topicsOf deduplication regression ─────────────────────────────────────────
+// These tests guard the invariant:
+//   If a baseline covers topic T, any LLM-generated category that also maps to
+//   topic T must be filtered out in finalizeScan — regardless of the name the
+//   LLM chose (e.g. "IEEPA Trade Action" vs "IEEPA Tariff — 9903.01.24").
+//
+// Affected names before the fix:
+//   "IEEPA Trade Action"  → topicsOf returned {} → leaked as official_unconfirmed
+//   "Phthalate Limits"    → topicsOf returned {} → leaked as official_unconfirmed
+
+describe('topicsOf deduplication — IEEPA and phthalate', () => {
+  function ieepaBaseline(): RiskCategory {
+    return {
+      id: 'ieepa_9903_01_24',
+      category: 'IEEPA Tariff — 9903.01.24',
+      level: 'High',
+      explanation: 'IEEPA 10% additional duty on China-origin goods.',
+      action: 'Include additional duty in landed cost.',
+      verification_status: 'verified_applicable',
+      verified_rate_pct: 10,
+      source: {
+        agency: 'USTR',
+        name: 'USTR',
+        title: 'HTSUS 9903.01.24 — Executive Order',
+        cfr_citation: 'HTSUS 9903.01.24',
+        effective_date: '2025-02-04',
+        last_verified_at: '2026-09-01',
+        url: 'https://hts.usitc.gov/',
+        why_relevant: 'China-origin goods.',
+      },
+    };
+  }
+
+  function phthalateBaseline(): RiskCategory {
+    return {
+      id: 'reg_cpsia_phthalates',
+      category: 'CPSIA / 16 CFR Part 1307 -- Phthalate Limits',
+      level: 'Critical',
+      explanation: 'Phthalates restricted in children\'s products.',
+      action: 'Test to 16 CFR Part 1307.',
+      verification_status: 'verified_applicable',
+      source: {
+        agency: 'CPSC',
+        name: 'CPSC',
+        title: '16 CFR Part 1307',
+        cfr_citation: '16 CFR 1307',
+        effective_date: '2018-01-01',
+        last_verified_at: '2026-09-01',
+        url: 'https://www.ecfr.gov/current/title-16/chapter-II/subchapter-B/part-1307',
+        why_relevant: 'Children\'s product with soft plastic.',
+      },
+    };
+  }
+
+  test('LLM "IEEPA Trade Action" is filtered when IEEPA baseline exists', () => {
+    const llmModelScan: ScanResult = {
+      overall_risk: 'High',
+      overall_summary: 'Model summary.',
+      risk_categories: [
+        {
+          category: 'IEEPA Trade Action',
+          level: 'High',
+          explanation: 'LLM-generated IEEPA category.',
+          action: 'Check IEEPA.',
+          verification_status: 'official_unconfirmed',
+        } as RiskCategory,
+      ],
+      document_checklist: [],
+      broker_questions: [],
+      supplier_questions: [],
+      next_actions: [],
+      readiness_score: 50,
+      confidence_level: 'Medium',
+    };
+
+    const baselines: RiskCategory[] = [ieepaBaseline()];
+    const final = finalizeScan(llmModelScan, baselines, 'en');
+
+    // The LLM "IEEPA Trade Action" must NOT appear as official_unconfirmed
+    const llmIeepa = final.risk_categories.find(
+      (c) => c.category === 'IEEPA Trade Action' && c.verification_status === 'official_unconfirmed',
+    );
+    expect(llmIeepa).toBeUndefined();
+
+    // The baseline ieepa_9903_01_24 must be present as verified_applicable
+    const baselineIeepa = final.risk_categories.find((c) => c.id === 'ieepa_9903_01_24');
+    expect(baselineIeepa).toBeDefined();
+    expect(baselineIeepa!.verification_status).toBe('verified_applicable');
+  });
+
+  test('LLM "Phthalate Limits" is filtered when phthalate baseline exists', () => {
+    const llmModelScan: ScanResult = {
+      overall_risk: 'Critical',
+      overall_summary: 'Model summary.',
+      risk_categories: [
+        {
+          category: 'Phthalate Limits',
+          level: 'Critical',
+          explanation: 'LLM-generated phthalate category.',
+          action: 'Test for phthalates.',
+          verification_status: 'official_unconfirmed',
+        } as RiskCategory,
+      ],
+      document_checklist: [],
+      broker_questions: [],
+      supplier_questions: [],
+      next_actions: [],
+      readiness_score: 50,
+      confidence_level: 'Medium',
+    };
+
+    const baselines: RiskCategory[] = [phthalateBaseline()];
+    const final = finalizeScan(llmModelScan, baselines, 'en');
+
+    // The LLM "Phthalate Limits" must NOT appear as official_unconfirmed
+    const llmPhthalate = final.risk_categories.find(
+      (c) => c.category === 'Phthalate Limits' && c.verification_status === 'official_unconfirmed',
+    );
+    expect(llmPhthalate).toBeUndefined();
+
+    // The baseline phthalate must be present as verified_applicable
+    const baselinePhthalate = final.risk_categories.find((c) => c.id === 'reg_cpsia_phthalates');
+    expect(baselinePhthalate).toBeDefined();
+    expect(baselinePhthalate!.verification_status).toBe('verified_applicable');
+  });
+});
+
+// ── Charles McManus vinyl toy — server-level invariants (E–F, K) ──────────────
+// HTS 9503008900, China→US, $50,000 value, is_children=true.
+// These fixtures are TEST-ONLY — the production scan path must not hardcode
+// any of these values.
+//
+// Invariant (verbatim from spec):
+//   "If an additional tariff rule is treated as applicable by the tariff engine
+//    AND included in the known payable amount, every user-visible representation
+//    of that SAME rule must reflect that it is applicable."
+
+describe('Charles McManus vinyl toy — server-level invariants', () => {
+  const charlesEntry = entry({
+    product_name: 'Vinyl Inflatable Children\'s Toy',
+    hts_code: '9503008900',
+    origin_country: 'China',
+    is_children: true,
+  });
+
+  // HTS 9503.00.89 — Other toys (parent heading used here since exact statistical
+  // suffix 9503.00.89.00 may vary by schedule year; the 8-digit parent is sufficient
+  // for IEEPA scope evaluation since all IEEPA rules have hts_scope: { type: 'all' }).
+  const toyHtsRows = [
+    { htsno: '9503.00.00', description: 'Tricycles, scooters, pedal cars and similar wheeled toys...', general: 'Free', footnotes: [] },
+    { htsno: '9503.00.89', description: 'Other toys', general: 'Free', footnotes: [] },
+  ];
+  const toyHts = resolveHtsRows('9503008900', toyHtsRows);
+
+  const charlesBaselines = assembleBaselines(charlesEntry, 50_000, toyHts, REG_BASELINES);
+
+  // E: ieepa_9903_01_24 must be verified_applicable from baselines
+  test('IEEPA 9903.01.24 baseline is verified_applicable (invariant E)', () => {
+    const cat = charlesBaselines.find((c) => c.id === 'ieepa_9903_01_24');
+    expect(cat).toBeDefined();
+    expect(cat!.verification_status).toBe('verified_applicable');
+  });
+
+  // F: ieepa_9903_01_25 must be verified_applicable from baselines
+  test('IEEPA 9903.01.25 baseline is verified_applicable (invariant F)', () => {
+    const cat = charlesBaselines.find((c) => c.id === 'ieepa_9903_01_25');
+    expect(cat).toBeDefined();
+    expect(cat!.verification_status).toBe('verified_applicable');
+  });
+
+  // G: 9903.01.63 (if suspended) must not appear as an active/applicable rule
+  test('IEEPA 9903.01.63 is not active/verified_applicable (invariant G)', () => {
+    const cat = charlesBaselines.find((c) => c.id === 'ieepa_9903_01_63');
+    // Either absent (not evaluated for this HTS/origin) or not_applicable (suspended)
+    if (cat) {
+      expect(cat.verification_status).not.toBe('verified_applicable');
+    }
+    // It must not be in an active required tariff row
+    expect(cat?.verification_status === 'verified_applicable').toBe(false);
+  });
+
+  // E+F via finalizeScan: after LLM injects "IEEPA Trade Action" as official_unconfirmed,
+  // final scan must still show IEEPA entries only as verified_applicable
+  test('finalizeScan preserves IEEPA as verified_applicable, filters LLM official_unconfirmed IEEPA', () => {
+    const llmScan: ScanResult = {
+      overall_risk: 'Critical',
+      overall_summary: 'LLM scan.',
+      risk_categories: [
+        {
+          category: 'IEEPA Trade Action',
+          level: 'High',
+          explanation: 'LLM IEEPA guess.',
+          action: 'Check IEEPA.',
+          verification_status: 'official_unconfirmed',
+        } as RiskCategory,
+        {
+          category: 'China IEEPA 9903.01.24',
+          level: 'High',
+          explanation: 'Another LLM IEEPA guess.',
+          action: 'Check.',
+          verification_status: 'official_unconfirmed',
+        } as RiskCategory,
+      ],
+      document_checklist: [],
+      broker_questions: [],
+      supplier_questions: [],
+      next_actions: [],
+      readiness_score: 50,
+      confidence_level: 'Medium',
+    };
+
+    const final = finalizeScan(llmScan, charlesBaselines, 'en');
+
+    // No IEEPA category may have official_unconfirmed status
+    const unconfirmedIeepa = final.risk_categories.filter(
+      (c) => (c.id?.startsWith('ieepa_') || /ieepa/i.test(c.category)) &&
+             c.verification_status === 'official_unconfirmed',
+    );
+    expect(unconfirmedIeepa).toHaveLength(0);
+
+    // Baselines survive as verified_applicable
+    const ieepa24 = final.risk_categories.find((c) => c.id === 'ieepa_9903_01_24');
+    const ieepa25 = final.risk_categories.find((c) => c.id === 'ieepa_9903_01_25');
+    expect(ieepa24?.verification_status).toBe('verified_applicable');
+    expect(ieepa25?.verification_status).toBe('verified_applicable');
+  });
+
+  // K: phthalate category is verified_applicable when children + vinyl (via manual baseline)
+  // The production phthalate finding comes from the regulatory module (childrens.ts),
+  // not from assembleBaselines, so we test the finalizeScan filtering path:
+  // a phthalate verified_applicable baseline must survive, while the LLM's
+  // official_unconfirmed "Phthalate Limits" must be filtered.
+  test('phthalate verified_applicable survives finalizeScan; LLM official_unconfirmed is filtered (invariant K)', () => {
+    const phthalateVerifiedBaseline: RiskCategory = {
+      id: 'reg_cpsia_phthalates',
+      category: 'CPSIA / 16 CFR Part 1307 -- Phthalate Limits',
+      level: 'Critical',
+      explanation: 'Vinyl children\'s toy: phthalate limits apply.',
+      action: 'Test to 16 CFR Part 1307 limits.',
+      verification_status: 'verified_applicable',
+      source: {
+        agency: 'CPSC',
+        name: 'CPSC',
+        title: '16 CFR Part 1307',
+        cfr_citation: '16 CFR 1307',
+        effective_date: '2018-01-01',
+        last_verified_at: '2026-09-01',
+        url: 'https://www.ecfr.gov/current/title-16/chapter-II/subchapter-B/part-1307',
+        why_relevant: 'Children\'s product confirmed to contain soft vinyl plastic.',
+      },
+    };
+
+    const baselinesWithPhthalate = [...charlesBaselines, phthalateVerifiedBaseline];
+
+    const llmScanWithPhthalate: ScanResult = {
+      overall_risk: 'Critical',
+      overall_summary: 'LLM scan.',
+      risk_categories: [
+        {
+          category: 'Phthalate Limits',
+          level: 'Critical',
+          explanation: 'LLM phthalate guess.',
+          action: 'Test.',
+          verification_status: 'official_unconfirmed',
+        } as RiskCategory,
+        {
+          category: 'CPSIA Phthalate Restrictions',
+          level: 'Critical',
+          explanation: 'Another LLM phthalate guess.',
+          action: 'Test.',
+          verification_status: 'official_unconfirmed',
+        } as RiskCategory,
+      ],
+      document_checklist: [],
+      broker_questions: [],
+      supplier_questions: [],
+      next_actions: [],
+      readiness_score: 50,
+      confidence_level: 'Medium',
+    };
+
+    const final = finalizeScan(llmScanWithPhthalate, baselinesWithPhthalate, 'en');
+
+    // No phthalate category may have official_unconfirmed status
+    const unconfirmedPhthalate = final.risk_categories.filter(
+      (c) => /phthalate|part.?1307/i.test(c.category) && c.verification_status === 'official_unconfirmed',
+    );
+    expect(unconfirmedPhthalate).toHaveLength(0);
+
+    // The verified_applicable baseline must survive
+    const phthalateCat = final.risk_categories.find((c) => c.id === 'reg_cpsia_phthalates');
+    expect(phthalateCat).toBeDefined();
+    expect(phthalateCat!.verification_status).toBe('verified_applicable');
+  });
+});
