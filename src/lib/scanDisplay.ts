@@ -169,8 +169,14 @@ export function buildCostRows(scan: ProductRiskScan, lang: Lang): CostRow[] {
       const provision = c.domain_key.replace("ieepa_", "").replace(/_/g, ".");  // e.g. "9903.01.24"
       if (c.status === "not_applicable" || c.status === "no_applicable_rule") {
         rows.push({ label: `IEEPA ${provision}`, answer: "Does not apply", rateText: null, ratePct: null, status: c.status, coverageItem: c });
-      } else if (c.status === "verified_applicable" && ratePct != null) {
-        rows.push({ label: `IEEPA ${provision}`, answer: `Applies — +${ratePct}% — ${provision}`, rateText, ratePct, status: c.status, coverageItem: c });
+      } else if (c.status === "verified_applicable") {
+        // Status drives the label — rate is supplementary. Do not gate on ratePct.
+        const answer = ratePct != null
+          ? `Applies — +${ratePct}% — ${provision}`
+          : `Applicable — included in estimate — ${provision}`;
+        rows.push({ label: `IEEPA ${provision}`, answer, rateText, ratePct, status: c.status, coverageItem: c });
+      } else if (c.status === "source_unavailable") {
+        rows.push({ label: `IEEPA ${provision}`, answer: "Cannot determine — tariff source temporarily unavailable", rateText: null, ratePct: null, status: c.status, coverageItem: c });
       } else {
         rows.push({ label: `IEEPA ${provision}`, answer: "Cannot determine — confirm applicability", rateText: null, ratePct: null, status: c.status, coverageItem: c });
       }

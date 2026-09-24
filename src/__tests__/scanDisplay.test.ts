@@ -989,3 +989,200 @@ describe("HTS provided + lookup failed — buildCostRows renders lookup-failure,
     expect(mfn!.answer).not.toContain("HTS code required");
   });
 });
+
+// ── Status consistency: IEEPA verified_applicable must NEVER say "Cannot determine" ──
+//
+// Root cause (Status Consistency Fix): buildCostRows gated the "Applies" IEEPA label
+// on `c.status === "verified_applicable" && ratePct != null`. When the category-card
+// lookup happened to return undefined (e.g. stale scan, finding_id mismatch), ratePct
+// fell to null and the code fell through to "Cannot determine — confirm applicability"
+// even though the coverage matrix correctly said verified_applicable and the known
+// payable total already included those amounts.
+//
+// Fix: status alone drives the label. Rate is supplementary (shown when available,
+// absent without changing the applicability verdict).
+
+/** IEEPA category cards for China → US — both at 10% */
+const IEEPA_9903_01_24_CATEGORY = {
+  id: "ieepa_9903_01_24",
+  category: "IEEPA Tariff — 9903.01.24",
+  level: "High" as const,
+  explanation: "IEEPA 9903.01.24: +10% on all China-origin goods, effective 2025-11-10.",
+  action: "Include in landed cost calculation.",
+  verification_status: "verified_applicable" as const,
+  verified_rate_pct: 10,
+  source: {
+    agency: "CBP",
+    name: "IEEPA executive action",
+    title: "9903.01.24",
+    last_verified_at: "2026-09-01",
+    url: "https://www.federalregister.gov/",
+  },
+};
+
+const IEEPA_9903_01_25_CATEGORY = {
+  id: "ieepa_9903_01_25",
+  category: "IEEPA Tariff — 9903.01.25",
+  level: "High" as const,
+  explanation: "IEEPA 9903.01.25: additional +10% on China-origin goods.",
+  action: "Include in landed cost calculation.",
+  verification_status: "verified_applicable" as const,
+  verified_rate_pct: 10,
+  source: {
+    agency: "CBP",
+    name: "IEEPA executive action",
+    title: "9903.01.25",
+    last_verified_at: "2026-09-01",
+    url: "https://www.federalregister.gov/",
+  },
+};
+
+/** Scan with both IEEPA rules verified_applicable + rate cards present */
+const IEEPA_SCAN_WITH_RATES: ProductRiskScan = {
+  ...BOXING_GLOVES_SCAN,
+  risk_categories: [
+    BOXING_GLOVES_MFN,
+    IEEPA_9903_01_24_CATEGORY,
+    IEEPA_9903_01_25_CATEGORY,
+  ],
+  coverage_matrix: [
+    { domain: "MFN Duty", domain_key: "mfn_duty", category: "tariff", status: "verified_applicable", finding_id: "hts_duty" },
+    { domain: "IEEPA 9903.01.24", domain_key: "ieepa_9903_01_24", category: "tariff", status: "verified_applicable", finding_id: "ieepa_9903_01_24" },
+    { domain: "IEEPA 9903.01.25", domain_key: "ieepa_9903_01_25", category: "tariff", status: "verified_applicable", finding_id: "ieepa_9903_01_25" },
+  ],
+  missing_facts: [],
+};
+
+/**
+ * Scan with IEEPA verified_applicable BUT no matching category card (simulates
+ * a stale/cached scan where finding_id lookup fails). This is the exact scenario
+ * that produced the "Cannot determine" bug for Charles's China → US shipment.
+ */
+const IEEPA_SCAN_NO_RATE_CARD: ProductRiskScan = {
+  ...BOXING_GLOVES_SCAN,
+  risk_categories: [BOXING_GLOVES_MFN],  // IEEPA category cards absent
+  coverage_matrix: [
+    { domain: "MFN Duty", domain_key: "mfn_duty", category: "tariff", status: "verified_applicable", finding_id: "hts_duty" },
+    // verified_applicable with no matching category card in risk_categories → ratePct will be null
+    { domain: "IEEPA 9903.01.24", domain_key: "ieepa_9903_01_24", category: "tariff", status: "verified_applicable", finding_id: "ieepa_9903_01_24" },
+    { domain: "IEEPA 9903.01.25", domain_key: "ieepa_9903_01_25", category: "tariff", status: "verified_applicable", finding_id: "ieepa_9903_01_25" },
+  ],
+  missing_facts: [],
+};
+
+describe("Status consistency — IEEPA verified_applicable must never say 'Cannot determine'", () => {
+  describe("A — verified_applicable with rate card present", () => {
+    const rows = buildCostRows(IEEPA_SCAN_WITH_RATES, "en");
+
+    it("A1: 9903.01.24 row answer is NOT 'Cannot determine'", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row).toBeDefined();
+      expect(row!.answer.toLowerCase()).not.toContain("cannot determine");
+    });
+
+    it("A2: 9903.01.24 row shows '+10%' and provision reference", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row!.answer).toContain("+10%");
+      expect(row!.answer).toContain("9903.01.24");
+    });
+
+    it("A3: 9903.01.24 ratePct is 10 and contributes to knownPct", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row!.ratePct).toBe(10);
+    });
+
+    it("A4: 9903.01.25 row answer is NOT 'Cannot determine'", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_25");
+      expect(row).toBeDefined();
+      expect(row!.answer.toLowerCase()).not.toContain("cannot determine");
+    });
+
+    it("A5: both IEEPA rows + MFN contribute to knownPct (4.9 + 10 + 10 = 24.9%)", () => {
+      const { knownPct, hasUnknown } = computeKnownTariffTotal(rows);
+      expect(knownPct).toBeCloseTo(24.9, 5);
+      expect(hasUnknown).toBe(false);
+    });
+  });
+
+  describe("B — verified_applicable with rate card ABSENT (the Charles scenario)", () => {
+    const rows = buildCostRows(IEEPA_SCAN_NO_RATE_CARD, "en");
+
+    it("B1: 9903.01.24 row answer is NOT 'Cannot determine'", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row).toBeDefined();
+      expect(row!.answer.toLowerCase()).not.toContain("cannot determine");
+    });
+
+    it("B2: 9903.01.24 row signals 'Applicable' without a fabricated rate", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row!.answer.toLowerCase()).toContain("applicable");
+      // Must NOT contain a percentage sign (no guessed rate)
+      expect(row!.answer).not.toMatch(/\+\d+%/);
+    });
+
+    it("B3: 9903.01.24 ratePct on the row is null (rate unknown — not guessed)", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row!.ratePct).toBeNull();
+    });
+
+    it("B4: 9903.01.25 row answer is NOT 'Cannot determine'", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_25");
+      expect(row).toBeDefined();
+      expect(row!.answer.toLowerCase()).not.toContain("cannot determine");
+    });
+
+    it("B5: status on both IEEPA rows is verified_applicable", () => {
+      const r24 = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      const r25 = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_25");
+      expect(r24!.status).toBe("verified_applicable");
+      expect(r25!.status).toBe("verified_applicable");
+    });
+  });
+
+  describe("C — not_applicable IEEPA rule → 'Does not apply'", () => {
+    const notApplicableScan: ProductRiskScan = {
+      ...BOXING_GLOVES_SCAN,
+      risk_categories: [BOXING_GLOVES_MFN],
+      coverage_matrix: [
+        { domain: "MFN Duty", domain_key: "mfn_duty", category: "tariff", status: "verified_applicable", finding_id: "hts_duty" },
+        { domain: "IEEPA 9903.01.24", domain_key: "ieepa_9903_01_24", category: "tariff", status: "not_applicable" },
+      ],
+      missing_facts: [],
+    };
+    const rows = buildCostRows(notApplicableScan, "en");
+
+    it("C1: not_applicable IEEPA row says 'Does not apply'", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row).toBeDefined();
+      expect(row!.answer).toBe("Does not apply");
+    });
+
+    it("C2: not_applicable IEEPA row has null ratePct", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row!.ratePct).toBeNull();
+    });
+  });
+
+  describe("D — source_unavailable IEEPA rule → Cannot determine, source unavailable", () => {
+    const sourceUnavailableScan: ProductRiskScan = {
+      ...BOXING_GLOVES_SCAN,
+      risk_categories: [BOXING_GLOVES_MFN],
+      coverage_matrix: [
+        { domain: "IEEPA 9903.01.24", domain_key: "ieepa_9903_01_24", category: "tariff", status: "source_unavailable" },
+      ],
+      missing_facts: [],
+    };
+    const rows = buildCostRows(sourceUnavailableScan, "en");
+
+    it("D1: source_unavailable IEEPA says 'tariff source temporarily unavailable'", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row).toBeDefined();
+      expect(row!.answer.toLowerCase()).toContain("tariff source temporarily unavailable");
+    });
+
+    it("D2: source_unavailable IEEPA has null ratePct — not included in known total", () => {
+      const row = rows.find((r) => r.coverageItem.domain_key === "ieepa_9903_01_24");
+      expect(row!.ratePct).toBeNull();
+    });
+  });
+});
