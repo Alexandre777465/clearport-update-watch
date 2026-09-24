@@ -208,4 +208,25 @@ describe("intakeToPayload — field mapping invariants", () => {
     expect(p.origin_country).toBe("China");
     expect(p.manufacturer_name).toBe("Factory");
   });
+
+  it("skippedSteps does not appear in API payload (I-2 regression)", () => {
+    const p = intakeToPayload(state({
+      email: "a@b.com", productName: "Mug",
+      originCountry: "China", destination: "United States",
+      skippedSteps: new Set(["description", "htsCode", "freightUsd", "insuranceUsd", "manufacturerName", "exporterName"]),
+    }));
+    // Payload should not contain skippedSteps at all
+    expect((p as Record<string, unknown>)["skippedSteps"]).toBeUndefined();
+    // Skipped optional fields remain absent from payload
+    expect(p.product_description).toBeUndefined();
+    expect(p.hts_code).toBeUndefined();
+    expect(p.freight_usd).toBeUndefined();
+    expect(p.insurance_usd).toBeUndefined();
+    expect(p.manufacturer_name).toBeUndefined();
+    expect(p.exporter_name).toBeUndefined();
+  });
+
+  it("EMPTY_STATE.skippedSteps is an empty Set", () => {
+    expect(EMPTY_STATE.skippedSteps.size).toBe(0);
+  });
 });

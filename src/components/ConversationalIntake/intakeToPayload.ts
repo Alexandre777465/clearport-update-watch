@@ -25,6 +25,8 @@ export interface ConversationState {
   manufacturerName: string;
   exporterName: string;
   knownFacts: Record<string, string>;
+  /** UI-only. Which optional core steps were explicitly skipped. Never reaches the API payload. */
+  skippedSteps: ReadonlySet<string>;
 }
 
 export const EMPTY_STATE: ConversationState = {
@@ -41,6 +43,7 @@ export const EMPTY_STATE: ConversationState = {
   manufacturerName: "",
   exporterName: "",
   knownFacts: {},
+  skippedSteps: new Set<string>(),
 };
 
 function parseUsd(raw: string): number | undefined {

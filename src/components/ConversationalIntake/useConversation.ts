@@ -10,7 +10,7 @@
  * This hook NEVER determines compliance facts — it only stores answers.
  */
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { CONVERSATION_STEPS, type StepId } from "./conversationSteps";
 import { EMPTY_STATE, type ConversationState } from "./intakeToPayload";
 import { getQuestionsForProduct, type ProductQuestion } from "@/lib/productQuestions";
@@ -27,19 +27,18 @@ export interface ChatMessage {
 
 type CoreStepId = StepId;
 type DynamicStepId = string; // ProductQuestion.key
-type AnyStepId = CoreStepId | DynamicStepId;
 
 export interface UseConversationReturn {
   messages: ChatMessage[];
   state: ConversationState;
   currentStep: ConversationStep | ProductQuestionStep | null;
   isComplete: boolean;
-  answer: (value: string) => void;
+  answer: (value: string, displayText?: string) => void;
   skip: () => void;
   reset: () => void;
 }
 
-interface ConversationStep {
+export interface ConversationStep {
   kind: "core";
   id: CoreStepId;
   prompt: string;
@@ -51,7 +50,7 @@ interface ConversationStep {
   showIf?: undefined;
 }
 
-interface ProductQuestionStep {
+export interface ProductQuestionStep {
   kind: "dynamic";
   id: DynamicStepId;
   prompt: string;
@@ -66,8 +65,16 @@ interface ProductQuestionStep {
 let msgCounter = 0;
 function uid() { return `m${++msgCounter}`; }
 
-function makeCoreStep(state: ConversationState, lang: "en" | "zh"): ConversationStep | null {
+/**
+ * Returns the first unanswered, non-skipped core step, or null when all done.
+ * Exported for unit testing only.
+ */
+export function makeCoreStep(
+  state: ConversationState,
+  lang: "en" | "zh",
+): ConversationStep | null {
   const remaining = CONVERSATION_STEPS.filter((s) => {
+    if (state.skippedSteps.has(s.id)) return false;
     const val = state[s.id as keyof ConversationState];
     return typeof val === "string" && val === "";
   });
@@ -88,14 +95,12 @@ function makeDynamicStep(
   state: ConversationState,
   lang: "en" | "zh",
 ): ProductQuestionStep | null {
-  // Only show dynamic questions once we have product name
   if (!state.productName) return null;
 
   const htsDigits = state.htsCode.replace(/[^0-9]/g, "");
   const productText = `${state.productName} ${state.description}`;
   const questions = getQuestionsForProduct(htsDigits, productText, {}, state.knownFacts);
 
-  // Filter to unanswered questions, respecting showIf conditions
   const unanswered = questions.filter((q: ProductQuestion) => {
     if (q.key in state.knownFacts) return false;
     if (q.showIf) {
@@ -136,7 +141,6 @@ export function useConversation(): UseConversationReturn {
   });
 
   const currentStep = useMemo((): ConversationStep | ProductQuestionStep | null => {
-    // Core steps take priority; dynamic questions appear after email is collected
     const core = makeCoreStep(state, lang);
     if (core) return core;
     return makeDynamicStep(state, lang);
@@ -144,13 +148,19 @@ export function useConversation(): UseConversationReturn {
 
   const isComplete = currentStep === null;
 
+  // Guard against rapid-click duplicates. A ref (not state) so it doesn't cause re-renders.
+  const answerInflightRef = useRef(false);
+
   const pushMessage = useCallback((role: MessageRole, text: string, stepId?: string) => {
     setMessages((prev) => [...prev, { id: uid(), role, text, stepId }]);
   }, []);
 
+  /**
+   * Compute and push the next assistant prompt given the fully-updated next state.
+   * Must be called at most once per user action (never inside a setState updater).
+   */
   const advancePrompt = useCallback(
     (nextState: ConversationState) => {
-      // Compute next step from the updated state
       const core = makeCoreStep(nextState, lang);
       if (core) {
         pushMessage("assistant", core.prompt, core.id);
@@ -161,7 +171,6 @@ export function useConversation(): UseConversationReturn {
         pushMessage("assistant", dyn.prompt, dyn.id);
         return;
       }
-      // All done
       const done =
         lang === "zh"
           ? "感谢！正在分析您的产品……"
@@ -171,36 +180,83 @@ export function useConversation(): UseConversationReturn {
     [lang, pushMessage],
   );
 
+  /**
+   * Record the user's answer and advance to the next step.
+   *
+   * @param value       The canonical stored value (e.g. "age_3_to_12", "ocean").
+   * @param displayText The human-readable label shown in the chat bubble.
+   *                    Falls back to `value` when not provided (text inputs).
+   *
+   * Fix I-1: advancePrompt is called directly in the function body, NOT inside a
+   * setState updater. This prevents React StrictMode from double-invoking the
+   * side effect and producing duplicate assistant messages.
+   *
+   * Fix I-3: the user bubble shows displayText (e.g. "Ages 3 – 12") while the
+   * canonical value (e.g. "age_3_to_12") is what gets stored and sent to the engine.
+   */
   const answer = useCallback(
-    (value: string) => {
+    (value: string, displayText?: string) => {
       if (!currentStep) return;
+      // Prevent duplicate messages from rapid double-clicks (I-1 defence in depth).
+      if (answerInflightRef.current) return;
+      answerInflightRef.current = true;
+
       const trimmed = value.trim();
+      const display = displayText !== undefined ? displayText : trimmed;
 
-      // Echo user message
-      pushMessage("user", trimmed || (lang === "zh" ? "（跳过）" : "(skipped)"), currentStep.id);
+      // Echo the human-readable label into the chat thread.
+      pushMessage(
+        "user",
+        display || (lang === "zh" ? "（跳过）" : "(skipped)"),
+        currentStep.id,
+      );
 
-      setState((prev) => {
-        const next = { ...prev };
+      // Compute next state from the current closure value — no setState updater.
+      const next: ConversationState = { ...state };
+      if (currentStep.kind === "core") {
+        (next[currentStep.id as keyof ConversationState] as string) = trimmed;
+      } else {
+        next.knownFacts = { ...state.knownFacts, [currentStep.id]: trimmed };
+      }
 
-        if (currentStep.kind === "core") {
-          (next[currentStep.id as keyof ConversationState] as string) = trimmed;
-        } else {
-          next.knownFacts = { ...prev.knownFacts, [currentStep.id]: trimmed };
-        }
+      // Commit state, then advance the prompt — both happen exactly once.
+      setState(next);
+      advancePrompt(next);
 
-        // Schedule prompt for next tick so state is settled
-        setTimeout(() => advancePrompt(next), 0);
-        return next;
-      });
+      // Release the guard after this event loop tick so the next render has settled.
+      setTimeout(() => { answerInflightRef.current = false; }, 0);
     },
-    [currentStep, lang, pushMessage, advancePrompt],
+    [currentStep, lang, pushMessage, advancePrompt, state],
   );
 
+  /**
+   * Skip the current optional step.
+   *
+   * Fix I-2: marks the step in skippedSteps (a Set carried inside ConversationState)
+   * rather than setting the field to "". makeCoreStep filters out skippedSteps, so the
+   * question never re-appears. The field remains "" and is therefore absent from the
+   * API payload — no sentinel value reaches the engine.
+   */
   const skip = useCallback(() => {
-    answer("");
-  }, [answer]);
+    if (!currentStep || !currentStep.optional) return;
+    if (answerInflightRef.current) return;
+    answerInflightRef.current = true;
+
+    pushMessage("user", lang === "zh" ? "（跳过）" : "(skipped)", currentStep.id);
+
+    const next: ConversationState = {
+      ...state,
+      skippedSteps: new Set([...state.skippedSteps, currentStep.id]),
+    };
+
+    setState(next);
+    advancePrompt(next);
+
+    setTimeout(() => { answerInflightRef.current = false; }, 0);
+  }, [currentStep, lang, pushMessage, state, advancePrompt]);
 
   const reset = useCallback(() => {
+    answerInflightRef.current = false;
     setState(EMPTY_STATE);
     msgCounter = 0;
     const greeting =

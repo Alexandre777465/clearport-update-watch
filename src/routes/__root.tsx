@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -116,11 +117,15 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  // Hide the assistant FAB while /check is active — the user is already in a
+  // conversational intake; a second chat widget overlaps the input on mobile.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const showAssistant = !pathname.startsWith("/check");
 
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
-      <FloatingAssistant />
+      {showAssistant && <FloatingAssistant />}
       <Toaster />
     </QueryClientProvider>
   );

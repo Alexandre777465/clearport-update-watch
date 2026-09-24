@@ -44,7 +44,8 @@ const TRANSPORT_OPTIONS = [
 
 interface Props {
   step: AnyStep;
-  onSubmit: (value: string) => void;
+  /** value = canonical stored value; displayText = human-readable label shown in chat bubble */
+  onSubmit: (value: string, displayText?: string) => void;
   onSkip?: () => void;
 }
 
@@ -76,7 +77,7 @@ export function StructuredInput({ step, onSubmit, onSkip }: Props) {
             variant="outline"
             size="sm"
             className="rounded-full text-xs"
-            onClick={() => onSubmit(opt.value)}
+            onClick={() => onSubmit(opt.value, opt.label)}
           >
             {opt.label}
           </Button>
@@ -126,7 +127,7 @@ export function StructuredInput({ step, onSubmit, onSkip }: Props) {
               variant="outline"
               size="sm"
               className="rounded-full text-xs"
-              onClick={() => onSubmit(opt.value)}
+              onClick={() => onSubmit(opt.value, lang === "zh" ? opt.labelZh : opt.label)}
             >
               {lang === "zh" ? opt.labelZh : opt.label}
             </Button>
