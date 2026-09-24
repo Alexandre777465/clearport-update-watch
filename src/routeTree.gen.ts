@@ -20,6 +20,7 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as ImportBasicsRouteImport } from './routes/import-basics'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as CheckRouteImport } from './routes/check'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AlertsIndexRouteImport } from './routes/alerts.index'
@@ -83,6 +84,11 @@ const DashboardRoute = DashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CheckRoute = CheckRouteImport.update({
+  id: '/check',
+  path: '/check',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AskRoute = AskRouteImport.update({
   id: '/ask',
   path: '/ask',
@@ -125,6 +131,7 @@ const Char91DotmcpChar93InvokeToolToolRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
+  '/check': typeof CheckRoute
   '/dashboard': typeof DashboardRoute
   '/import-basics': typeof ImportBasicsRoute
   '/mcp': typeof McpRoute
@@ -145,6 +152,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
+  '/check': typeof CheckRoute
   '/dashboard': typeof DashboardRoute
   '/import-basics': typeof ImportBasicsRoute
   '/mcp': typeof McpRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
+  '/check': typeof CheckRoute
   '/dashboard': typeof DashboardRoute
   '/import-basics': typeof ImportBasicsRoute
   '/mcp': typeof McpRoute
@@ -188,6 +197,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/ask'
+    | '/check'
     | '/dashboard'
     | '/import-basics'
     | '/mcp'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/ask'
+    | '/check'
     | '/dashboard'
     | '/import-basics'
     | '/mcp'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/ask'
+    | '/check'
     | '/dashboard'
     | '/import-basics'
     | '/mcp'
@@ -249,6 +261,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AskRoute: typeof AskRoute
+  CheckRoute: typeof CheckRoute
   DashboardRoute: typeof DashboardRoute
   ImportBasicsRoute: typeof ImportBasicsRoute
   McpRoute: typeof McpRoute
@@ -346,6 +359,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/check': {
+      id: '/check'
+      path: '/check'
+      fullPath: '/check'
+      preLoaderRoute: typeof CheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ask': {
       id: '/ask'
       path: '/ask'
@@ -401,6 +421,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AskRoute: AskRoute,
+  CheckRoute: CheckRoute,
   DashboardRoute: DashboardRoute,
   ImportBasicsRoute: ImportBasicsRoute,
   McpRoute: McpRoute,

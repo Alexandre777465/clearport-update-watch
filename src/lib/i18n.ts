@@ -687,6 +687,11 @@ const DICT = {
   },
   sec1_cannot_value: { en: "Customs value not provided", zh: "未提供关税价值" },
 
+  // ── Import Check (/check) section headings ───────────────────────────────
+  check_section_costs:        { en: "Tariff & cost breakdown",      zh: "关税及成本明细" },
+  check_section_regulations:  { en: "Laws & product requirements",  zh: "法规与产品要求" },
+  check_total_duty_rate:      { en: "Known total duty rate",        zh: "已知关税合计税率" },
+
   // ── Chinese translation status banners ───────────────────────────────────
   translation_pending_banner: {
     en: "Base report ready. Chinese version is being generated, please wait…",
