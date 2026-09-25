@@ -62,15 +62,28 @@
  *
  *   ANNEX II MACHINE-READABILITY FINDING (verified 2026-09-25):
  *     The Annex II HTS-code tables are published as IMAGE files in the Federal Register
- *     (GPH elements EN28JY26.060 through EN28JY26.086+, pages 47396–47422). The string
+ *     (GPH elements EN28JY26.060 through EN28JY26.326, pages 47396–47422). The string
  *     "9503" does not appear anywhere in the 183,456-character machine-readable XML of
  *     FR Doc. 2026-15181. The USITC HTS API returns "footnotes": [] (no 9903.05.xx
- *     footnote) for HTS 9503.00.00. Critically, the USITC also returns "footnotes": []
- *     for HTS 6109.10.00 (cotton T-shirts — definitively covered goods), confirming the
- *     USITC has not yet incorporated 9903.05.20 footnotes for ANY goods as of 2026-09-25.
- *     CONCLUSION: 'official_unconfirmed' is the only legally defensible engine state for
- *     any specific HTS vs. 9903.05.20. Coverage can only be determined by human review
- *     of the image tables. $6,250 (12.5% × $50,000) must NOT enter known-payable totals.
+ *     footnote) for HTS 9503.00.00. The USITC also returns "footnotes": [] for HTS
+ *     6109.10.00 (cotton T-shirts — definitively covered goods), confirming the USITC
+ *     has not yet incorporated 9903.05.20 footnotes for ANY goods as of 2026-09-25.
+ *
+ *   ANNEX II VISUAL INSPECTION FINDING (verified 2026-09-25):
+ *     Direct examination of Federal Register image tables EN28JY26.060–EN28JY26.326:
+ *       Part A (Any Investigated Economy, images 060–154): ALL entries carry "Aircraft"
+ *         scope limitation. Chapter 95 (HTS 9503.xx, toys) is completely absent.
+ *       Country-specific Parts (images 155–326): Examined Switzerland (B), Malaysia (E),
+ *         Cambodia (F), Guatemala (G), Argentina (I), Taiwan (K), Indonesia (L), Ecuador
+ *         (M), Jordan (N), CAFTA-DR textiles/apparel (O). All contain only agricultural,
+ *         natural-material, and textile goods. NO manufactured consumer goods. NO Ch. 95.
+ *       China-specific Part: NONE. The publication skips from Part B (Switzerland, ending
+ *         mid-page on image 164) to Part E (Malaysia, beginning same page) with no
+ *         intervening Part C or D. China receives only Part A exemptions (aircraft only).
+ *     CONCLUSION: HTS 9503 is definitively NOT exempt from 9903.05.20 under Annex II.
+ *     Status for HTS 9503: 'verified_applicable'. $6,250 (12.5% × $50,000) IS
+ *     known-payable for a $50,000 China-origin HTS 9503 entry after 2026-07-24.
+ *     All other HTS codes remain 'official_unconfirmed' pending human Annex II review.
  *
  * Sources:
  *   IEEPA ruling:  SCOTUS, Feb 20, 2026 (per Holland & Knight, WilmerHale, Skadden alerts)

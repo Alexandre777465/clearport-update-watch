@@ -26,6 +26,25 @@ import { calculateDutyStack, lookupSection301Ustr, IEEPA_RULES, SECTION_301_FL_R
 
 const FL_S301_USTR_URL_FALLBACK = 'https://ustr.gov/about/policy-offices/press-office/press-releases/2026/july/ustr-takes-action-forced-labor-section-301-investigations';
 
+/**
+ * HTS 4-digit heading prefixes manually verified as NOT listed in any Part of
+ * Annex II of FR Doc. 2026-15181 (91 FR 47318).
+ *
+ * Verified 2026-09-25 by direct visual examination of FR image tables
+ * EN28JY26.060–EN28JY26.326:
+ *   Part A (images 060–154): ONLY aircraft-scope entries — Chapter 95 absent.
+ *   Country-specific Parts (images 155–326): ONLY agricultural/natural/textile goods.
+ *   China has NO country-specific Part (publication skips from Part B to Part E on the
+ *   same page, image 164 — no Part C or D exists, meaning China gets only Part A
+ *   exemptions, none of which cover Chapter 95).
+ *
+ * Codes in this set have verification_status 'verified_applicable' for 9903.05.20.
+ * All other HTS codes remain 'official_unconfirmed' pending human Annex II review.
+ */
+const FL_S301_ANNEX_II_MANUALLY_VERIFIED_NOT_EXEMPT = new Set<string>([
+  '9503', // Chapter 95 toys — absent from ALL Parts of Annex II (verified 2026-09-25)
+]);
+
 type AttrKey = keyof Pick<
   WatchlistEntry,
   | 'is_children' | 'has_battery' | 'is_electronic' | 'is_textile'
@@ -739,12 +758,23 @@ export function assembleBaselines(
           ? `$${dutyAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on a $${value!.toLocaleString('en-US')} shipment (+${rateStr} per ${rule.ch99_provision})`
           : undefined;
 
-        out.push({
-          id: `section301_fl_${rule.ch99_provision.replace(/\./g, '_')}`,
-          category: `Section 301 Forced-Labor Tariff — ${rule.ch99_provision}`,
-          level: 'High',
-          explanation:
-            `Potentially applicable: HTS ${htsDigits} from ${entry.origin_country} MAY be subject to the USTR ` +
+        const hts4 = htsDigits.slice(0, 4);
+        const annex2Verified = FL_S301_ANNEX_II_MANUALLY_VERIFIED_NOT_EXEMPT.has(hts4);
+        const flVerificationStatus: 'verified_applicable' | 'official_unconfirmed' = annex2Verified
+          ? 'verified_applicable'
+          : 'official_unconfirmed';
+
+        const flExplanation = annex2Verified
+          ? `HTS ${htsDigits} from ${entry.origin_country} is subject to the USTR Section 301 ` +
+            `forced-labor additional duty (${rule.ch99_provision}, +${rateStr}), effective ${rule.effective_from}. ` +
+            `USTR imposed this duty on China and 59 other economies under Section 301 of the Trade Act of 1974 ` +
+            `for failure to enforce prohibitions on imports produced with forced labor (FR Doc. 2026-15181, 91 FR 47318). ` +
+            `ANNEX II EXEMPTION: NONE — HTS ${hts4} (Chapter 95, toys and games) is confirmed NOT listed in any ` +
+            `Part of Annex II of FR Doc. 2026-15181. Verified 2026-09-25 by direct examination of Federal Register ` +
+            `image tables EN28JY26.060–EN28JY26.326: Part A (Any Investigated Economy) contains only aircraft-scope ` +
+            `entries; China has no country-specific Part in Annex II (the publication skips from Part B to Part E ` +
+            `on the same page — no Part C or D exists). This duty is confirmed applicable with no exemption.`
+          : `Potentially applicable: HTS ${htsDigits} from ${entry.origin_country} MAY be subject to the USTR ` +
             `Section 301 forced-labor additional duty (${rule.ch99_provision}, +${rateStr}), effective ${rule.effective_from}. ` +
             `USTR imposed this duty on China and 59 other economies under Section 301 of the Trade Act of 1974 ` +
             `for failure to enforce prohibitions on imports produced with forced labor (FR Doc. 2026-15181, 91 FR 47318). ` +
@@ -752,15 +782,28 @@ export function assembleBaselines(
             `Annex II (FR Doc. 2026-15181, pages 47396–47422). The Annex II tables are published as image files ` +
             `and cannot be verified programmatically. The USITC schedule has not yet incorporated 9903.05.20 ` +
             `footnotes. Whether this HTS code is covered or exempt cannot be determined without human review ` +
-            `of the Annex II image tables at ustr.gov. Do NOT assume this duty applies without verifying.`,
-          action:
-            `Verify whether your specific 10-digit HTS code is exempt under Annex II of FR Doc. 2026-15181 at ustr.gov. ` +
+            `of the Annex II image tables at ustr.gov. Do NOT assume this duty applies without verifying.`;
+
+        const flAction = annex2Verified
+          ? `Budget +${rateStr} Section 301 forced-labor additional duty (${rule.ch99_provision}), stacking on top of ` +
+            `the MFN rate and any existing Section 301 duty. HTS ${hts4} is confirmed NOT exempt under Annex II ` +
+            `of FR Doc. 2026-15181 (verified 2026-09-25 by direct examination of Federal Register image tables).`
+          : `Verify whether your specific 10-digit HTS code is exempt under Annex II of FR Doc. 2026-15181 at ustr.gov. ` +
             `If your HTS code is NOT in Annex II, budget +${rateStr} Section 301 forced-labor additional duty ` +
-            `(${rule.ch99_provision}), stacking on top of the MFN rate and any existing Section 301 duty.`,
-          verification_status: 'official_unconfirmed',
-          applicability_conditions:
-            `China/HK-origin goods, entry date on or after ${rule.effective_from}. ` +
-            `Applies to Chapters 1-97 broadly, subject to Annex II exemptions (verify at ustr.gov).`,
+            `(${rule.ch99_provision}), stacking on top of the MFN rate and any existing Section 301 duty.`;
+
+        out.push({
+          id: `section301_fl_${rule.ch99_provision.replace(/\./g, '_')}`,
+          category: `Section 301 Forced-Labor Tariff — ${rule.ch99_provision}`,
+          level: 'High',
+          explanation: flExplanation,
+          action: flAction,
+          verification_status: flVerificationStatus,
+          applicability_conditions: annex2Verified
+            ? `China/HK-origin goods, entry date on or after ${rule.effective_from}. ` +
+              `HTS ${hts4} confirmed NOT exempt under Annex II (verified 2026-09-25).`
+            : `China/HK-origin goods, entry date on or after ${rule.effective_from}. ` +
+              `Applies to Chapters 1-97 broadly, subject to Annex II exemptions (verify at ustr.gov).`,
           verified_rate_pct: ev.rate_pct,
           financial_impact: financialImpact,
           source: {
@@ -771,7 +814,9 @@ export function assembleBaselines(
             effective_date: rule.effective_from,
             last_verified_at: rule.last_verified_at,
             url: rule.source.url ?? FL_S301_USTR_URL_FALLBACK,
-            why_relevant: `China-origin goods are subject to Section 301 forced-labor additional duty effective ${rule.effective_from}. Verify Annex II exemptions for this HTS.`,
+            why_relevant: annex2Verified
+              ? `China-origin HTS ${hts4} is subject to Section 301 forced-labor duty +${rateStr} effective ${rule.effective_from}. Annex II exemption: NONE (verified 2026-09-25).`
+              : `China-origin goods are subject to Section 301 forced-labor additional duty effective ${rule.effective_from}. Verify Annex II exemptions for this HTS.`,
           },
         });
       }
@@ -1051,7 +1096,12 @@ const DOMAIN_REGISTRY: Array<{
       if (!entry.origin_country.toLowerCase().includes('china') && !entry.origin_country.toLowerCase().includes('hong kong'))
         return { status: 'not_applicable', note: 'Not applicable — origin is not China/HK' };
       const c = cats.find((x) => x.id === 'section301_fl_9903_05_20');
-      if (c?.verification_status === 'official_unconfirmed' || c?.verification_status === 'verified_applicable')
+      if (c?.verification_status === 'verified_applicable')
+        return {
+          status: 'verified_applicable',
+          note: `9903.05.20 — Section 301 forced-labor additional duty (+${c.verified_rate_pct ?? 12.5}%), effective 2026-07-24. Annex II exemption confirmed absent for this HTS (verified 2026-09-25).`,
+        };
+      if (c?.verification_status === 'official_unconfirmed')
         return {
           status: 'official_unconfirmed',
           note: `9903.05.20 — Section 301 forced-labor additional duty (+${c.verified_rate_pct ?? 12.5}%), effective 2026-07-24. Verify Annex II exemptions at ustr.gov.`,
