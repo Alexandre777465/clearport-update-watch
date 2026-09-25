@@ -22,7 +22,9 @@ import {
 } from './tariffRules';
 import { evaluateAllModules } from './regulatoryModules/index';
 import type { ModuleInput, DocSpec as ModuleDocSpec, DynamicQuestion } from './regulatoryModules/index';
-import { calculateDutyStack, lookupSection301Ustr, IEEPA_RULES } from './tariffRuleEngine';
+import { calculateDutyStack, lookupSection301Ustr, IEEPA_RULES, SECTION_301_FL_RULES } from './tariffRuleEngine';
+
+const FL_S301_USTR_URL_FALLBACK = 'https://ustr.gov/about/policy-offices/press-office/press-releases/2026/july/ustr-takes-action-forced-labor-section-301-investigations';
 
 type AttrKey = keyof Pick<
   WatchlistEntry,
@@ -647,18 +649,19 @@ export function assembleBaselines(
 
     // ── 2e. IEEPA tariff layers (Chapter 99, Subchapter III) ─────────────────
     // Evaluate all IEEPA rules for this entry date and origin.
-    // Show each rule that is ACTIVE or SUSPENDED (so customer sees what was evaluated).
-    // Expired rules and rules with wrong origin/HTS scope are suppressed.
+    // Show: ACTIVE, SUSPENDED (origin-relevant, informative), JUDICIALLY_INVALIDATED
+    //       (origin-relevant — tell the customer what changed and why duty is zero).
+    // Suppress: EXPIRED-by-date (natural expiry, no newsworthy status), NOT_APPLICABLE.
     {
       const htsDigits = hts?.requested ?? normalizeHts(entry.hts_code ?? '');
       const ieepResult = calculateDutyStack(htsDigits, entry.origin_country, today, IEEPA_RULES);
       for (const ev of ieepResult.evaluated_rules) {
         const rule = ev.rule;
         if (!rule.ch99_provision) continue;
-        // Show ACTIVE rules + SUSPENDED rules that are origin-relevant (informative)
         const showActive = ev.status === 'ACTIVE';
         const showSuspended = ev.status === 'SUSPENDED' && matchesOriginForDisplay(rule, entry.origin_country);
-        if (!showActive && !showSuspended) continue;
+        const showInvalidated = ev.status === 'JUDICIALLY_INVALIDATED' && matchesOriginForDisplay(rule, entry.origin_country);
+        if (!showActive && !showSuspended && !showInvalidated) continue;
 
         const rateStr = rule.rate.type === 'ad_valorem' ? `${rule.rate.ad_valorem_pct}%` : (rule.rate.description ?? 'see provision');
         const dutyAmt = showActive && rule.rate.type === 'ad_valorem' && value != null
@@ -668,15 +671,36 @@ export function assembleBaselines(
           ? `$${dutyAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on a $${value!.toLocaleString('en-US')} shipment (+${rateStr} per ${rule.ch99_provision})`
           : undefined;
 
+        let explanation: string;
+        let action: string;
+        let verificationStatus: 'verified_applicable' | 'not_applicable';
+        if (showActive) {
+          explanation = `${ev.reason}${rule.stacking_note ? ` ${rule.stacking_note}` : ''}`;
+          action = `Include +${rateStr} IEEPA additional duty in your landed cost. Source: ${rule.source.document}.`;
+          verificationStatus = 'verified_applicable';
+        } else if (showInvalidated) {
+          explanation =
+            `HTSUS ${rule.ch99_provision} (${rateStr} IEEPA tariff) does not apply to this shipment. ` +
+            `The U.S. Supreme Court held on February 20, 2026 that IEEPA does not authorize tariffs. ` +
+            `CBP ceased collection effective February 24, 2026. ` +
+            `This provision still appears in the published HTSUS schedule, but presence in the ` +
+            `schedule does not establish that the duty is legally collectible — it is not. ` +
+            `${rule.stacking_note ?? ''}`;
+          action = 'No IEEPA duty is owed for this shipment. If your previous shipments were entered before February 24, 2026 and IEEPA duties were collected, consult your customs broker about the refund/reliquidation process.';
+          verificationStatus = 'not_applicable';
+        } else {
+          explanation = `${ev.reason}${rule.stacking_note ? ` ${rule.stacking_note}` : ''}`;
+          action = 'No action required — this IEEPA provision is suspended.';
+          verificationStatus = 'not_applicable';
+        }
+
         out.push({
           id: `ieepa_${rule.ch99_provision.replace(/\./g, '_')}`,
           category: `IEEPA Tariff — ${rule.ch99_provision}`,
           level: showActive ? 'High' : 'N/A',
-          explanation: `${ev.reason}${rule.stacking_note ? ` ${rule.stacking_note}` : ''}`,
-          action: showActive
-            ? `Include +${rateStr} IEEPA additional duty in your landed cost. Source: ${rule.source.document}.`
-            : 'No action required — this IEEPA provision is suspended.',
-          verification_status: showActive ? 'verified_applicable' : 'not_applicable',
+          explanation,
+          action,
+          verification_status: verificationStatus,
           applicability_conditions: `${rule.ch99_provision}: effective ${rule.effective_from}${rule.effective_to ? `–${rule.effective_to}` : ''}; ${rule.origin_scope.type === 'all' ? 'all countries' : (rule.origin_scope.countries ?? []).join(', ')}.`,
           verified_rate_pct: showActive ? ev.rate_pct : null,
           financial_impact: financialImpact,
@@ -689,6 +713,61 @@ export function assembleBaselines(
             last_verified_at: rule.last_verified_at,
             url: rule.source.url ?? 'https://hts.usitc.gov/',
             why_relevant: `${rule.ch99_provision} evaluated for ${entry.origin_country}-origin goods, entry date ${today}.`,
+          },
+        });
+      }
+    }
+
+    // ── 2f. Section 301 forced-labor additional duty (July 24, 2026) ──────────
+    // USTR imposed 12.5% additional duty on China-origin goods under Section 301
+    // based on forced-labor investigation. Effective July 24, 2026.
+    // FR Doc. 2026-15181. Stacks with MFN and any original Section 301 List duty.
+    // Note: 471 HTS exemptions exist (Annex II); specific coverage not fully encoded.
+    if (entry.origin_country.toLowerCase().includes('china') || entry.origin_country.toLowerCase().includes('hong kong')) {
+      const htsDigits = hts?.requested ?? normalizeHts(entry.hts_code ?? '');
+      const flResult = calculateDutyStack(htsDigits, entry.origin_country, today, SECTION_301_FL_RULES);
+      for (const ev of flResult.evaluated_rules) {
+        const rule = ev.rule;
+        if (!rule.ch99_provision) continue;
+        if (ev.status !== 'ACTIVE') continue; // only show when applicable
+
+        const rateStr = rule.rate.type === 'ad_valorem' ? `${rule.rate.ad_valorem_pct}%` : (rule.rate.description ?? 'see provision');
+        const dutyAmt = rule.rate.type === 'ad_valorem' && value != null
+          ? (value * (rule.rate.ad_valorem_pct ?? 0)) / 100
+          : null;
+        const financialImpact = dutyAmt != null
+          ? `$${dutyAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on a $${value!.toLocaleString('en-US')} shipment (+${rateStr} per ${rule.ch99_provision})`
+          : undefined;
+
+        out.push({
+          id: `section301_fl_${rule.ch99_provision.replace(/\./g, '_')}`,
+          category: `Section 301 Forced-Labor Tariff — ${rule.ch99_provision}`,
+          level: 'High',
+          explanation:
+            `HTS ${htsDigits} from ${entry.origin_country} is subject to the USTR Section 301 forced-labor additional duty ` +
+            `(${rule.ch99_provision}, +${rateStr}), effective ${rule.effective_from}. ` +
+            `USTR imposed this duty on China and 59 other economies under Section 301 of the Trade Act of 1974 ` +
+            `for failure to enforce prohibitions on imports produced with forced labor (FR Doc. 2026-15181). ` +
+            `IMPORTANT: 471 HTS subheadings are exempt under Annex II of the Federal Register notice — ` +
+            `verify whether your specific 10-digit HTS code is in the exemption list at ustr.gov before filing.`,
+          action:
+            `Budget +${rateStr} Section 301 forced-labor additional duty (${rule.ch99_provision}), stacking on top of the MFN rate and any existing Section 301 duty. ` +
+            `Verify whether your specific 10-digit HTS code is exempt under Annex II of FR Doc. 2026-15181 at ustr.gov.`,
+          verification_status: 'official_unconfirmed',
+          applicability_conditions:
+            `China/HK-origin goods, entry date on or after ${rule.effective_from}. ` +
+            `Applies to Chapters 1-97 broadly, subject to Annex II exemptions (verify at ustr.gov).`,
+          verified_rate_pct: ev.rate_pct,
+          financial_impact: financialImpact,
+          source: {
+            agency: rule.source.authority,
+            name: 'USTR — Section 301 Forced Labor Investigation',
+            title: `HTSUS ${rule.ch99_provision} — Section 301 Forced-Labor Additional Duty (+${rateStr}), effective ${rule.effective_from}`,
+            cfr_citation: `HTSUS ${rule.ch99_provision}; ${rule.source.fr_citation ?? 'FR Doc. 2026-15181'}`,
+            effective_date: rule.effective_from,
+            last_verified_at: rule.last_verified_at,
+            url: rule.source.url ?? FL_S301_USTR_URL_FALLBACK,
+            why_relevant: `China-origin goods are subject to Section 301 forced-labor additional duty effective ${rule.effective_from}. Verify Annex II exemptions for this HTS.`,
           },
         });
       }
@@ -894,9 +973,13 @@ const DOMAIN_REGISTRY: Array<{
     },
   },
   // ── IEEPA tariff domain entries ───────────────────────────────────────────
+  // These provisions are JUDICIALLY INVALIDATED for entries on/after 2026-02-24.
+  // Coverage matrix surfaces the outcome (not_applicable / judicially_invalidated)
+  // so the report always explains WHY the duty is zero — the heading still exists
+  // in the published HTSUS schedule but is not legally collectible.
   {
     key: 'ieepa_9903_01_24',
-    label: 'IEEPA Tariff — 9903.01.24 (China/HK +10%, from Nov 10, 2025)',
+    label: 'IEEPA Tariff — 9903.01.24 (China/HK +10%, 2025-11-10 – 2026-02-23; judicially invalidated)',
     cat: 'tariff',
     relevant: (_e, _hts) => true,
     resolve: (cats, entry) => {
@@ -905,28 +988,42 @@ const DOMAIN_REGISTRY: Array<{
       const c = cats.find((x) => x.id === 'ieepa_9903_01_24');
       if (c?.verification_status === 'verified_applicable')
         return { status: 'verified_applicable', note: `Applies — +${c.verified_rate_pct ?? 10}% (9903.01.24, effective 2025-11-10)` };
-      if (c?.verification_status === 'not_applicable')
-        return { status: 'not_applicable', note: c.explanation?.slice(0, 120) ?? '9903.01.24 does not apply' };
+      if (c?.verification_status === 'not_applicable') {
+        const isInvalidated = c.explanation?.includes('judicially invalidated') || c.explanation?.includes('Supreme Court');
+        return {
+          status: 'not_applicable',
+          note: isInvalidated
+            ? '9903.01.24 — judicially invalidated (SCOTUS Feb 20, 2026); CBP ceased collection Feb 24, 2026'
+            : (c.explanation?.slice(0, 120) ?? '9903.01.24 does not apply'),
+        };
+      }
       return { status: 'not_applicable', note: '9903.01.24 not applicable for this entry date or origin' };
     },
   },
   {
     key: 'ieepa_9903_01_25',
-    label: 'IEEPA Tariff — 9903.01.25 (all countries +10%, from Apr 5, 2025)',
+    label: 'IEEPA Tariff — 9903.01.25 (all countries +10%, 2025-04-05 – 2026-02-23; judicially invalidated)',
     cat: 'tariff',
     relevant: () => true,
     resolve: (cats) => {
       const c = cats.find((x) => x.id === 'ieepa_9903_01_25');
       if (c?.verification_status === 'verified_applicable')
         return { status: 'verified_applicable', note: `Applies — +${c.verified_rate_pct ?? 10}% (9903.01.25)` };
-      if (c?.verification_status === 'not_applicable')
-        return { status: 'not_applicable', note: c.explanation?.slice(0, 120) ?? '9903.01.25 does not apply' };
+      if (c?.verification_status === 'not_applicable') {
+        const isInvalidated = c.explanation?.includes('judicially invalidated') || c.explanation?.includes('Supreme Court');
+        return {
+          status: 'not_applicable',
+          note: isInvalidated
+            ? '9903.01.25 — judicially invalidated (SCOTUS Feb 20, 2026); CBP ceased collection Feb 24, 2026'
+            : (c.explanation?.slice(0, 120) ?? '9903.01.25 does not apply'),
+        };
+      }
       return { status: 'not_applicable', note: '9903.01.25 not applicable for this entry date' };
     },
   },
   {
     key: 'ieepa_9903_01_63',
-    label: 'IEEPA Tariff — 9903.01.63 (China/HK +34% reciprocal — SUSPENDED)',
+    label: 'IEEPA Tariff — 9903.01.63 (China/HK +34% reciprocal — SUSPENDED + judicially invalidated)',
     cat: 'tariff',
     relevant: (_e, _hts) => true,
     resolve: (cats, entry) => {
@@ -934,10 +1031,28 @@ const DOMAIN_REGISTRY: Array<{
         return { status: 'not_applicable', note: 'Not applicable — origin is not China/HK' };
       const c = cats.find((x) => x.id === 'ieepa_9903_01_63');
       if (c?.verification_status === 'not_applicable')
-        return { status: 'not_applicable', note: '9903.01.63 — China 34% reciprocal tariff is SUSPENDED (Geneva deal)' };
+        return { status: 'not_applicable', note: '9903.01.63 — China 34% reciprocal tariff is SUSPENDED (Geneva deal) and judicially invalidated' };
       if (c?.verification_status === 'verified_applicable')
         return { status: 'verified_applicable', note: `Applies — +${c.verified_rate_pct ?? 34}% (9903.01.63)` };
-      return { status: 'not_applicable', note: '9903.01.63 suspended or not applicable' };
+      return { status: 'not_applicable', note: '9903.01.63 suspended and judicially invalidated' };
+    },
+  },
+  // ── Section 301 forced-labor domain entry ────────────────────────────────
+  {
+    key: 'section301_fl_9903_05_20',
+    label: 'Section 301 Forced-Labor Tariff — 9903.05.20 (China/HK +12.5%, from Jul 24, 2026)',
+    cat: 'tariff',
+    relevant: (_e, _hts) => true,
+    resolve: (cats, entry) => {
+      if (!entry.origin_country.toLowerCase().includes('china') && !entry.origin_country.toLowerCase().includes('hong kong'))
+        return { status: 'not_applicable', note: 'Not applicable — origin is not China/HK' };
+      const c = cats.find((x) => x.id === 'section301_fl_9903_05_20');
+      if (c?.verification_status === 'official_unconfirmed' || c?.verification_status === 'verified_applicable')
+        return {
+          status: 'official_unconfirmed',
+          note: `9903.05.20 — Section 301 forced-labor additional duty (+${c.verified_rate_pct ?? 12.5}%), effective 2026-07-24. Verify Annex II exemptions at ustr.gov.`,
+        };
+      return { status: 'not_applicable', note: '9903.05.20 not applicable for this entry date or origin' };
     },
   },
   {

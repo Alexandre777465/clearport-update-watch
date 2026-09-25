@@ -1284,18 +1284,20 @@ describe('Charles McManus vinyl toy — server-level invariants', () => {
 
   const charlesBaselines = assembleBaselines(charlesEntry, 50_000, toyHts, REG_BASELINES);
 
-  // E: ieepa_9903_01_24 must be verified_applicable from baselines
-  test('IEEPA 9903.01.24 baseline is verified_applicable (invariant E)', () => {
+  // E: ieepa_9903_01_24 must be not_applicable (judicially invalidated — SCOTUS 2026-02-20, CBP 2026-02-24)
+  test('IEEPA 9903.01.24 baseline is not_applicable (invariant E — judicially invalidated, was verified_applicable pre-fix)', () => {
     const cat = charlesBaselines.find((c) => c.id === 'ieepa_9903_01_24');
     expect(cat).toBeDefined();
-    expect(cat!.verification_status).toBe('verified_applicable');
+    // Post-fix: IEEPA is judicially invalidated for any entry date >= 2026-02-24
+    expect(cat!.verification_status).toBe('not_applicable');
   });
 
-  // F: ieepa_9903_01_25 must be verified_applicable from baselines
-  test('IEEPA 9903.01.25 baseline is verified_applicable (invariant F)', () => {
+  // F: ieepa_9903_01_25 must be not_applicable (judicially invalidated — SCOTUS 2026-02-20, CBP 2026-02-24)
+  test('IEEPA 9903.01.25 baseline is not_applicable (invariant F — judicially invalidated, was verified_applicable pre-fix)', () => {
     const cat = charlesBaselines.find((c) => c.id === 'ieepa_9903_01_25');
     expect(cat).toBeDefined();
-    expect(cat!.verification_status).toBe('verified_applicable');
+    // Post-fix: IEEPA is judicially invalidated for any entry date >= 2026-02-24
+    expect(cat!.verification_status).toBe('not_applicable');
   });
 
   // G: 9903.01.63 (if suspended) must not appear as an active/applicable rule
@@ -1348,11 +1350,11 @@ describe('Charles McManus vinyl toy — server-level invariants', () => {
     );
     expect(unconfirmedIeepa).toHaveLength(0);
 
-    // Baselines survive as verified_applicable
+    // Post-fix: IEEPA baselines survive with not_applicable (judicially invalidated), not verified_applicable
     const ieepa24 = final.risk_categories.find((c) => c.id === 'ieepa_9903_01_24');
     const ieepa25 = final.risk_categories.find((c) => c.id === 'ieepa_9903_01_25');
-    expect(ieepa24?.verification_status).toBe('verified_applicable');
-    expect(ieepa25?.verification_status).toBe('verified_applicable');
+    expect(ieepa24?.verification_status).toBe('not_applicable');
+    expect(ieepa25?.verification_status).toBe('not_applicable');
   });
 
   // K: phthalate category is verified_applicable when children + vinyl (via manual baseline)
