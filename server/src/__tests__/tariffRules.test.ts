@@ -1543,8 +1543,8 @@ describe('HTS state model — H: existing compliance/CPSC/phthalate test fixture
 // ── Phase 7: Charles regression — correct Sep 2026 tariff stack ──────────────
 //
 // HTS 9503.00.8900, vinyl inflatable children's toy, China, $50,000 customs value.
-// Correct Sep 2026 stack: NO IEEPA (judicially invalidated); FL S301 +12.5% (official_unconfirmed);
-// MFN 0%; MPF $173.20; HMF $62.50.
+// Correct Sep 2026 stack: NO IEEPA (judicially invalidated); FL S301 +12.5% (verified_applicable —
+// HTS 9503 confirmed NOT in Annex II, 2026-09-25); MFN 0%; MPF $173.20; HMF $62.50.
 
 describe('Phase 7 — Charles regression: correct Sep 2026 tariff stack (HTS 9503, China)', () => {
   const HTS_9503: import('../services/htsBaseline').HtsLookupResult = {
