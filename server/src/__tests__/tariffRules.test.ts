@@ -1618,6 +1618,37 @@ describe('Phase 7 — Charles regression: correct Sep 2026 tariff stack (HTS 950
     expect(flS301!.verified_rate_pct).toBe(12.5);
   });
 
+  it('P7: FL S301 explanation says "potentially" and does NOT assert the duty applies without qualification (anti-conflation guard)', () => {
+    // Regression guard: official_unconfirmed status must be reflected in explanation text.
+    // The explanation must NOT say the HTS code "is subject to" the duty (unconditional assertion)
+    // while the engine state is official_unconfirmed (Annex II exemption not confirmed).
+    const cats = assembleBaselines(CHARLES_ENTRY, null, HTS_9503, [], '2026-09-25');
+    const flS301 = cats.find((c) => c.id === 'section301_fl_9903_05_20');
+    expect(flS301).toBeDefined();
+    expect(flS301!.verification_status).toBe('official_unconfirmed');
+    // Explanation must communicate potential/conditional applicability
+    expect(flS301!.explanation.toLowerCase()).toMatch(/potentially|may be subject|unconfirmed|exemption check/i);
+    // Explanation must NOT open with an unconditional "is subject to" claim
+    expect(flS301!.explanation).not.toMatch(/^HTS .* is subject to/);
+  });
+
+  it('P7: FL S301 $6,250 (12.5% × $50,000) does NOT enter known-payable (official_unconfirmed excluded from verified_applicable total)', () => {
+    // Annex II exemption unresolved — the $6,250 is potential additional, not known payable.
+    const cats = assembleBaselines(CHARLES_ENTRY, 50_000, HTS_9503, [], '2026-09-25');
+    const flS301 = cats.find((c) => c.id === 'section301_fl_9903_05_20');
+    expect(flS301!.verification_status).toBe('official_unconfirmed');
+    // The rate is shown (12.5%) but is potential — NOT counted in verified_applicable sum
+    expect(flS301!.verified_rate_pct).toBe(12.5);
+    // MPF and HMF are fees (not tariffs), correctly verified_applicable — exclude them.
+    // The TARIFF-only verified_applicable rate must be 0%: MFN Free, S301 0%, IEEPA invalidated.
+    const knownPayableTariffRates = cats
+      .filter((c) => c.verification_status === 'verified_applicable' && c.verified_rate_pct != null && c.id !== 'mpf' && c.id !== 'hmf')
+      .map((c) => c.verified_rate_pct!);
+    const knownPayableTariffTotal = knownPayableTariffRates.reduce((a, b) => a + b, 0);
+    // FL S301 12.5% must NOT be in this total
+    expect(knownPayableTariffTotal).toBe(0); // MFN Free, S301 0%, IEEPA invalidated
+  });
+
   it('P7: total verified_applicable rate for Sep 2026 HTS 9503 China is 0% (no IEEPA, MFN free, S301 0%)', () => {
     const cats = assembleBaselines(CHARLES_ENTRY, null, HTS_9503, [], '2026-09-25');
     const verifiedRates = cats

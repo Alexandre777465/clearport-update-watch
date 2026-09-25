@@ -744,15 +744,19 @@ export function assembleBaselines(
           category: `Section 301 Forced-Labor Tariff — ${rule.ch99_provision}`,
           level: 'High',
           explanation:
-            `HTS ${htsDigits} from ${entry.origin_country} is subject to the USTR Section 301 forced-labor additional duty ` +
-            `(${rule.ch99_provision}, +${rateStr}), effective ${rule.effective_from}. ` +
+            `Potentially applicable: HTS ${htsDigits} from ${entry.origin_country} MAY be subject to the USTR ` +
+            `Section 301 forced-labor additional duty (${rule.ch99_provision}, +${rateStr}), effective ${rule.effective_from}. ` +
             `USTR imposed this duty on China and 59 other economies under Section 301 of the Trade Act of 1974 ` +
-            `for failure to enforce prohibitions on imports produced with forced labor (FR Doc. 2026-15181). ` +
-            `IMPORTANT: 471 HTS subheadings are exempt under Annex II of the Federal Register notice — ` +
-            `verify whether your specific 10-digit HTS code is in the exemption list at ustr.gov before filing.`,
+            `for failure to enforce prohibitions on imports produced with forced labor (FR Doc. 2026-15181, 91 FR 47318). ` +
+            `APPLICABILITY UNCONFIRMED — HTS exemption check required: 471 HTS subheadings are exempt under ` +
+            `Annex II (FR Doc. 2026-15181, pages 47396–47422). The Annex II tables are published as image files ` +
+            `and cannot be verified programmatically. The USITC schedule has not yet incorporated 9903.05.20 ` +
+            `footnotes. Whether this HTS code is covered or exempt cannot be determined without human review ` +
+            `of the Annex II image tables at ustr.gov. Do NOT assume this duty applies without verifying.`,
           action:
-            `Budget +${rateStr} Section 301 forced-labor additional duty (${rule.ch99_provision}), stacking on top of the MFN rate and any existing Section 301 duty. ` +
-            `Verify whether your specific 10-digit HTS code is exempt under Annex II of FR Doc. 2026-15181 at ustr.gov.`,
+            `Verify whether your specific 10-digit HTS code is exempt under Annex II of FR Doc. 2026-15181 at ustr.gov. ` +
+            `If your HTS code is NOT in Annex II, budget +${rateStr} Section 301 forced-labor additional duty ` +
+            `(${rule.ch99_provision}), stacking on top of the MFN rate and any existing Section 301 duty.`,
           verification_status: 'official_unconfirmed',
           applicability_conditions:
             `China/HK-origin goods, entry date on or after ${rule.effective_from}. ` +

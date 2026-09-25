@@ -57,14 +57,26 @@
  * New Section 301 forced-labor action (verified 2026-09-25):
  *   9903.05.20 — USTR action in 60-economy Section 301 forced-labor investigation.
  *                China: +12.5% additional duty. Effective July 24, 2026.
- *                Source: FR Doc. 2026-15181 (July 28, 2026).
- *                Covers Chapters 1-97 broadly; 471 HTS exemptions published in
- *                Annex II — specific HTS coverage must be verified at ustr.gov.
+ *                Source: FR Doc. 2026-15181 (July 28, 2026, 91 FR 47318).
+ *                Covers Chapters 1-97 broadly; 471 HTS subheadings exempted (Annex II).
+ *
+ *   ANNEX II MACHINE-READABILITY FINDING (verified 2026-09-25):
+ *     The Annex II HTS-code tables are published as IMAGE files in the Federal Register
+ *     (GPH elements EN28JY26.060 through EN28JY26.086+, pages 47396–47422). The string
+ *     "9503" does not appear anywhere in the 183,456-character machine-readable XML of
+ *     FR Doc. 2026-15181. The USITC HTS API returns "footnotes": [] (no 9903.05.xx
+ *     footnote) for HTS 9503.00.00. Critically, the USITC also returns "footnotes": []
+ *     for HTS 6109.10.00 (cotton T-shirts — definitively covered goods), confirming the
+ *     USITC has not yet incorporated 9903.05.20 footnotes for ANY goods as of 2026-09-25.
+ *     CONCLUSION: 'official_unconfirmed' is the only legally defensible engine state for
+ *     any specific HTS vs. 9903.05.20. Coverage can only be determined by human review
+ *     of the image tables. $6,250 (12.5% × $50,000) must NOT enter known-payable totals.
  *
  * Sources:
  *   IEEPA ruling:  SCOTUS, Feb 20, 2026 (per Holland & Knight, WilmerHale, Skadden alerts)
  *   CBP termination: CBP CSMS guidance, effective Feb 24, 2026
- *   FL S301:       FR Doc. 2026-15181 (91 FR [pending]); USTR press release July 23, 2026
+ *   FL S301:       FR Doc. 2026-15181 (91 FR 47318); USTR press release July 23, 2026
+ *   Annex II:      federalregister.gov XML (2026-09-25); USITC HTS API (2026-09-25)
  *
  * Last verified: 2026-09-25.
  */
